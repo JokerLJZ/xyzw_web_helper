@@ -50,6 +50,9 @@ importers:
       pinia:
         specifier: ^2.3.1
         version: 2.3.1(typescript@5.9.3)(vue@3.5.22(typescript@5.9.3))
+      pnpm:
+        specifier: ^10.30.3
+        version: 10.30.3
       vue:
         specifier: ^3.5.22
         version: 3.5.22(typescript@5.9.3)
@@ -2802,6 +2805,11 @@ packages:
 
   pnpm-workspace-yaml@1.4.3:
     resolution: {integrity: sha512-Q8B3SWuuISy/Ciag4DFP7MCrJX07wfaekcqD2o/msdIj4x8Ql3bZ/NEKOXV7mTVh7m1YdiFWiMi9xH+0zuEGHw==}
+
+  pnpm@10.30.3:
+    resolution: {integrity: sha512-yWHR4KLY41TsqlFmuCJRZmi39Ey1vZUSLVkN2Bki9gb1RzttI+xKW+Bef80Y6EiNR9l4u+mBhy8RRdBumnQAFw==}
+    engines: {node: '>=18.12'}
+    hasBin: true
 
   postcss-selector-parser@7.1.1:
     resolution: {integrity: sha512-orRsuYpJVw8LdAwqqLykBj9ecS5/cRHlI5+nvTo8LcCKmzDmqVORXtOIYEEQuL9D4BxtA1lm5isAqzQZCoQ6Eg==}
@@ -6126,6 +6134,8 @@ snapshots:
   pnpm-workspace-yaml@1.4.3:
     dependencies:
       yaml: 2.8.2
+
+  pnpm@10.30.3: {}
 
   postcss-selector-parser@7.1.1:
     dependencies:

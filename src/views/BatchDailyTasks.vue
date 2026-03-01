@@ -2616,8 +2616,8 @@ const batchSettings = reactive({
   refreshInterval: 360, // 分钟
   // WxPusher 通知配置
   wxpusherEnabled: false,
-  wxpusherAppToken: "AT_pj0gPKlRooCKrhg72aIS33OpDd2b1q3j",
-  wxpusherUids: "UID_8EwgKnKhfuAQtrKXsAkm3F6xVMJi",
+  wxpusherAppToken: "",
+  wxpusherUids: "",
   smartDepartureGoldThreshold: 0,
   smartDepartureRecruitThreshold: 0,
   smartDepartureJadeThreshold: 0,
