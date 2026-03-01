@@ -79,3 +79,5 @@ dist.zip
 *.bin
 bin/
 server/config.json
+docker-compose.yaml
+nginx_config/nginx.conf
