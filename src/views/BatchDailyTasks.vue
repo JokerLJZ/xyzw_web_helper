@@ -1952,7 +1952,7 @@
             <n-divider title-placement="left" style="margin: 12px 0 8px 0">WxPusher 推送通知</n-divider>
             <div class="settings-grid">
               <div class="setting-item" style="flex-direction: row; justify-content: space-between; align-items: center;">
-                <label class="setting-label">启用任务完成推送</label>
+                <label class="setting-label">启用 WxPusher 推送</label>
                 <n-switch v-model:value="batchSettings.wxpusherEnabled" />
               </div>
               <div v-if="batchSettings.wxpusherEnabled">
@@ -1966,6 +1966,22 @@
                 </div>
                 <div class="setting-item" style="flex-direction: row; justify-content: flex-end; align-items: center;">
                   <n-button size="small" @click="testWxPusher">发送测试消息</n-button>
+                </div>
+              </div>
+            </div>
+            <n-divider title-placement="left" style="margin: 12px 0 8px 0">PushPlus 推送通知</n-divider>
+            <div class="settings-grid">
+              <div class="setting-item" style="flex-direction: row; justify-content: space-between; align-items: center;">
+                <label class="setting-label">启用 PushPlus 推送</label>
+                <n-switch v-model:value="batchSettings.pushplusEnabled" />
+              </div>
+              <div v-if="batchSettings.pushplusEnabled">
+                <div class="setting-item" style="flex-direction: row; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <label class="setting-label">Token</label>
+                  <n-input v-model:value="batchSettings.pushplusToken" placeholder="pushplus token" size="small" style="width: 200px" />
+                </div>
+                <div class="setting-item" style="flex-direction: row; justify-content: flex-end; align-items: center;">
+                  <n-button size="small" @click="testPushPlus">发送测试消息</n-button>
                 </div>
               </div>
             </div>
@@ -2318,7 +2334,7 @@ import {
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
-import { sendWxPusherMessage, formatBatchTaskNotification } from "@/utils/wxpusher";
+import { sendWxPusherMessage, sendPushPlusMessage, formatBatchTaskNotification, formatScheduledTaskNotification } from "@/utils/wxpusher";
 
 // Initialize token store, message service, and task runner
 const tokenStore = useTokenStore();
@@ -2614,10 +2630,12 @@ const batchSettings = reactive({
   // 页面刷新配置
   enableRefresh: false,
   refreshInterval: 360, // 分钟
-  // WxPusher 通知配置
+  // 推送通知配置
   wxpusherEnabled: false,
   wxpusherAppToken: "",
   wxpusherUids: "",
+  pushplusEnabled: false,
+  pushplusToken: "",
   smartDepartureGoldThreshold: 0,
   smartDepartureRecruitThreshold: 0,
   smartDepartureJadeThreshold: 0,
@@ -3630,6 +3648,7 @@ const verifyTaskDependencies = async (task) => {
 
 // Execute a scheduled task with dependency verification
 const executeScheduledTask = async (task) => {
+  const scheduledTaskStartTime = new Date();
   addLog({
     time: new Date().toLocaleTimeString(),
     message: `=== 开始执行定时任务: ${task.name} ===`,
@@ -3790,6 +3809,14 @@ const executeScheduledTask = async (task) => {
       message: `=== 定时任务执行完成: ${task.name} ===`,
       type: "success",
     });
+
+    // 发送定时任务完成推送通知
+    const scheduledTokenResults = availableTokens.map((tokenId) => {
+      const token = tokens.value.find((t) => t.id === tokenId);
+      return { name: token?.name || tokenId, status: tokenStatus.value[tokenId] || "completed" };
+    });
+    const { title, content } = formatScheduledTaskNotification(task.name, scheduledTokenResults, scheduledTaskStartTime);
+    await sendNotifications(title, content);
   } catch (error) {
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -3800,6 +3827,11 @@ const executeScheduledTask = async (task) => {
       `[${new Date().toISOString()}] Error executing scheduled task ${task.name}:`,
       error,
     );
+
+    // 发送定时任务失败推送通知
+    const failedTitle = `❌ 定时任务失败: ${task.name}`;
+    const failedContent = `## ❌ 定时任务执行失败\n\n**任务名称**: ${task.name}\n\n**失败原因**: ${error.message}\n\n**时间**: ${new Date().toLocaleTimeString()}`;
+    await sendNotifications(failedTitle, failedContent);
   }
 };
 
@@ -5032,27 +5064,43 @@ const startBatch = async () => {
   currentRunningTokenId.value = null;
   message.success("批量任务执行结束");
 
-  // WxPusher 推送通知
+  // 推送通知
+  const tokenResults = selectedTokens.value.map((tokenId) => {
+    const token = tokens.value.find((t) => t.id === tokenId);
+    return {
+      name: token?.name || tokenId,
+      status: tokenStatus.value[tokenId] || "failed",
+    };
+  });
+  const { title, content } = formatBatchTaskNotification(tokenResults, batchStartTime);
+  await sendNotifications(title, content);
+};
+
+// 发送推送通知到所有已启用渠道
+const sendNotifications = async (title, content) => {
+  const promises = [];
+
   if (batchSettings.wxpusherEnabled && batchSettings.wxpusherAppToken && batchSettings.wxpusherUids) {
-    try {
-      const tokenResults = selectedTokens.value.map((tokenId) => {
-        const token = tokens.value.find((t) => t.id === tokenId);
-        return {
-          name: token?.name || tokenId,
-          status: tokenStatus.value[tokenId] || "failed",
-        };
-      });
-      const { title, content } = formatBatchTaskNotification(tokenResults, batchStartTime);
-      await sendWxPusherMessage(
+    promises.push(
+      sendWxPusherMessage(
         { appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids },
         title,
         content,
-      );
-      addLog({ time: new Date().toLocaleTimeString(), message: "WxPusher 推送已发送", type: "success" });
-    } catch (err) {
-      addLog({ time: new Date().toLocaleTimeString(), message: `WxPusher 推送失败: ${err.message}`, type: "error" });
-    }
+      )
+        .then(() => addLog({ time: new Date().toLocaleTimeString(), message: "WxPusher 推送已发送", type: "success" }))
+        .catch((err) => addLog({ time: new Date().toLocaleTimeString(), message: `WxPusher 推送失败: ${err.message}`, type: "error" })),
+    );
   }
+
+  if (batchSettings.pushplusEnabled && batchSettings.pushplusToken) {
+    promises.push(
+      sendPushPlusMessage(batchSettings.pushplusToken, title, content)
+        .then(() => addLog({ time: new Date().toLocaleTimeString(), message: "PushPlus 推送已发送", type: "success" }))
+        .catch((err) => addLog({ time: new Date().toLocaleTimeString(), message: `PushPlus 推送失败: ${err.message}`, type: "error" })),
+    );
+  }
+
+  await Promise.all(promises);
 };
 
 const testWxPusher = async () => {
@@ -5061,6 +5109,19 @@ const testWxPusher = async () => {
       { appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids },
       "✅ WxPusher 测试消息",
       "## WxPusher 推送配置成功\n\n批量日常任务完成后将自动推送通知到此账号。",
+    );
+    message.success("测试消息发送成功，请检查微信通知");
+  } catch (err) {
+    message.error(`发送失败: ${err.message}`);
+  }
+};
+
+const testPushPlus = async () => {
+  try {
+    await sendPushPlusMessage(
+      batchSettings.pushplusToken,
+      "✅ PushPlus 测试消息",
+      "## PushPlus 推送配置成功\n\n批量日常任务完成后将自动推送通知到此账号。",
     );
     message.success("测试消息发送成功，请检查微信通知");
   } catch (err) {

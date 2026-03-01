@@ -1,9 +1,11 @@
 /**
- * WxPusher 推送工具
- * 文档: https://wxpusher.zjiecode.com/docs
+ * WxPusher / PushPlus 推送工具
+ * WxPusher 文档: https://wxpusher.zjiecode.com/docs
+ * PushPlus 文档: https://www.pushplus.plus/doc/
  */
 
 const WXPUSHER_API = "https://wxpusher.zjiecode.com/api/send/message";
+const PUSHPLUS_API = "https://www.pushplus.plus/send";
 
 /**
  * 发送 WxPusher 消息
@@ -52,6 +54,93 @@ export async function sendWxPusherMessage(config, title, content, contentType = 
   }
 
   return { success: true, message: result.msg || "发送成功" };
+}
+
+/**
+ * 发送 PushPlus 消息
+ * @param {string} token - PushPlus Token
+ * @param {string} title - 消息标题
+ * @param {string} content - 消息内容（Markdown 格式）
+ * @returns {Promise<{success: boolean, message: string}>}
+ */
+export async function sendPushPlusMessage(token, title, content) {
+  if (!token) throw new Error("缺少 PushPlus Token");
+
+  const payload = { token, title, content, template: "markdown" };
+
+  const response = await fetch(PUSHPLUS_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`PushPlus 请求失败: HTTP ${response.status}`);
+  }
+
+  const result = await response.json();
+
+  if (result.code !== 200) {
+    throw new Error(`PushPlus 返回错误: ${result.msg || "未知错误"}`);
+  }
+
+  return { success: true, message: result.msg || "发送成功" };
+}
+
+/**
+ * 格式化定时任务完成通知 (Markdown)
+ * @param {string} taskName - 定时任务名称
+ * @param {Array<{name: string, status: 'completed'|'failed', error?: string}>} tokenResults
+ * @param {Date} startTime - 任务开始时间
+ * @returns {{title: string, content: string}}
+ */
+export function formatScheduledTaskNotification(taskName, tokenResults, startTime) {
+  const total = tokenResults.length;
+  const completed = tokenResults.filter((r) => r.status === "completed").length;
+  const failed = tokenResults.filter((r) => r.status === "failed").length;
+
+  const duration = Math.round((Date.now() - startTime.getTime()) / 1000);
+  const minutes = Math.floor(duration / 60);
+  const seconds = duration % 60;
+  const durationStr = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
+  const endTime = new Date().toLocaleTimeString();
+
+  const statusIcon = failed === 0 ? "✅" : "⚠️";
+  const title = `${statusIcon} 定时任务完成: ${taskName} (${completed}/${total})`;
+
+  const lines = [
+    `## ${statusIcon} 定时任务执行完毕`,
+    ``,
+    `**任务名称**: ${taskName}`,
+    ``,
+    `| 项目 | 数值 |`,
+    `|------|------|`,
+    `| 总账号 | ${total} |`,
+    `| 成功 | ${completed} |`,
+    `| 失败 | ${failed} |`,
+    `| 耗时 | ${durationStr} |`,
+    `| 完成时间 | ${endTime} |`,
+  ];
+
+  if (failed > 0) {
+    lines.push(``, `### ❌ 失败账号`);
+    tokenResults
+      .filter((r) => r.status === "failed")
+      .forEach((r) => {
+        lines.push(`- **${r.name}**${r.error ? `：${r.error}` : ""}`);
+      });
+  }
+
+  if (completed > 0) {
+    lines.push(``, `### ✅ 成功账号`);
+    tokenResults
+      .filter((r) => r.status === "completed")
+      .forEach((r) => {
+        lines.push(`- ${r.name}`);
+      });
+  }
+
+  return { title, content: lines.join("\n") };
 }
 
 /**
