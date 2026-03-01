@@ -1949,6 +1949,26 @@
                 <n-input-number v-model:value="batchSettings.refreshInterval" :min="10" :max="1440" :step="30" size="small" style="width: 100px" />
               </div>
             </div>
+            <n-divider title-placement="left" style="margin: 12px 0 8px 0">WxPusher 推送通知</n-divider>
+            <div class="settings-grid">
+              <div class="setting-item" style="flex-direction: row; justify-content: space-between; align-items: center;">
+                <label class="setting-label">启用任务完成推送</label>
+                <n-switch v-model:value="batchSettings.wxpusherEnabled" />
+              </div>
+              <div v-if="batchSettings.wxpusherEnabled">
+                <div class="setting-item" style="flex-direction: row; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <label class="setting-label">AppToken</label>
+                  <n-input v-model:value="batchSettings.wxpusherAppToken" placeholder="AT_xxx" size="small" style="width: 200px" />
+                </div>
+                <div class="setting-item" style="flex-direction: row; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <label class="setting-label">UID (逗号分隔)</label>
+                  <n-input v-model:value="batchSettings.wxpusherUids" placeholder="UID_xxx" size="small" style="width: 200px" />
+                </div>
+                <div class="setting-item" style="flex-direction: row; justify-content: flex-end; align-items: center;">
+                  <n-button size="small" @click="testWxPusher">发送测试消息</n-button>
+                </div>
+              </div>
+            </div>
           </n-grid-item>
         </n-grid>
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
@@ -2298,6 +2318,7 @@ import {
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
+import { sendWxPusherMessage, formatBatchTaskNotification } from "@/utils/wxpusher";
 
 // Initialize token store, message service, and task runner
 const tokenStore = useTokenStore();
@@ -2593,6 +2614,10 @@ const batchSettings = reactive({
   // 页面刷新配置
   enableRefresh: false,
   refreshInterval: 360, // 分钟
+  // WxPusher 通知配置
+  wxpusherEnabled: false,
+  wxpusherAppToken: "AT_pj0gPKlRooCKrhg72aIS33OpDd2b1q3j",
+  wxpusherUids: "UID_8EwgKnKhfuAQtrKXsAkm3F6xVMJi",
   smartDepartureGoldThreshold: 0,
   smartDepartureRecruitThreshold: 0,
   smartDepartureJadeThreshold: 0,
@@ -4903,6 +4928,7 @@ const startBatch = async () => {
 
   isRunning.value = true;
   shouldStop.value = false;
+  const batchStartTime = new Date();
   // 不再重置logs数组，保留之前的日志
   // logs.value = [];
 
@@ -5005,6 +5031,41 @@ const startBatch = async () => {
   isRunning.value = false;
   currentRunningTokenId.value = null;
   message.success("批量任务执行结束");
+
+  // WxPusher 推送通知
+  if (batchSettings.wxpusherEnabled && batchSettings.wxpusherAppToken && batchSettings.wxpusherUids) {
+    try {
+      const tokenResults = selectedTokens.value.map((tokenId) => {
+        const token = tokens.value.find((t) => t.id === tokenId);
+        return {
+          name: token?.name || tokenId,
+          status: tokenStatus.value[tokenId] || "failed",
+        };
+      });
+      const { title, content } = formatBatchTaskNotification(tokenResults, batchStartTime);
+      await sendWxPusherMessage(
+        { appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids },
+        title,
+        content,
+      );
+      addLog({ time: new Date().toLocaleTimeString(), message: "WxPusher 推送已发送", type: "success" });
+    } catch (err) {
+      addLog({ time: new Date().toLocaleTimeString(), message: `WxPusher 推送失败: ${err.message}`, type: "error" });
+    }
+  }
+};
+
+const testWxPusher = async () => {
+  try {
+    await sendWxPusherMessage(
+      { appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids },
+      "✅ WxPusher 测试消息",
+      "## WxPusher 推送配置成功\n\n批量日常任务完成后将自动推送通知到此账号。",
+    );
+    message.success("测试消息发送成功，请检查微信通知");
+  } catch (err) {
+    message.error(`发送失败: ${err.message}`);
+  }
 };
 
 const stopBatch = () => {
