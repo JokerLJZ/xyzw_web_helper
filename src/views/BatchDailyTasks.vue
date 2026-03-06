@@ -2350,6 +2350,7 @@ import {
   parseCronField,
   calculateNextRuns,
   calculateNextExecutionTime,
+  calculateLastExpectedExecutionTime,
   formatTimeDifference,
   matchesCronExpression,
   // Connection manager
@@ -2382,7 +2383,7 @@ import {
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
-import { sendWxPusherMessage, sendPushPlusMessage, formatBatchTaskNotification, formatScheduledTaskNotification } from "@/utils/wxpusher";
+import { sendWxPusherMessage, sendPushPlusMessage, formatScheduledTaskNotification, formatMissedExecutionNotification } from "@/utils/wxpusher";
 
 // Initialize token store, message service, and task runner
 const tokenStore = useTokenStore();
@@ -3039,6 +3040,141 @@ const saveScheduledTasks = () => {
   }
 };
 
+// ======================
+// 定时任务执行历史 & 漏执行检测
+// ======================
+
+const MISSED_EXECUTION_TOLERANCE_MS = 15 * 60 * 1000;     // 15分钟容忍窗口
+const MISSED_EXECUTION_MAX_STALE_MS = 2 * 60 * 60 * 1000; // 超过2小时只通知不补执行
+
+const taskExecutionHistory = ref({});
+
+const loadTaskExecutionHistory = () => {
+  try {
+    const saved = localStorage.getItem("taskExecutionHistory");
+    if (saved) {
+      taskExecutionHistory.value = JSON.parse(saved);
+    }
+  } catch (error) {
+    console.error("Failed to load task execution history:", error);
+    taskExecutionHistory.value = {};
+  }
+};
+
+const saveTaskExecutionHistory = () => {
+  try {
+    localStorage.setItem("taskExecutionHistory", JSON.stringify(taskExecutionHistory.value));
+  } catch (error) {
+    console.error("Failed to save task execution history:", error);
+  }
+};
+
+// 记录定时任务执行成功
+const recordTaskExecution = (taskId) => {
+  taskExecutionHistory.value[taskId] = {
+    ...taskExecutionHistory.value[taskId],
+    lastSuccessfulExecution: new Date().toISOString(),
+    executionCount: (taskExecutionHistory.value[taskId]?.executionCount || 0) + 1,
+    isReExecuting: false,
+  };
+  saveTaskExecutionHistory();
+};
+
+// 清理超过48小时的 missed_ localStorage key
+const cleanupStaleMissedKeys = () => {
+  const twoDaysAgo = new Date();
+  twoDaysAgo.setHours(twoDaysAgo.getHours() - 48);
+
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith("missed_")) {
+      // key 格式: missed_{taskId}_{ISO timestamp}
+      const lastUnderscoreIdx = key.lastIndexOf("_");
+      if (lastUnderscoreIdx > 7) {
+        const dateStr = key.substring(lastUnderscoreIdx + 1);
+        try {
+          const keyDate = new Date(decodeURIComponent(dateStr));
+          if (!isNaN(keyDate.getTime()) && keyDate < twoDaysAgo) {
+            localStorage.removeItem(key);
+          }
+        } catch {
+          localStorage.removeItem(key);
+        }
+      }
+    }
+  }
+};
+
+// 检测漏执行的定时任务
+const checkMissedExecutions = async () => {
+  const now = new Date();
+
+  for (const task of scheduledTasks.value) {
+    if (!task.enabled) continue;
+    if (taskExecutionHistory.value[task.id]?.isReExecuting) continue;
+
+    // 计算最近一次应执行的时间
+    const lastExpectedTime = calculateLastExpectedExecutionTime(task, now);
+    if (!lastExpectedTime) continue;
+
+    const lastSuccessful = taskExecutionHistory.value[task.id]?.lastSuccessfulExecution;
+    const lastSuccessfulDate = lastSuccessful ? new Date(lastSuccessful) : null;
+
+    // 如果上次执行时间 >= 上次应执行时间，说明没有漏执行
+    if (lastSuccessfulDate && lastSuccessfulDate >= lastExpectedTime) {
+      continue;
+    }
+
+    const timeSinceExpected = now.getTime() - lastExpectedTime.getTime();
+
+    // 还在容忍窗口内，scheduler 可能还会正常触发
+    if (timeSinceExpected < MISSED_EXECUTION_TOLERANCE_MS) {
+      continue;
+    }
+
+    // 去重：避免同一漏执行重复处理
+    const missedKey = `missed_${task.id}_${encodeURIComponent(lastExpectedTime.toISOString())}`;
+    if (localStorage.getItem(missedKey)) continue;
+    localStorage.setItem(missedKey, "1");
+
+    const willReExecute = timeSinceExpected <= MISSED_EXECUTION_MAX_STALE_MS;
+
+    // 发送漏执行通知
+    const { title, content } = formatMissedExecutionNotification(task, lastExpectedTime, now, willReExecute);
+    await sendNotifications(title, content);
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 检测到定时任务 ${task.name} 漏执行 (预期 ${lastExpectedTime.toLocaleTimeString()}, 延迟 ${Math.round(timeSinceExpected / 60000)}分钟) ===`,
+      type: "warning",
+    });
+
+    if (willReExecute) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `=== 补执行定时任务: ${task.name} ===`,
+        type: "info",
+      });
+
+      taskExecutionHistory.value[task.id] = {
+        ...taskExecutionHistory.value[task.id],
+        isReExecuting: true,
+        lastMissedAt: now.toISOString(),
+        missedCount: (taskExecutionHistory.value[task.id]?.missedCount || 0) + 1,
+      };
+      saveTaskExecutionHistory();
+
+      await executeScheduledTask(task);
+    } else {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `=== 定时任务 ${task.name} 漏执行时间过久(>2小时)，仅发送通知不补执行 ===`,
+        type: "warning",
+      });
+    }
+  }
+};
+
 // Open task modal for adding new task
 const openTaskModal = () => {
   editingTask.value = null;
@@ -3596,6 +3732,9 @@ const healthCheck = () => {
       }
     }
   }
+
+  // 检测漏执行的定时任务
+  checkMissedExecutions();
 };
 
 // Start the scheduler
@@ -3637,6 +3776,23 @@ const startScheduler = () => {
           });
           shouldRun = nowTime === taskTime;
           reason = `currentTime=${nowTime}, taskTime=${taskTime}, match=${shouldRun}`;
+
+          if (shouldRun) {
+            // Deduplication: same pattern as cron tasks
+            const taskExecutionKey = `${task.id}_${now.getDate()}_${now.getHours()}_${now.getMinutes()}`;
+            const lastExecutionKey = localStorage.getItem(
+              `lastTaskExecution_${task.id}`,
+            );
+
+            if (lastExecutionKey !== taskExecutionKey) {
+              localStorage.setItem(
+                `lastTaskExecution_${task.id}`,
+                taskExecutionKey,
+              );
+              lastTaskExecution = Date.now();
+              executeScheduledTask(task);
+            }
+          }
         } else if (task.runType === "cron") {
           // Improved cron expression parsing using shared utility
           try {
@@ -3695,11 +3851,20 @@ const startScheduler = () => {
 
 // Debug: Log initial state when component mounts
 onMounted(() => {
+  // 加载执行历史
+  loadTaskExecutionHistory();
+  // 清理过期的漏执行记录
+  cleanupStaleMissedKeys();
   // Start the task scheduler after all functions are initialized
   scheduleTaskExecution();
   // Start countdown timer
   startCountdown();
   loadTaskTemplates();
+
+  // 延迟检测漏执行（等状态初始化完成）
+  setTimeout(() => {
+    checkMissedExecutions();
+  }, 5000);
 });
 
 // Cleanup countdown interval on unmount
@@ -3994,6 +4159,9 @@ const executeScheduledTask = async (task) => {
     });
     const { title, content } = formatScheduledTaskNotification(task.name, scheduledTokenResults, scheduledTaskStartTime);
     await sendNotifications(title, content);
+
+    // 记录执行成功，用于漏执行检测
+    recordTaskExecution(task.id);
   } catch (error) {
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -5240,17 +5408,6 @@ const startBatch = async () => {
   isRunning.value = false;
   currentRunningTokenId.value = null;
   message.success("批量任务执行结束");
-
-  // 推送通知
-  const tokenResults = selectedTokens.value.map((tokenId) => {
-    const token = tokens.value.find((t) => t.id === tokenId);
-    return {
-      name: token?.name || tokenId,
-      status: tokenStatus.value[tokenId] || "failed",
-    };
-  });
-  const { title, content } = formatBatchTaskNotification(tokenResults, batchStartTime);
-  await sendNotifications(title, content);
 };
 
 // 发送推送通知到所有已启用渠道

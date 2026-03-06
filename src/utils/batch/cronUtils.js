@@ -786,3 +786,47 @@ export const matchesCronExpression = (cronExpression, now = new Date()) => {
 
   return matchesMinute && matchesHour && matchesDay && matchesMonth;
 };
+
+/**
+ * 计算任务最近一次应执行的时间（从 referenceDate 往回看）
+ * @param {object} task - 任务对象，需包含 runType, runTime, cronExpression
+ * @param {Date} referenceDate - 参考时间（往回推算的起点）
+ * @returns {Date|null} 最近一次应执行的时间，找不到则返回 null
+ */
+export const calculateLastExpectedExecutionTime = (task, referenceDate = new Date()) => {
+  if (task.runType === "daily") {
+    const [hours, minutes] = task.runTime.split(":").map(Number);
+    const lastRun = new Date(referenceDate);
+    lastRun.setHours(hours, minutes, 0, 0);
+
+    // 如果今天的计划时间还没过，则看昨天的
+    if (lastRun > referenceDate) {
+      lastRun.setDate(lastRun.getDate() - 1);
+    }
+
+    return lastRun;
+  }
+
+  if (task.runType === "cron") {
+    if (!task.cronExpression) return null;
+
+    const candidate = new Date(referenceDate);
+    candidate.setSeconds(0, 0);
+
+    // 最多回溯 48 小时
+    const minDate = new Date(referenceDate);
+    minDate.setHours(minDate.getHours() - 48);
+
+    while (candidate >= minDate) {
+      candidate.setMinutes(candidate.getMinutes() - 1);
+
+      if (matchesCronExpression(task.cronExpression, candidate)) {
+        return new Date(candidate);
+      }
+    }
+
+    return null;
+  }
+
+  return null;
+};

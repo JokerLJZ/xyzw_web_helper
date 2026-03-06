@@ -195,3 +195,31 @@ export function formatBatchTaskNotification(tokenResults, startTime) {
 
   return { title, content: lines.join("\n") };
 }
+
+/**
+ * 格式化漏执行通知 (Markdown)
+ * @param {object} task - 任务对象
+ * @param {Date} expectedTime - 预期执行时间
+ * @param {Date} detectedTime - 检测到漏执行的时间
+ * @param {boolean} willReExecute - 是否将补执行
+ * @returns {{title: string, content: string}}
+ */
+export function formatMissedExecutionNotification(task, expectedTime, detectedTime, willReExecute = true) {
+  const delayMinutes = Math.round((detectedTime.getTime() - expectedTime.getTime()) / 60000);
+  const title = `⚠️ 定时任务漏执行: ${task.name} (延迟${delayMinutes}分钟)`;
+
+  const lines = [
+    `## ⚠️ 定时任务漏执行`,
+    ``,
+    `**任务名称**: ${task.name}`,
+    ``,
+    `| 项目 | 数值 |`,
+    `|------|------|`,
+    `| 预期执行时间 | ${expectedTime.toLocaleTimeString()} |`,
+    `| 检测时间 | ${detectedTime.toLocaleTimeString()} |`,
+    `| 延迟 | ${delayMinutes}分钟 |`,
+    `| 状态 | ${willReExecute ? "正在补执行" : "仅通知(超时过久)"} |`,
+  ];
+
+  return { title, content: lines.join("\n") };
+}
