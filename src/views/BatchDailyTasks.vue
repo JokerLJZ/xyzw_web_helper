@@ -3809,8 +3809,9 @@ const startScheduler = () => {
             });
             return;
           }
+        }
 
-          if (shouldRun) {
+        if (shouldRun) {
             // Check if the task was already executed in the last minute to avoid duplicate execution
             const taskExecutionKey = `${task.id}_${now.getDate()}_${now.getHours()}_${now.getMinutes()}`;
             const lastExecutionKey = localStorage.getItem(
@@ -3832,7 +3833,6 @@ const startScheduler = () => {
               // But since we check every 10s, this might log multiple times if we don't track logged state
               // For now, we can skip logging "already executed" to keep logs clean
             }
-          }
         }
       });
     } catch (error) {
