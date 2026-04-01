@@ -144,7 +144,7 @@ export function registerDefaultCommands(reg) {
     .registerHeartbeat()
     // 角色/系统
     .register("role_getroleinfo", {
-      clientVersion: "2.10.3-f10a39eaa0c409f4-wx",
+      clientVersion: "2.21.2-fa918e1997301834-wx",
       inviteUid: 0,
       platform: "hortor",
       platformExt: "mix",
@@ -198,6 +198,8 @@ export function registerDefaultCommands(reg) {
     .register("legion_refuseapply")
     .register("legion_agree")
     .register("legion_ignore")
+    .register("legion_research")
+    .register("legion_resetresearch")
 
     .register("legion_getinfobyid")
     .register("legion_getarearank")
@@ -209,6 +211,9 @@ export function registerDefaultCommands(reg) {
     .register("legion_claimpayloadtaskprogress")
     .register("saltroad_getwartype")
     .register("saltroad_getsaltroadwargrouprank")
+    .register("league_getbattlefield")
+    .register("league_getgroupopponent")
+    .register("legion_signup") // 盐场报名
 
     // 邮件
     .register("mail_getlist", { category: [0, 4, 5], lastId: 0, size: 60 })
@@ -275,10 +280,20 @@ export function registerDefaultCommands(reg) {
     .register("presetteam_setteam")
     .register("presetteam_saveteam", { teamId: 1 })
     .register("role_gettargetteam")
+    .register("hero_exchange")
+    .register("hero_gointobattle")
+    .register("hero_gobackbattle")
+    .register("artifact_load")
+    .register("artifact_unload")
+    .register("lordweapon_changedefaultweapon")
+    .register("pearl_replaceskill")
+    .register("pearl_exchangeskill")
+    .register("pearl_unloadskill")
 
     // 武将升级相关
     .register("hero_heroupgradelevel") //武将升级
     .register("hero_heroupgradeorder") //武将进阶
+    .register("hero_rebirth") //武将重新birth
 
     // 升星相关
     .register("hero_heroupgradestar")
@@ -303,6 +318,7 @@ export function registerDefaultCommands(reg) {
     .register("warguess_getrank")
     .register("warguess_startguess")
     .register("warguess_getguesscoinreward")
+    .register("legion_payloadsignup") // 蟠桃报名
 
     // 珍宝阁相关
     .register("collection_claimfreereward")
@@ -1070,6 +1086,15 @@ export class XyzwWebSocketClient {
       warguess_getrankresp: "warguess_getrank",
       warguess_startguessresp: "warguess_startguess",
       warguess_getguesscoinrewardresp: "warguess_getguesscoinreward",
+      league_getbattlefieldresp: "league_getbattlefield",
+      league_getgroupopponentresp: "league_getgroupopponent",
+      legion_signupresp: "legion_signup",
+      legion_payloadsignupresp: "legion_payloadsignup",
+      legion_researchresp: "legion_research",
+      legion_resetresearchresp: "legion_resetresearch",
+      pearl_replaceskillresp: "pearl_replaceskill",
+      pearl_exchangeskillresp: "pearl_exchangeskill",
+      pearl_unloadskillresp: "pearl_unloadskill",
       // 咸王宝库
       matchteam_getroleteaminforesp: "matchteam_getroleteaminfo",
       bosstower_getinforesp: "bosstower_getinfo",
@@ -1078,6 +1103,9 @@ export class XyzwWebSocketClient {
       discount_getdiscountinforesp: "discount_getdiscountinfo",
       // 升星相关响应映射
       hero_heroupgradestarresp: "hero_heroupgradestar",
+      hero_rebirthresp: "hero_rebirth",
+      hero_heroupgradelevelresp: "hero_heroupgradelevel",
+      hero_heroupgradeorderresp: "hero_heroupgradeorder",
       book_upgraderesp: "book_upgrade",
       book_claimpointrewardresp: "book_claimpointreward",
       // 军团信息
@@ -1114,6 +1142,9 @@ export class XyzwWebSocketClient {
         "system_mysharecallback",
         "task_claimdailypoint",
         "role_commitpassword",
+        "hero_gointobattle",
+        "hero_gobackbattle",
+        "lordweapon_changedefaultweapon",
       ],
       syncrewardresp: [
         "system_buygold",
@@ -1125,6 +1156,7 @@ export class XyzwWebSocketClient {
         "system_signinreward",
         "dungeon_selecthero",
         "artifact_exchange",
+        "hero_exchange",
       ],
     };
 
@@ -1150,6 +1182,11 @@ export class XyzwWebSocketClient {
             : packet.decodedBody !== undefined
               ? packet.decodedBody
               : packet.body;
+
+        // 附加原始命令名到响应对象
+        if (responseBody && typeof responseBody === "object") {
+          responseBody._originalCmd = promiseData.originalCmd;
+        }
 
         if (packet.code === 0 || packet.code === undefined) {
           promiseData.resolve(responseBody || packet);

@@ -62,6 +62,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     ServerRankListPageCard: typeof import('./src/components/cards/ServerRankListPageCard.vue')['default']
+    ServerRoleList: typeof import('./src/components/ServerRoleList.vue')['default']
     Signin: typeof import('./src/components/Club/Signin.vue')['default']
     SkinChallengeCard: typeof import('./src/components/cards/SkinChallengeCard.vue')['default']
     StarUpgradeCard: typeof import('./src/components/cards/StarUpgradeCard.vue')['default']
@@ -73,6 +74,7 @@ declare module 'vue' {
     TopClubListPageCard: typeof import('./src/components/cards/TopClubListPageCard.vue')['default']
     TopRankListPageCard: typeof import('./src/components/cards/TopRankListPageCard.vue')['default']
     TowerStatus: typeof import('./src/components/Tower/TowerStatus.vue')['default']
+    Unlimitedlineup: typeof import('./src/components/cards/Unlimitedlineup.vue')['default']
     WebSocketTester: typeof import('./src/components/Test/WebSocketTester.vue')['default']
     WeirdTowerStatus: typeof import('./src/components/Tower/WeirdTowerStatus.vue')['default']
   }
