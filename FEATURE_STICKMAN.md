@@ -141,8 +141,137 @@
 
 ---
 
+## 附录 A：项目存储架构参考
+
+> 本节为只读参考，不随功能变更更新。整理本项目 token / 批量任务相关数据的存储位置，便于后续设计跨模块功能（如孤儿 token 清理、自动刷新等）时定位。
+
+### A.1 存储介质分层
+
+| 介质 | 用途 |
+|---|---|
+| **localStorage** | 主要持久化层，绝大多数配置和数据 |
+| **IndexedDB** (`xyzw_token_db`) | token 二进制 / 大对象（[src/utils/tokenDb.js](src/utils/tokenDb.js)），含 `kv` 与 `gameTokens` 两个 store |
+| **Pinia store** ([src/stores/tokenStore.ts](src/stores/tokenStore.ts)) | 运行时响应式状态，通过 VueUse 的 `useLocalStorage` 自动持久化到 localStorage |
+
+### A.2 Token 相关 localStorage 键
+
+| Key | 用途 | 维护者 |
+|---|---|---|
+| `gameTokens` | Token 列表（`TokenData[]`） | `tokenStore` |
+| `selectedTokenId` | 当前选中的 token id | `tokenStore` |
+| `selectedRoleInfo` | 选中 token 的角色信息缓存 | `tokenStore` |
+| `activeConnections` | 跨 tab 协调，防止重复连接 | `tokenStore` |
+| `tokenGroups` | Token 分组 | `tokenStore` |
+| `userToken` | 旧版用户 token（IndexedDB 也冗余存了一份） | `tokenStore` / `tokenDb` |
+| `ws_connection_<tokenId>` | 每个 token 的 WS 连接快照 | `tokenStore` |
+| `xyzw_chat_msg_list` | 聊天消息缓存 | `tokenStore` |
+
+#### TokenData 结构
+
+```ts
+interface TokenData {
+  id: string;
+  name: string;
+  token: string;             // 原始 Base64
+  wsUrl: string | null;
+  server: string;
+  remark?: string;
+  importMethod?: 'manual' | 'bin' | 'url';
+  sourceUrl?: string;        // url 导入时来源，refresh 用
+  upgradedToPermanent?: boolean;
+  upgradedAt?: string;
+  updatedAt?: string;        // 关键：判断是否需要 token 刷新的依据
+}
+```
+
+#### IndexedDB（`xyzw_token_db`）
+
+- `kv` store：通用键值表（`userToken` 等）
+- `gameTokens` store：按 `roleId` 索引的角色级数据（**与 localStorage 中 `gameTokens` 同名但语义不同**，是历史包袱）
+
+### A.3 批量任务相关 localStorage 键
+
+全部由 [BatchDailyTasks.vue](src/views/BatchDailyTasks.vue) 直接读写，**未走 Pinia**：
+
+| Key | 用途 |
+|---|---|
+| `batchSettings` | 批量任务设置（含 wxpusher / pushplus / 刷新 / 阈值等所有开关） |
+| `scheduledTasks` | 定时任务列表（数组） |
+| `taskExecutionHistory` | 任务执行历史（`lastSuccessfulExecution` / `lastStartedAt` 等） |
+| `lastTaskExecution_<taskId>` | 每个任务上次触发的分钟级 dedup key |
+| `missed_<taskId>_<timestamp>` | 漏执行去重 key（48h 后清理） |
+| `refresh_cron_<YYYYMMDD_HHMM>` / `refresh_stale_<...>` | 自动刷新 dedup key（48h 后清理） |
+| `lastRefreshAt` | 上次自动刷新时间戳 |
+| `tokenSortConfig` | Token 列表排序配置 |
+| `task-templates` | 任务模板 |
+| `daily-settings:<tokenId>` | 每个 token 的每日任务个性化配置 |
+
+#### scheduledTasks 单项结构
+
+```js
+{
+  id: "task_xxx",
+  name: "凌晨2点签到",
+  runType: "daily",                       // 'daily' | 'cron'
+  runTime: "02:00",
+  cronExpression: "",
+  selectedTokens: ["t1", "t2", "t3"],     // ⚠ token 删除后会残留 id（孤儿引用源头）
+  connectedTokens: ["t1", "t2", "t3"],    // 运行时缓存
+  selectedTasks: ["batchOpenBox", "batcharenafight"],
+  enabled: true,
+}
+```
+
+### A.4 数据流拓扑
+
+```
+  UI (Vue 组件)  ◀──▶  Pinia tokenStore  ◀── useLocalStorage ──▶  localStorage
+                                                                  ├─ gameTokens
+                                                                  ├─ selectedTokenId
+                                                                  └─ ws_connection_*
+
+  BatchDailyTasks.vue  ──直接读写──▶  localStorage
+                                     ├─ batchSettings
+                                     ├─ scheduledTasks
+                                     ├─ taskExecutionHistory
+                                     └─ ...
+
+  tokenDb.js (IndexedDB)  ◀── 角色级 / 二进制大对象
+```
+
+### A.5 跨模块设计要点
+
+- **`tokenStore` 与 `BatchDailyTasks` 完全解耦**：两侧各自直接读写 localStorage，没有事件 / 引用关系。这是"删除 token 后定时任务残留 id"问题的根源，跨模块功能必须显式建立同步机制（事件订阅 / watch / 主动扫描）。
+- **`updatedAt` 是 token 时效性的真相来源**：自动刷新等功能应基于该字段判断，不要再造时间戳。
+- **批量任务模块的 dedup key 命名约定**：`<scope>_<taskId或expr>_<时间key>`，统一用 48h TTL 清理函数处理。
+
+---
+
+## 5. 集成 Gacha 分支：每日免费扭蛋（2026-05-06，cherry-pick `f0bc2da` + `0a15ab4`）
+
+从 `GitHuber20th:Gacha` 分支 cherry-pick 两个提交，集成每日免费扭蛋自动化。原分支基于较老的上游 main，直接 merge 会反向丢失本仓库的差异化功能（wxpusher / refreshScheduler 等），故采用 cherry-pick 仅取这 20 行有效改动。
+
+### 5.1 改动内容
+- [src/utils/xyzwWebSocket.js](src/utils/xyzwWebSocket.js)：注册新命令 `gacha_drawreward`（默认参数 `{ num: 1, isGroup: false }`）
+- [src/utils/dailyTaskRunner.js](src/utils/dailyTaskRunner.js)：
+  - `DailyTaskRunner` 默认设置追加 `freeGachaEnable: true`
+  - 每日任务流水线插入"免费扭蛋"任务，依赖 `statisticsTime["gacha:free"]` 通过 `isTodayAvailable` 判断当日是否已领取
+
+### 5.2 行为约定
+- **默认启用**：老用户的 `daily-settings:<tokenId>` 不显式包含该字段时，会通过对象解构 fallback 自动启用；如需关闭需显式设 `freeGachaEnable: false`
+- **幂等保护**：`isTodayAvailable` 决定当日是否已领，避免重复执行
+- **失败容忍**：执行失败不阻塞其他每日任务，沿用现有 `executeGameCommand` 的错误处理
+
+### 5.3 来源信息
+- 远端：`https://github.com/GitHuber20th/xyzw_web_helper.git` 分支 `Gacha`
+- 原始提交：`d1d2839 增加免费扭蛋功能`、`fa9acf8 扭蛋注册`
+- 本地 cherry-pick 后哈希：`f0bc2da`、`0a15ab4`
+
+---
+
 ## 维护索引（按时间倒序）
 
 | 日期 | 提交 | 变更摘要 |
 |---|---|---|
+| 2026-05-06 | `f0bc2da` + `0a15ab4` | cherry-pick GitHuber20th:Gacha 集成每日免费扭蛋 |
 | 2026-05-05 | `cff1b1d` | 修复长任务误判漏执行 + 自动刷新支持 cron |
