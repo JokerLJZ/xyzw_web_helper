@@ -144,6 +144,12 @@ export const defaultBatchSettings = {
   connectionTimeout: 10000,
   reconnectDelay: 1000,
   maxLogEntries: 1000,
+  // 页面刷新配置
+  enableRefresh: false,
+  refreshType: "interval", // 'interval' | 'cron'
+  refreshInterval: 360,
+  refreshCronExpression: "",
+  refreshMaxStaleHours: 0,
   // 智能发车阈值设置
   smartDepartureGoldThreshold: 0,
   smartDepartureRecruitThreshold: 0,

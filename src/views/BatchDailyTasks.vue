@@ -2423,6 +2423,21 @@
                 "
                 v-if="batchSettings.enableRefresh"
               >
+                <label class="setting-label">刷新方式</label>
+                <n-radio-group v-model:value="batchSettings.refreshType" size="small">
+                  <n-radio value="interval">固定间隔</n-radio>
+                  <n-radio value="cron">Cron 表达式</n-radio>
+                </n-radio-group>
+              </div>
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: row;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+                v-if="batchSettings.enableRefresh && batchSettings.refreshType === 'interval'"
+              >
                 <label class="setting-label">刷新间隔(分钟)</label>
                 <n-input-number
                   v-model:value="batchSettings.refreshInterval"
@@ -2432,6 +2447,36 @@
                   size="small"
                   style="width: 100px"
                 />
+              </div>
+              <div
+                class="setting-item"
+                v-if="batchSettings.enableRefresh && batchSettings.refreshType === 'cron'"
+              >
+                <label class="setting-label">Cron 表达式</label>
+                <n-input
+                  v-model:value="batchSettings.refreshCronExpression"
+                  placeholder="例如 0 */6 * * * 表示每6小时整点刷新"
+                  size="small"
+                />
+                <div class="cron-parser" v-if="batchSettings.refreshCronExpression">
+                  <div v-if="refreshCronValidation.valid" class="cron-validation success">
+                    <n-text type="success">✓ {{ refreshCronValidation.message }}</n-text>
+                  </div>
+                  <div v-else class="cron-validation error">
+                    <n-text type="error">✗ {{ refreshCronValidation.message }}</n-text>
+                  </div>
+                  <div
+                    v-if="refreshCronValidation.valid && refreshCronNextRuns.length > 0"
+                    class="cron-next-runs"
+                  >
+                    <h4>未来5次刷新时间：</h4>
+                    <ul>
+                      <li v-for="(run, index) in refreshCronNextRuns" :key="index">
+                        {{ run }}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             </div>
             <n-divider title-placement="left" style="margin: 12px 0 8px 0">WxPusher 推送通知</n-divider>
@@ -2883,6 +2928,7 @@ import {
   calculateLastExpectedExecutionTime,
   formatTimeDifference,
   matchesCronExpression,
+  evaluateRefresh,
   // Connection manager
   createConnectionManager,
   getActivityStatus,
@@ -3425,7 +3471,10 @@ const batchSettings = reactive({
   maxLogEntries: 1000,
   // 页面刷新配置
   enableRefresh: false,
-  refreshInterval: 360, // 分钟
+  refreshType: "interval", // 'interval' | 'cron'
+  refreshInterval: 360, // 分钟（interval 模式）
+  refreshCronExpression: "", // cron 模式表达式
+  refreshMaxStaleHours: 0, // 兜底：距上次刷新超过 N 小时强制刷一次；0 关闭
   // 推送通知配置
   wxpusherEnabled: false,
   wxpusherAppToken: "",
@@ -3600,6 +3649,35 @@ const groupedAvailableTasks = computed(() => {
 const cronValidation = ref({ valid: true, message: "" });
 const cronNextRuns = ref([]);
 
+// 自动刷新 cron 表达式的独立校验状态（与任务表单互不影响）
+const refreshCronValidation = ref({ valid: true, message: "" });
+const refreshCronNextRuns = ref([]);
+
+const parseRefreshCronExpression = (expression) => {
+  const validation = validateCronExpression(expression);
+  refreshCronValidation.value = validation;
+  if (!validation.valid) {
+    refreshCronNextRuns.value = [];
+    return;
+  }
+  const cronParts = expression.split(" ").filter(Boolean);
+  const [m, h, dom, mon, dow] = cronParts;
+  refreshCronNextRuns.value = calculateNextRuns(m, h, dom, mon, dow, 5);
+};
+
+// 监听 batchSettings 中刷新 cron 表达式的变化，自动刷新预览
+watch(
+  () => batchSettings.refreshCronExpression,
+  (val) => {
+    if (val) parseRefreshCronExpression(val);
+    else {
+      refreshCronValidation.value = { valid: true, message: "" };
+      refreshCronNextRuns.value = [];
+    }
+  },
+  { immediate: true },
+);
+
 // 注: availableTasks, CarresearchItem, taskColumns 已从 @/utils/batch 导入
 
 // ======================
@@ -3671,6 +3749,7 @@ const saveScheduledTasks = () => {
 
 const MISSED_EXECUTION_TOLERANCE_MS = 15 * 60 * 1000;     // 15分钟容忍窗口
 const MISSED_EXECUTION_MAX_STALE_MS = 2 * 60 * 60 * 1000; // 超过2小时只通知不补执行
+const MAX_TASK_DURATION_MS = 2 * 60 * 60 * 1000;          // 单次任务最长允许执行2小时（实际批量约1.5h，留余量）
 
 const taskExecutionHistory = ref({});
 
@@ -3747,6 +3826,17 @@ const checkMissedExecutions = async () => {
 
     // 如果上次执行时间 >= 上次应执行时间，说明没有漏执行
     if (lastSuccessfulDate && lastSuccessfulDate >= lastExpectedTime) {
+      continue;
+    }
+
+    // 任务正在运行（已开始本周期且仍在合理执行时长内），跳过；超出 MAX_TASK_DURATION_MS 视为崩溃由后续逻辑兜底
+    const lastStarted = taskExecutionHistory.value[task.id]?.lastStartedAt;
+    const lastStartedDate = lastStarted ? new Date(lastStarted) : null;
+    if (
+      lastStartedDate &&
+      lastStartedDate >= lastExpectedTime &&
+      now.getTime() - lastStartedDate.getTime() < MAX_TASK_DURATION_MS
+    ) {
       continue;
     }
 
@@ -4358,25 +4448,50 @@ const healthCheck = () => {
     }
   }
 
-  // Check for page refresh
-  if (batchSettings.enableRefresh && batchSettings.refreshInterval > 0) {
-    const elapsedMinutes = (Date.now() - pageLoadTime) / 1000 / 60;
-    if (elapsedMinutes >= batchSettings.refreshInterval) {
-      if (!isRunning.value) {
-        console.log(
-          `[${new Date().toISOString()}] Refreshing page as scheduled (Interval: ${batchSettings.refreshInterval}m, Elapsed: ${elapsedMinutes.toFixed(1)}m)`,
-        );
-        window.location.reload();
-      } else {
-        console.log(
-          `[${new Date().toISOString()}] Scheduled refresh postponed due to running task`,
-        );
-      }
-    }
-  }
+  // 自动刷新调度已迁移至 10s scheduler（保证 cron 分钟级精度）
 
   // 检测漏执行的定时任务
   checkMissedExecutions();
+};
+
+// 上一次记录"任务运行中跳过刷新"日志的分钟 key，用于节流
+let _lastRefreshSkipLogMinute = "";
+
+// 在 10s scheduler tick 中调用：评估并执行自动刷新
+const evaluateAndApplyRefresh = () => {
+  if (!batchSettings.enableRefresh) return;
+  try {
+    const now = new Date();
+    const result = evaluateRefresh(batchSettings, {
+      now,
+      pageLoadTime,
+      isTaskRunning: isRunning.value,
+    });
+    if (result.shouldRefresh) {
+      addLog({
+        time: now.toLocaleTimeString(),
+        message: `=== 触发自动刷新页面 (${result.reason}) ===`,
+        type: "info",
+      });
+      console.log(
+        `[${now.toISOString()}] Refreshing page (reason: ${result.reason})`,
+      );
+      window.location.reload();
+    } else if (result.reason === "task-running") {
+      // 同一分钟内只记录一次，避免日志刷屏
+      const mk = `${now.getHours()}:${now.getMinutes()}`;
+      if (_lastRefreshSkipLogMinute !== mk) {
+        _lastRefreshSkipLogMinute = mk;
+        addLog({
+          time: now.toLocaleTimeString(),
+          message: "=== 自动刷新触发命中，但任务运行中，已跳过本次 ===",
+          type: "warning",
+        });
+      }
+    }
+  } catch (error) {
+    console.error("evaluateAndApplyRefresh error:", error);
+  }
 };
 
 // Start the scheduler
@@ -4477,6 +4592,9 @@ const startScheduler = () => {
           }
         }
       });
+
+      // 自动刷新评估（与任务调度共用 10s tick，保证 cron 分钟级精度）
+      evaluateAndApplyRefresh();
     } catch (error) {
       console.error(
         `[${new Date().toISOString()}] Error in task scheduler:`,
@@ -4640,6 +4758,15 @@ const verifyTaskDependencies = async (task) => {
 // Execute a scheduled task with dependency verification
 const executeScheduledTask = async (task) => {
   const scheduledTaskStartTime = new Date();
+
+  // 立即写入 lastStartedAt，让 checkMissedExecutions 知道本周期已开始执行
+  // 这样长任务（>15min 容忍窗口）不会被误判为漏执行而重复触发
+  taskExecutionHistory.value[task.id] = {
+    ...taskExecutionHistory.value[task.id],
+    lastStartedAt: scheduledTaskStartTime.toISOString(),
+  };
+  saveTaskExecutionHistory();
+
   addLog({
     time: new Date().toLocaleTimeString(),
     message: `=== 开始执行定时任务: ${task.name} ===`,

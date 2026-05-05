@@ -4,6 +4,9 @@ export * from './constants.js';
 // Cron utilities
 export * from './cronUtils.js';
 
+// Refresh scheduler
+export * from './refreshScheduler.js';
+
 // Connection manager
 export * from './connectionManager.js';
 
