@@ -694,7 +694,6 @@
               <span class="time">{{ log.time }}</span>
               <span class="message">{{ log.message }}</span>
             </div>
-            <div ref="logEndAnchor" class="log-end-anchor"></div>
           </div>
         </n-card>
       </div>
@@ -5583,7 +5582,6 @@ const currentRunningTokenId = ref(null);
 const currentProgress = ref(0);
 const logs = ref([]);
 const logContainer = ref(null);
-const logEndAnchor = ref(null);
 const autoScrollLog = ref(true);
 const filterErrorsOnly = ref(false);
 const errorCount = computed(() => {
@@ -5817,14 +5815,10 @@ const addLog = (log) => {
 };
 
 const scrollLogToBottom = () => {
-  // 优先 scrollIntoView 哨兵（最可靠），降级到 scrollTop
-  const anchor = logEndAnchor.value;
-  if (anchor && typeof anchor.scrollIntoView === "function") {
-    anchor.scrollIntoView({ block: "end", inline: "nearest" });
-    return;
-  }
+  // 仅作用于日志容器自身（避免连带滚动外层页面，详见 §6.5）
   const el = logContainer.value;
-  if (el) el.scrollTop = el.scrollHeight;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
 };
 
 // flush:'post' 保证回调在 Vue 完成 DOM patch 之后执行；
@@ -6413,11 +6407,6 @@ const stopBatch = () => {
 .log-item {
   margin-bottom: 4px;
   font-size: 12px;
-}
-
-.log-end-anchor {
-  height: 1px;
-  scroll-margin-bottom: 0;
 }
 
 .log-item.error {

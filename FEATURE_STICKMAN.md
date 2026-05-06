@@ -287,14 +287,19 @@ interface TokenData {
 - [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
 - [src/layout/DefaultLayout.vue](src/layout/DefaultLayout.vue)
 
-### 6.4 后续：splice 实测仍不可靠 → 改用哨兵 + watch + flush:'post' + rAF
+### 6.4 后续：splice 仍不可靠 → 改为 watch + flush:'post' + rAF
 
-splice 在并发批量任务下实测仍滚不动。最终方案：
+splice 在并发批量任务下实测仍滚不动。改用：
 
-- **哨兵节点**：在日志列表末尾插入 `<div ref="logEndAnchor" class="log-end-anchor" />`，调用 `scrollIntoView({ block: 'end' })`，避免依赖 `scrollTop = scrollHeight` 这条对 layout 时序敏感的路径
-- **`watch` + `flush: 'post'`**：监听 `filteredLogs.value.length`，由 Vue 自身保证回调发生在 DOM patch 之后
-- **`requestAnimationFrame`**：再嵌一帧等浏览器完成 layout，确保哨兵已经到达最新位置
-- **监听 `filteredLogs` 而非 `logs`**：让"只看错误"切换时也能正确跟随
-- 把"滚动"从 `addLog` 中剥离，addLog 只负责数据，关注点更清晰
+- **`watch(() => filteredLogs.value.length, fn, { flush: 'post' })`** —— 由 Vue 保证回调发生在 DOM patch 之后
+- **`requestAnimationFrame`** —— 再嵌一帧等浏览器完成 layout，再赋 `scrollTop`
+- **监听 `filteredLogs` 而非 `logs`** —— 让"只看错误"切换时也能正确跟随
+- **滚动从 `addLog` 中剥离**，addLog 只管数据
+
+### 6.5 踩坑：scrollIntoView 不能用于此场景
+
+曾尝试在日志末尾加哨兵 `<div ref="logEndAnchor" />` + `scrollIntoView({ block: 'end' })`。结果在移动端布局下（`.batch-daily-tasks { overflow-y: auto }`）外层页面也是可滚动祖先，`scrollIntoView` 默认会把所有可滚动祖先一起滚到目标可见 → 整个页面被一起拽到最下方，日志区"突破边界"。
+
+**结论**：`scrollIntoView` 不可用，必须直接对日志容器赋 `scrollTop`，作用域被严格限制在容器自身。
 | 2026-05-06 | `f0bc2da` + `0a15ab4` | cherry-pick GitHuber20th:Gacha 集成每日免费扭蛋 |
 | 2026-05-05 | `cff1b1d` | 修复长任务误判漏执行 + 自动刷新支持 cron |
