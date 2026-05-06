@@ -287,12 +287,6 @@ interface TokenData {
 - [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
 - [src/layout/DefaultLayout.vue](src/layout/DefaultLayout.vue)
 
-### 6.4 后续：splice 仍不可靠 → 改用 watch + flush:'post'
-
-仅靠 `splice` + `nextTick` 在批量并发任务下仍然偶发滚动失效（截图显示长任务跑到一半后视口卡死，新日志在底下却看不到）。
-
-**最终方案**：把"滚动"从 `addLog` 中剥离，用 `watch(() => filteredLogs.value.length, ..., { flush: 'post' })` 监听条目数变化。`flush: 'post'` 保证回调在 Vue 完成全部组件 patch、DOM 实际更新后才执行，比 `nextTick` 在并发批量 push 场景下更稳。同时监听的是 `filteredLogs` 而非 `logs`，确保"只看错误"开启时也能正确跟随。
-
 ---
 
 ## 维护索引（按时间倒序）
