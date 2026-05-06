@@ -5812,19 +5812,27 @@ const addLog = (log) => {
   if (logs.value.length > maxLogEntries) {
     logs.value.splice(0, logs.value.length - maxLogEntries);
   }
-
-  nextTick(() => {
-    if (logContainer.value && autoScrollLog.value) {
-      logContainer.value.scrollTop = logContainer.value.scrollHeight;
-    }
-  });
 };
 
+const scrollLogToBottom = () => {
+  const el = logContainer.value;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
+};
+
+// flush:'post' 确保回调在 DOM 真正更新后执行；
+// 监听 filteredLogs.length 而不是 logs.length，是为了即使开了"只看错误"也能正确滚动
+watch(
+  () => filteredLogs.value.length,
+  () => {
+    if (autoScrollLog.value) scrollLogToBottom();
+  },
+  { flush: "post" },
+);
+
 watch(autoScrollLog, (newValue) => {
-  if (newValue && logContainer.value) {
-    nextTick(() => {
-      logContainer.value.scrollTop = logContainer.value.scrollHeight;
-    });
+  if (newValue) {
+    nextTick(scrollLogToBottom);
   }
 });
 
