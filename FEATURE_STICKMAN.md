@@ -301,5 +301,36 @@ splice 在并发批量任务下实测仍滚不动。改用：
 曾尝试在日志末尾加哨兵 `<div ref="logEndAnchor" />` + `scrollIntoView({ block: 'end' })`。结果在移动端布局下（`.batch-daily-tasks { overflow-y: auto }`）外层页面也是可滚动祖先，`scrollIntoView` 默认会把所有可滚动祖先一起滚到目标可见 → 整个页面被一起拽到最下方，日志区"突破边界"。
 
 **结论**：`scrollIntoView` 不可用，必须直接对日志容器赋 `scrollTop`，作用域被严格限制在容器自身。
+
+### 6.6 最终方案：MutationObserver
+
+`watch(filteredLogs.length, ..., { flush: 'post' })` + `rAF` 实测在 burst push 场景下仍偶发失效（截图：40 条日志只显示前 16 条，`scrollTop` 一直是 0）。
+
+**根因猜测**：Vue 的响应式调度与 naive-ui / n-progress 等组件的内部更新有微妙的时序竞争，`flush:'post'` 之后仍可能有后续 DOM 变更导致最终 `scrollTop` 设置失效。
+
+**最终采用 DOM 层面的 `MutationObserver`**：
+
+```js
+let logMutationObserver = null;
+onMounted(() => {
+  if (!logContainer.value) return;
+  logMutationObserver = new MutationObserver(scrollLogToBottom);
+  logMutationObserver.observe(logContainer.value, { childList: true, subtree: false });
+  scrollLogToBottom(); // keep-alive 复活时初次同步
+});
+onBeforeUnmount(() => logMutationObserver?.disconnect());
+```
+
+**为什么更可靠**：
+- MO 直接观察 DOM 突变，不依赖 Vue 响应式调度
+- `childList: true` 仅观察子节点增删，每条日志一个 `<div>`，触发精确
+- 回调内 `requestAnimationFrame` + 一个 raf-id 节流，合并同一帧内多次触发，且只在浏览器完成 layout 后才读 `scrollHeight`
+- `scrollTop` 直接赋值，不连带滚动外层页面（避免 §6.5 的坑）
+- `onBeforeUnmount` 释放 observer + 取消挂起的 rAF，防止内存泄漏
+
+**关注点分离后的最终结构**：
+- `addLog`：仅 push + 限长，不再触碰 DOM
+- `MutationObserver`：DOM 增删 → 触发滚动
+- `watch(autoScrollLog)`：用户重新勾选"自动滚动"时立刻补一次滚动（这事件 MO 看不到）
 | 2026-05-06 | `f0bc2da` + `0a15ab4` | cherry-pick GitHuber20th:Gacha 集成每日免费扭蛋 |
 | 2026-05-05 | `cff1b1d` | 修复长任务误判漏执行 + 自动刷新支持 cron |
