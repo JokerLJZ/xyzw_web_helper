@@ -269,9 +269,30 @@ interface TokenData {
 
 ---
 
+## 6. 修复日志自动滚动 + 移除右上角清除Token菜单（2026-05-06，提交 `373f2f6`）
+
+### 6.1 问题：批量任务日志不再自动滚动到底部
+
+**根因**：commit `8e9fa03`（2026-02-12 由 PR #238 合并入本仓库）在 `addLog` 中加入"最大日志条目数"截断逻辑时使用了 `logs.value = logs.value.slice(-max)` —— 这会**整体替换**响应式数组，触发 `v-for` 全量重渲染。在生产构建（含 Cloudflare Pages 部署）下，DOM 抖动让随后的 `scrollTop = scrollHeight` 失效；dev 模式因 HMR 等开销掩盖了问题。
+
+**修复**：[BatchDailyTasks.vue:5808 `addLog`](src/views/BatchDailyTasks.vue:5808) 改用 `logs.value.splice(0, len - max)` **原地修改**，Vue 仅 patch 头部被移除的节点，尾部 DOM 节点稳定，`scrollTop` 行为可靠。同时回到最简单的单层 `nextTick` + 直接赋 `scrollHeight` 实现，去掉了之前为兜底而堆叠的同步 + nextTick + try/catch 噪声。
+
+### 6.2 移除右上角下拉菜单"清除所有Token并退出"
+
+**动机**：该菜单只有这一个危险项，误点会清空全部 token；并且当前流程下用户更习惯到 `/tokens` 页面进行管理。
+
+**改动**：[DefaultLayout.vue](src/layout/DefaultLayout.vue) 保留头像与用户名展示，删除 `n-dropdown` 包裹与 `userMenuOptions` / `handleUserAction`，顺手清理因此不再使用的 `ChevronDown`、`useRouter`、`useMessage`、`useTokenStore`、`selectedTokenId` 等导入。
+
+### 6.3 涉及文件
+- [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
+- [src/layout/DefaultLayout.vue](src/layout/DefaultLayout.vue)
+
+---
+
 ## 维护索引（按时间倒序）
 
 | 日期 | 提交 | 变更摘要 |
 |---|---|---|
+| 2026-05-06 | `373f2f6` | 修复批量任务日志自动滚动 + 移除右上角清除Token下拉菜单 |
 | 2026-05-06 | `f0bc2da` + `0a15ab4` | cherry-pick GitHuber20th:Gacha 集成每日免费扭蛋 |
 | 2026-05-05 | `cff1b1d` | 修复长任务误判漏执行 + 自动刷新支持 cron |
