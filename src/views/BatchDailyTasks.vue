@@ -5814,52 +5814,75 @@ const addLog = (log) => {
   }
 };
 
-// 日志自动滚动实现说明（多次踩坑后的最终方案，详见 FEATURE_STICKMAN.md §6）
-// - 不能用 scrollIntoView：会把外层 .batch-daily-tasks 一起滚到底（移动端会"突破边界"）
-// - 不能只靠 nextTick / watch flush:'post'：在 burst push 场景下偶发失效
-// - 直接用 MutationObserver 观察容器子节点增删，最贴近 DOM 真相
-let logScrollRafId = 0;
-const scrollLogToBottom = () => {
-  const el = logContainer.value;
-  if (!el || !autoScrollLog.value) return;
-  // 用 rAF 合并同一帧内多次触发，并等浏览器完成 layout 后再读 scrollHeight
-  if (logScrollRafId) cancelAnimationFrame(logScrollRafId);
-  logScrollRafId = requestAnimationFrame(() => {
-    logScrollRafId = 0;
-    const node = logContainer.value;
-    if (!node || !autoScrollLog.value) return;
-    node.scrollTop = node.scrollHeight;
-  });
+// 日志自动滚动（详见 FEATURE_STICKMAN.md §6）
+// 关键点：
+// 1. MO 必须在 logContainer 变成 non-null 之后再装 —— 用 watch(logContainer, immediate: true)
+//    取代 onMounted，避免 ref 还没 ready 就退出
+// 2. MO 触发时 DOM 已经更新完毕，直接 scrollTop=scrollHeight 同步赋值（rAF 反而引入时序竞争）
+// 3. 不能用 scrollIntoView：会顺带滚动外层可滚动祖先（移动端 .batch-daily-tasks 会被一起拽下去）
+let logMutationObserver = null;
+const logScrollDebug = {
+  setupCount: 0,
+  triggerCount: 0,
+  lastTriggerAt: null,
+  lastScrollTop: null,
+  lastScrollHeight: null,
 };
 
-let logMutationObserver = null;
-onMounted(() => {
-  if (!logContainer.value) return;
-  logMutationObserver = new MutationObserver(scrollLogToBottom);
-  logMutationObserver.observe(logContainer.value, {
-    childList: true,
-    subtree: false,
-    characterData: false,
-  });
-  // 初次挂载也滚一次（处理 keep-alive 复活后历史日志已经存在的情形）
-  scrollLogToBottom();
-});
+const scrollLogToBottom = () => {
+  const el = logContainer.value;
+  if (!el) return;
+  if (!autoScrollLog.value) return;
+  el.scrollTop = el.scrollHeight;
+  logScrollDebug.triggerCount++;
+  logScrollDebug.lastTriggerAt = Date.now();
+  logScrollDebug.lastScrollTop = el.scrollTop;
+  logScrollDebug.lastScrollHeight = el.scrollHeight;
+};
 
-onBeforeUnmount(() => {
+const teardownLogObserver = () => {
   if (logMutationObserver) {
     logMutationObserver.disconnect();
     logMutationObserver = null;
   }
-  if (logScrollRafId) {
-    cancelAnimationFrame(logScrollRafId);
-    logScrollRafId = 0;
-  }
-});
+};
 
-// 用户开关从关变开：立刻滚到底（这种事件不会由 MutationObserver 触发）
+// 用 watch+immediate 替代 onMounted，确保 logContainer.value 一旦可用就装上 MO
+watch(
+  logContainer,
+  (el) => {
+    teardownLogObserver();
+    if (!el) return;
+    logMutationObserver = new MutationObserver(scrollLogToBottom);
+    logMutationObserver.observe(el, { childList: true, subtree: false });
+    logScrollDebug.setupCount++;
+    scrollLogToBottom();
+  },
+  { immediate: true, flush: "post" },
+);
+
+onBeforeUnmount(teardownLogObserver);
+
 watch(autoScrollLog, (enabled) => {
   if (enabled) scrollLogToBottom();
 });
+
+// 调试用：在浏览器 Console 里执行 window.__logScrollDebug 查看状态
+if (typeof window !== "undefined") {
+  window.__logScrollDebug = {
+    state: logScrollDebug,
+    get observerInstalled() {
+      return !!logMutationObserver;
+    },
+    get container() {
+      return logContainer.value;
+    },
+    get autoScrollEnabled() {
+      return autoScrollLog.value;
+    },
+    forceScroll: scrollLogToBottom,
+  };
+}
 
 const copyLogs = () => {
   if (logs.value.length === 0) {
