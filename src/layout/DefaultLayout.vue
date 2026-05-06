@@ -72,21 +72,16 @@
           <!-- 主题切换按钮 -->
           <ThemeToggle />
 
-          <n-dropdown :options="userMenuOptions" @select="handleUserAction">
-            <div class="user-info">
-              <n-avatar
-                :src="selectedToken?.avatar || '/icons/xiaoyugan.png'"
-                size="medium"
-                fallback-src="/icons/xiaoyugan.png"
-              />
-              <span class="username">{{
-                selectedToken?.name || "未选择Token"
-              }}</span>
-              <n-icon>
-                <ChevronDown />
-              </n-icon>
-            </div>
-          </n-dropdown>
+          <div class="user-info">
+            <n-avatar
+              :src="selectedToken?.avatar || '/icons/xiaoyugan.png'"
+              size="medium"
+              fallback-src="/icons/xiaoyugan.png"
+            />
+            <span class="username">{{
+              selectedToken?.name || "未选择Token"
+            }}</span>
+          </div>
         </div>
       </div>
     </nav>
@@ -182,9 +177,7 @@
 
 <script setup>
 import {
-  useTokenStore,
   selectedToken,
-  selectedTokenId,
 } from "@/stores/tokenStore";
 import ThemeToggle from "@/components/Common/ThemeToggle.vue";
 import {
@@ -192,41 +185,17 @@ import {
   PersonCircle,
   Cube,
   Settings,
-  ChevronDown,
   ChatbubbleEllipsesSharp,
   LockClosedSharp,LockOpen,
   Menu,
   Layers,
 } from "@vicons/ionicons5";
 
-import { useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
 import { ref } from 'vue'
 import { isNowInLegionWarTime } from '@/utils/clubBattleUtils'
 
-const tokenStore = useTokenStore();
-const router = useRouter();
-const message = useMessage();
-
 const isMobileMenuOpen = ref(false);
 
-const userMenuOptions = [
-  {
-    label: "清除所有Token并退出",
-    key: "logout",
-  },
-];
-
-// 方法
-const handleUserAction = async (key) => {
-  switch (key) {
-    case "logout":
-      await tokenStore.clearAllTokens();
-      message.success("已清除所有Token");
-      router.push("/tokens");
-      break;
-  }
-};
 </script>
 
 <style scoped lang="scss">

@@ -5806,35 +5806,16 @@ const getGroupTokenList = (groupId) => {
 // 注: pickArenaTargetId, FISH_TARGET, ARENA_TARGET, getTodayStartSec, isTodayAvailable, calculateMonthProgress 已从 @/utils/batch 导入
 
 const addLog = (log) => {
-  // 添加日志数据到数组
   logs.value.push(log);
 
-  // 限制logs数组大小，防止内存占用过大
   const maxLogEntries = batchSettings.maxLogEntries || 1000;
   if (logs.value.length > maxLogEntries) {
-    logs.value = logs.value.slice(-maxLogEntries);
+    logs.value.splice(0, logs.value.length - maxLogEntries);
   }
 
-  // 尝试DOM操作，但不依赖nextTick确保日志显示
-  // 在后台运行时，浏览器可能会限制DOM操作
-  try {
-    if (logContainer.value && autoScrollLog.value) {
-      // 直接尝试滚动，不使用nextTick
-      logContainer.value.scrollTop = logContainer.value.scrollHeight;
-    }
-  } catch (error) {
-    // 忽略DOM操作错误，确保日志数据仍然被记录
-    console.warn("Failed to scroll log container:", error);
-  }
-
-  // 同时使用nextTick作为后备，确保在页面回到前台时能正确滚动
   nextTick(() => {
-    try {
-      if (logContainer.value && autoScrollLog.value) {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight;
-      }
-    } catch (error) {
-      // 忽略错误
+    if (logContainer.value && autoScrollLog.value) {
+      logContainer.value.scrollTop = logContainer.value.scrollHeight;
     }
   });
 };
@@ -5842,12 +5823,7 @@ const addLog = (log) => {
 watch(autoScrollLog, (newValue) => {
   if (newValue && logContainer.value) {
     nextTick(() => {
-      try {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight;
-      } catch (error) {
-        // 忽略DOM操作错误
-        console.warn("Failed to scroll log container:", error);
-      }
+      logContainer.value.scrollTop = logContainer.value.scrollHeight;
     });
   }
 });
