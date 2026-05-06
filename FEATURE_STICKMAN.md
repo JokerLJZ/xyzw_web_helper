@@ -287,12 +287,14 @@ interface TokenData {
 - [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
 - [src/layout/DefaultLayout.vue](src/layout/DefaultLayout.vue)
 
----
+### 6.4 后续：splice 实测仍不可靠 → 改用哨兵 + watch + flush:'post' + rAF
 
-## 维护索引（按时间倒序）
+splice 在并发批量任务下实测仍滚不动。最终方案：
 
-| 日期 | 提交 | 变更摘要 |
-|---|---|---|
-| 2026-05-06 | `373f2f6` | 修复批量任务日志自动滚动 + 移除右上角清除Token下拉菜单 |
+- **哨兵节点**：在日志列表末尾插入 `<div ref="logEndAnchor" class="log-end-anchor" />`，调用 `scrollIntoView({ block: 'end' })`，避免依赖 `scrollTop = scrollHeight` 这条对 layout 时序敏感的路径
+- **`watch` + `flush: 'post'`**：监听 `filteredLogs.value.length`，由 Vue 自身保证回调发生在 DOM patch 之后
+- **`requestAnimationFrame`**：再嵌一帧等浏览器完成 layout，确保哨兵已经到达最新位置
+- **监听 `filteredLogs` 而非 `logs`**：让"只看错误"切换时也能正确跟随
+- 把"滚动"从 `addLog` 中剥离，addLog 只负责数据，关注点更清晰
 | 2026-05-06 | `f0bc2da` + `0a15ab4` | cherry-pick GitHuber20th:Gacha 集成每日免费扭蛋 |
 | 2026-05-05 | `cff1b1d` | 修复长任务误判漏执行 + 自动刷新支持 cron |

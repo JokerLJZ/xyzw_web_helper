@@ -694,6 +694,7 @@
               <span class="time">{{ log.time }}</span>
               <span class="message">{{ log.message }}</span>
             </div>
+            <div ref="logEndAnchor" class="log-end-anchor"></div>
           </div>
         </n-card>
       </div>
@@ -5582,6 +5583,7 @@ const currentRunningTokenId = ref(null);
 const currentProgress = ref(0);
 const logs = ref([]);
 const logContainer = ref(null);
+const logEndAnchor = ref(null);
 const autoScrollLog = ref(true);
 const filterErrorsOnly = ref(false);
 const errorCount = computed(() => {
@@ -5812,19 +5814,34 @@ const addLog = (log) => {
   if (logs.value.length > maxLogEntries) {
     logs.value.splice(0, logs.value.length - maxLogEntries);
   }
-
-  nextTick(() => {
-    if (logContainer.value && autoScrollLog.value) {
-      logContainer.value.scrollTop = logContainer.value.scrollHeight;
-    }
-  });
 };
 
+const scrollLogToBottom = () => {
+  // 优先 scrollIntoView 哨兵（最可靠），降级到 scrollTop
+  const anchor = logEndAnchor.value;
+  if (anchor && typeof anchor.scrollIntoView === "function") {
+    anchor.scrollIntoView({ block: "end", inline: "nearest" });
+    return;
+  }
+  const el = logContainer.value;
+  if (el) el.scrollTop = el.scrollHeight;
+};
+
+// flush:'post' 保证回调在 Vue 完成 DOM patch 之后执行；
+// 再嵌一层 rAF 等浏览器完成 layout，确保 scrollHeight / 哨兵位置已更新；
+// 监听 filteredLogs.length 而不是 logs.length，"只看错误"切换时也能跟随
+watch(
+  () => filteredLogs.value.length,
+  () => {
+    if (!autoScrollLog.value) return;
+    requestAnimationFrame(scrollLogToBottom);
+  },
+  { flush: "post" },
+);
+
 watch(autoScrollLog, (newValue) => {
-  if (newValue && logContainer.value) {
-    nextTick(() => {
-      logContainer.value.scrollTop = logContainer.value.scrollHeight;
-    });
+  if (newValue) {
+    nextTick(() => requestAnimationFrame(scrollLogToBottom));
   }
 });
 
@@ -6396,6 +6413,11 @@ const stopBatch = () => {
 .log-item {
   margin-bottom: 4px;
   font-size: 12px;
+}
+
+.log-end-anchor {
+  height: 1px;
+  scroll-margin-bottom: 0;
 }
 
 .log-item.error {
