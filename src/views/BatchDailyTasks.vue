@@ -684,10 +684,11 @@
             :indicator-placement="'inside'"
             processing
           />
-          <div
+          <n-scrollbar
             class="log-container"
             ref="logContainer"
-            @scroll="handleLogScroll"
+            trigger="none"
+            :content-style="{ padding: '10px' }"
             @wheel.stop
           >
             <div
@@ -699,7 +700,7 @@
               <span class="time">{{ log.time }}</span>
               <span class="message">{{ log.message }}</span>
             </div>
-          </div>
+          </n-scrollbar>
         </n-card>
       </div>
     </div>
@@ -5590,7 +5591,6 @@ const currentRunningTokenId = ref(null);
 const currentProgress = ref(0);
 const logs = ref([]);
 const logContainer = ref(null);
-const isProgrammaticLogScroll = ref(false);
 const autoScrollLog = ref(true);
 const filterErrorsOnly = ref(false);
 const errorCount = computed(() => {
@@ -5614,33 +5614,19 @@ const scrollLogToBottom = () => {
 
   nextTick(() => {
     const scroll = () => {
-      const container = logContainer.value;
-      if (!container || !autoScrollLog.value) return;
+      const scrollbar = logContainer.value;
+      if (!scrollbar || !autoScrollLog.value) return;
 
-      isProgrammaticLogScroll.value = true;
-      container.scrollTop = container.scrollHeight;
-      setTimeout(() => {
-        isProgrammaticLogScroll.value = false;
-      }, 0);
+      scrollbar.scrollTo?.({
+        top: Number.MAX_SAFE_INTEGER,
+        behavior: "auto",
+      });
     };
 
     requestAnimationFrame(scroll);
     setTimeout(scroll, 0);
     setTimeout(scroll, 50);
   });
-};
-
-const handleLogScroll = () => {
-  const container = logContainer.value;
-  if (!container || isProgrammaticLogScroll.value || !autoScrollLog.value) {
-    return;
-  }
-
-  const distanceToBottom =
-    container.scrollHeight - container.clientHeight - container.scrollTop;
-  if (distanceToBottom > 24) {
-    autoScrollLog.value = false;
-  }
 };
 
 const handleVisibilityLogScroll = () => {
@@ -6449,31 +6435,25 @@ const stopBatch = () => {
 
 .log-container {
   flex: 1 1 0;
-  overflow-y: scroll;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  scrollbar-width: auto;
-  scrollbar-color: #b8b8b8 #e8e8e8;
   background: #f5f5f5;
-  padding: 10px;
   border-radius: 4px;
   margin-top: 10px;
   font-family: monospace;
   min-height: 0;
 }
 
-.log-container::-webkit-scrollbar {
-  width: 8px;
+.log-container :deep(.n-scrollbar-container) {
+  overscroll-behavior: contain;
 }
 
-.log-container::-webkit-scrollbar-track {
-  background: #e8e8e8;
-  border-radius: 4px;
+.log-container :deep(.n-scrollbar-rail) {
+  background: #e8e8e8 !important;
+  opacity: 1 !important;
 }
 
-.log-container::-webkit-scrollbar-thumb {
-  background: #b8b8b8;
-  border-radius: 4px;
+.log-container :deep(.n-scrollbar-rail__scrollbar) {
+  background-color: #b8b8b8 !important;
+  width: 8px !important;
 }
 
 .log-item {
