@@ -5806,83 +5806,51 @@ const getGroupTokenList = (groupId) => {
 // 注: pickArenaTargetId, FISH_TARGET, ARENA_TARGET, getTodayStartSec, isTodayAvailable, calculateMonthProgress 已从 @/utils/batch 导入
 
 const addLog = (log) => {
+  // 添加日志数据到数组
   logs.value.push(log);
 
+  // 限制logs数组大小，防止内存占用过大
   const maxLogEntries = batchSettings.maxLogEntries || 1000;
   if (logs.value.length > maxLogEntries) {
-    logs.value.splice(0, logs.value.length - maxLogEntries);
+    logs.value = logs.value.slice(-maxLogEntries);
   }
-};
 
-// 日志自动滚动（详见 FEATURE_STICKMAN.md §6）
-// 关键点：
-// 1. MO 必须在 logContainer 变成 non-null 之后再装 —— 用 watch(logContainer, immediate: true)
-//    取代 onMounted，避免 ref 还没 ready 就退出
-// 2. MO 触发时 DOM 已经更新完毕，直接 scrollTop=scrollHeight 同步赋值（rAF 反而引入时序竞争）
-// 3. 不能用 scrollIntoView：会顺带滚动外层可滚动祖先（移动端 .batch-daily-tasks 会被一起拽下去）
-let logMutationObserver = null;
-const logScrollDebug = {
-  setupCount: 0,
-  triggerCount: 0,
-  lastTriggerAt: null,
-  lastScrollTop: null,
-  lastScrollHeight: null,
-};
-
-const scrollLogToBottom = () => {
-  const el = logContainer.value;
-  if (!el) return;
-  if (!autoScrollLog.value) return;
-  el.scrollTop = el.scrollHeight;
-  logScrollDebug.triggerCount++;
-  logScrollDebug.lastTriggerAt = Date.now();
-  logScrollDebug.lastScrollTop = el.scrollTop;
-  logScrollDebug.lastScrollHeight = el.scrollHeight;
-};
-
-const teardownLogObserver = () => {
-  if (logMutationObserver) {
-    logMutationObserver.disconnect();
-    logMutationObserver = null;
+  // 尝试DOM操作，但不依赖nextTick确保日志显示
+  // 在后台运行时，浏览器可能会限制DOM操作
+  try {
+    if (logContainer.value && autoScrollLog.value) {
+      // 直接尝试滚动，不使用nextTick
+      logContainer.value.scrollTop = logContainer.value.scrollHeight;
+    }
+  } catch (error) {
+    // 忽略DOM操作错误，确保日志数据仍然被记录
+    console.warn("Failed to scroll log container:", error);
   }
+
+  // 同时使用nextTick作为后备，确保在页面回到前台时能正确滚动
+  nextTick(() => {
+    try {
+      if (logContainer.value && autoScrollLog.value) {
+        logContainer.value.scrollTop = logContainer.value.scrollHeight;
+      }
+    } catch (error) {
+      // 忽略错误
+    }
+  });
 };
 
-// 用 watch+immediate 替代 onMounted，确保 logContainer.value 一旦可用就装上 MO
-watch(
-  logContainer,
-  (el) => {
-    teardownLogObserver();
-    if (!el) return;
-    logMutationObserver = new MutationObserver(scrollLogToBottom);
-    logMutationObserver.observe(el, { childList: true, subtree: false });
-    logScrollDebug.setupCount++;
-    scrollLogToBottom();
-  },
-  { immediate: true, flush: "post" },
-);
-
-onBeforeUnmount(teardownLogObserver);
-
-watch(autoScrollLog, (enabled) => {
-  if (enabled) scrollLogToBottom();
+watch(autoScrollLog, (newValue) => {
+  if (newValue && logContainer.value) {
+    nextTick(() => {
+      try {
+        logContainer.value.scrollTop = logContainer.value.scrollHeight;
+      } catch (error) {
+        // 忽略DOM操作错误
+        console.warn("Failed to scroll log container:", error);
+      }
+    });
+  }
 });
-
-// 调试用：在浏览器 Console 里执行 window.__logScrollDebug 查看状态
-if (typeof window !== "undefined") {
-  window.__logScrollDebug = {
-    state: logScrollDebug,
-    get observerInstalled() {
-      return !!logMutationObserver;
-    },
-    get container() {
-      return logContainer.value;
-    },
-    get autoScrollEnabled() {
-      return autoScrollLog.value;
-    },
-    forceScroll: scrollLogToBottom,
-  };
-}
 
 const copyLogs = () => {
   if (logs.value.length === 0) {

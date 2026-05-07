@@ -269,68 +269,9 @@ interface TokenData {
 
 ---
 
-## 6. 修复日志自动滚动 + 移除右上角清除Token菜单（2026-05-06，提交 `373f2f6`）
+## 维护索引（按时间倒序）
 
-### 6.1 问题：批量任务日志不再自动滚动到底部
-
-**根因**：commit `8e9fa03`（2026-02-12 由 PR #238 合并入本仓库）在 `addLog` 中加入"最大日志条目数"截断逻辑时使用了 `logs.value = logs.value.slice(-max)` —— 这会**整体替换**响应式数组，触发 `v-for` 全量重渲染。在生产构建（含 Cloudflare Pages 部署）下，DOM 抖动让随后的 `scrollTop = scrollHeight` 失效；dev 模式因 HMR 等开销掩盖了问题。
-
-**修复**：[BatchDailyTasks.vue:5808 `addLog`](src/views/BatchDailyTasks.vue:5808) 改用 `logs.value.splice(0, len - max)` **原地修改**，Vue 仅 patch 头部被移除的节点，尾部 DOM 节点稳定，`scrollTop` 行为可靠。同时回到最简单的单层 `nextTick` + 直接赋 `scrollHeight` 实现，去掉了之前为兜底而堆叠的同步 + nextTick + try/catch 噪声。
-
-### 6.2 移除右上角下拉菜单"清除所有Token并退出"
-
-**动机**：该菜单只有这一个危险项，误点会清空全部 token；并且当前流程下用户更习惯到 `/tokens` 页面进行管理。
-
-**改动**：[DefaultLayout.vue](src/layout/DefaultLayout.vue) 保留头像与用户名展示，删除 `n-dropdown` 包裹与 `userMenuOptions` / `handleUserAction`，顺手清理因此不再使用的 `ChevronDown`、`useRouter`、`useMessage`、`useTokenStore`、`selectedTokenId` 等导入。
-
-### 6.3 涉及文件
-- [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
-- [src/layout/DefaultLayout.vue](src/layout/DefaultLayout.vue)
-
-### 6.4 后续：splice 仍不可靠 → 改为 watch + flush:'post' + rAF
-
-splice 在并发批量任务下实测仍滚不动。改用：
-
-- **`watch(() => filteredLogs.value.length, fn, { flush: 'post' })`** —— 由 Vue 保证回调发生在 DOM patch 之后
-- **`requestAnimationFrame`** —— 再嵌一帧等浏览器完成 layout，再赋 `scrollTop`
-- **监听 `filteredLogs` 而非 `logs`** —— 让"只看错误"切换时也能正确跟随
-- **滚动从 `addLog` 中剥离**，addLog 只管数据
-
-### 6.5 踩坑：scrollIntoView 不能用于此场景
-
-曾尝试在日志末尾加哨兵 `<div ref="logEndAnchor" />` + `scrollIntoView({ block: 'end' })`。结果在移动端布局下（`.batch-daily-tasks { overflow-y: auto }`）外层页面也是可滚动祖先，`scrollIntoView` 默认会把所有可滚动祖先一起滚到目标可见 → 整个页面被一起拽到最下方，日志区"突破边界"。
-
-**结论**：`scrollIntoView` 不可用，必须直接对日志容器赋 `scrollTop`，作用域被严格限制在容器自身。
-
-### 6.6 最终方案：MutationObserver
-
-`watch(filteredLogs.length, ..., { flush: 'post' })` + `rAF` 实测在 burst push 场景下仍偶发失效（截图：40 条日志只显示前 16 条，`scrollTop` 一直是 0）。
-
-**根因猜测**：Vue 的响应式调度与 naive-ui / n-progress 等组件的内部更新有微妙的时序竞争，`flush:'post'` 之后仍可能有后续 DOM 变更导致最终 `scrollTop` 设置失效。
-
-**最终采用 DOM 层面的 `MutationObserver`**：
-
-```js
-let logMutationObserver = null;
-onMounted(() => {
-  if (!logContainer.value) return;
-  logMutationObserver = new MutationObserver(scrollLogToBottom);
-  logMutationObserver.observe(logContainer.value, { childList: true, subtree: false });
-  scrollLogToBottom(); // keep-alive 复活时初次同步
-});
-onBeforeUnmount(() => logMutationObserver?.disconnect());
-```
-
-**为什么更可靠**：
-- MO 直接观察 DOM 突变，不依赖 Vue 响应式调度
-- `childList: true` 仅观察子节点增删，每条日志一个 `<div>`，触发精确
-- 回调内 `requestAnimationFrame` + 一个 raf-id 节流，合并同一帧内多次触发，且只在浏览器完成 layout 后才读 `scrollHeight`
-- `scrollTop` 直接赋值，不连带滚动外层页面（避免 §6.5 的坑）
-- `onBeforeUnmount` 释放 observer + 取消挂起的 rAF，防止内存泄漏
-
-**关注点分离后的最终结构**：
-- `addLog`：仅 push + 限长，不再触碰 DOM
-- `MutationObserver`：DOM 增删 → 触发滚动
-- `watch(autoScrollLog)`：用户重新勾选"自动滚动"时立刻补一次滚动（这事件 MO 看不到）
+| 日期 | 提交 | 变更摘要 |
+|---|---|---|
 | 2026-05-06 | `f0bc2da` + `0a15ab4` | cherry-pick GitHuber20th:Gacha 集成每日免费扭蛋 |
 | 2026-05-05 | `cff1b1d` | 修复长任务误判漏执行 + 自动刷新支持 cron |
