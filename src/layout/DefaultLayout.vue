@@ -199,34 +199,16 @@ import {
   Layers,
 } from "@vicons/ionicons5";
 
-import { useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
 import { ref } from 'vue'
 import { isNowInLegionWarTime } from '@/utils/clubBattleUtils'
 
 const tokenStore = useTokenStore();
-const router = useRouter();
-const message = useMessage();
 
 const isMobileMenuOpen = ref(false);
 
-const userMenuOptions = [
-  {
-    label: "清除所有Token并退出",
-    key: "logout",
-  },
-];
+const userMenuOptions = [];
 
-// 方法
-const handleUserAction = async (key) => {
-  switch (key) {
-    case "logout":
-      await tokenStore.clearAllTokens();
-      message.success("已清除所有Token");
-      router.push("/tokens");
-      break;
-  }
-};
+const handleUserAction = () => {};
 </script>
 
 <style scoped lang="scss">
