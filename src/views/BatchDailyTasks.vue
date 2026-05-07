@@ -694,6 +694,7 @@
               <span class="time">{{ log.time }}</span>
               <span class="message">{{ log.message }}</span>
             </div>
+            <div ref="logBottomAnchor" class="log-bottom-anchor" />
           </div>
         </n-card>
       </div>
@@ -4620,6 +4621,7 @@ const handleTokenRefreshWaiting = (data) => {
 
 // Debug: Log initial state when component mounts
 onMounted(() => {
+  document.addEventListener("visibilitychange", handleVisibilityLogScroll);
   // 加载执行历史
   loadTaskExecutionHistory();
   // 清理过期的漏执行记录
@@ -4633,6 +4635,8 @@ onMounted(() => {
 
 // Cleanup countdown interval on unmount
 onBeforeUnmount(() => {
+  document.removeEventListener("visibilitychange", handleVisibilityLogScroll);
+
   if (countdownInterval) {
     clearInterval(countdownInterval);
     countdownInterval = null;
@@ -5582,6 +5586,7 @@ const currentRunningTokenId = ref(null);
 const currentProgress = ref(0);
 const logs = ref([]);
 const logContainer = ref(null);
+const logBottomAnchor = ref(null);
 const autoScrollLog = ref(true);
 const filterErrorsOnly = ref(false);
 const errorCount = computed(() => {
@@ -5604,13 +5609,28 @@ const scrollLogToBottom = () => {
   if (!autoScrollLog.value) return;
 
   nextTick(() => {
-    requestAnimationFrame(() => {
+    const scroll = () => {
       const container = logContainer.value;
       if (!container || !autoScrollLog.value) return;
 
       container.scrollTop = container.scrollHeight;
-    });
+      logBottomAnchor.value?.scrollIntoView({
+        block: "end",
+        inline: "nearest",
+      });
+      container.scrollTop = container.scrollHeight;
+    };
+
+    requestAnimationFrame(scroll);
+    setTimeout(scroll, 0);
+    setTimeout(scroll, 50);
   });
+};
+
+const handleVisibilityLogScroll = () => {
+  if (!document.hidden) {
+    scrollLogToBottom();
+  }
 };
 
 // Selection logic
@@ -6297,8 +6317,11 @@ const stopBatch = () => {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: calc(100vh - 104px);
+  max-height: calc(100vh - 104px);
   min-height: 0;
+  position: sticky;
+  top: 20px;
 }
 
 .page-header {
@@ -6318,6 +6341,7 @@ const stopBatch = () => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 .custom-card-header {
@@ -6390,11 +6414,16 @@ const stopBatch = () => {
 }
 
 .log-card :deep(.n-card__content) {
-  flex: 1;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  height: 0;
   min-height: 0;
+}
+
+.log-card :deep(.n-card-header) {
+  flex: 0 0 auto;
 }
 
 .log-header-controls {
@@ -6405,13 +6434,35 @@ const stopBatch = () => {
 
 .log-container {
   flex: 1 1 0;
-  overflow-y: auto;
+  height: 0;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   background: #f5f5f5;
   padding: 10px;
   border-radius: 4px;
   margin-top: 10px;
   font-family: monospace;
   min-height: 0;
+}
+
+.log-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.log-container::-webkit-scrollbar-track {
+  background: #e8e8e8;
+  border-radius: 4px;
+}
+
+.log-container::-webkit-scrollbar-thumb {
+  background: #b8b8b8;
+  border-radius: 4px;
+}
+
+.log-bottom-anchor {
+  width: 100%;
+  height: 1px;
 }
 
 .log-item {
@@ -6515,7 +6566,10 @@ const stopBatch = () => {
   .right-column {
     width: 100%;
     height: auto;
+    max-height: none;
     flex-shrink: 0;
+    position: static;
+    top: auto;
   }
 
   .log-container {
@@ -6547,8 +6601,11 @@ const stopBatch = () => {
 
   .right-column {
     height: auto;
+    max-height: none;
     width: 100%;
     flex: none;
+    position: static;
+    top: auto;
   }
 
   .page-header {
