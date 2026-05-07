@@ -6418,7 +6418,6 @@ const stopBatch = () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  height: 0;
   min-height: 0;
 }
 
@@ -6434,7 +6433,6 @@ const stopBatch = () => {
 
 .log-container {
   flex: 1 1 0;
-  height: 0;
   overflow-y: scroll;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -6572,9 +6570,21 @@ const stopBatch = () => {
     top: auto;
   }
 
+  .log-card {
+    height: auto;
+  }
+
+  .log-card :deep(.n-card__content) {
+    flex: none;
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
   .log-container {
     height: 300px;
     min-height: 300px;
+    flex: none;
   }
 }
 
@@ -6627,6 +6637,7 @@ const stopBatch = () => {
     flex: none !important;
     overflow: visible !important;
     display: block !important;
+    height: auto !important;
   }
 
   .log-container {
