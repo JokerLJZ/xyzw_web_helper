@@ -5600,6 +5600,19 @@ const currentRunningTokenName = computed(() => {
   return t ? t.name : "";
 });
 
+const scrollLogToBottom = () => {
+  if (!autoScrollLog.value) return;
+
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      const container = logContainer.value;
+      if (!container || !autoScrollLog.value) return;
+
+      container.scrollTop = container.scrollHeight;
+    });
+  });
+};
+
 // Selection logic
 const isAllSelected = computed(
   () =>
@@ -5815,42 +5828,20 @@ const addLog = (log) => {
     logs.value = logs.value.slice(-maxLogEntries);
   }
 
-  // 尝试DOM操作，但不依赖nextTick确保日志显示
-  // 在后台运行时，浏览器可能会限制DOM操作
-  try {
-    if (logContainer.value && autoScrollLog.value) {
-      // 直接尝试滚动，不使用nextTick
-      logContainer.value.scrollTop = logContainer.value.scrollHeight;
-    }
-  } catch (error) {
-    // 忽略DOM操作错误，确保日志数据仍然被记录
-    console.warn("Failed to scroll log container:", error);
-  }
-
-  // 同时使用nextTick作为后备，确保在页面回到前台时能正确滚动
-  nextTick(() => {
-    try {
-      if (logContainer.value && autoScrollLog.value) {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight;
-      }
-    } catch (error) {
-      // 忽略错误
-    }
-  });
+  scrollLogToBottom();
 };
 
 watch(autoScrollLog, (newValue) => {
-  if (newValue && logContainer.value) {
-    nextTick(() => {
-      try {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight;
-      } catch (error) {
-        // 忽略DOM操作错误
-        console.warn("Failed to scroll log container:", error);
-      }
-    });
-  }
+  if (newValue) scrollLogToBottom();
 });
+
+watch(
+  [() => filteredLogs.value.length, filterErrorsOnly],
+  () => {
+    scrollLogToBottom();
+  },
+  { flush: "post" },
+);
 
 const copyLogs = () => {
   if (logs.value.length === 0) {
@@ -6279,9 +6270,10 @@ const stopBatch = () => {
 <style scoped>
 .batch-daily-tasks {
   padding: 20px;
-  height: 100vh;
+  height: calc(100vh - 64px);
   box-sizing: border-box;
   overflow: hidden;
+  min-height: 0;
 }
 
 .main-layout {
@@ -6289,12 +6281,14 @@ const stopBatch = () => {
   gap: 20px;
   height: 100%;
   overflow: hidden;
+  min-height: 0;
 }
 
 .left-column {
   flex: 1;
   overflow-y: auto;
   min-width: 0;
+  min-height: 0;
   padding-right: 8px;
 }
 
@@ -6303,7 +6297,8 @@ const stopBatch = () => {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  height: 700px;
+  height: 100%;
+  min-height: 0;
 }
 
 .page-header {
@@ -6322,6 +6317,7 @@ const stopBatch = () => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .custom-card-header {
@@ -6398,6 +6394,7 @@ const stopBatch = () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .log-header-controls {
@@ -6407,14 +6404,14 @@ const stopBatch = () => {
 }
 
 .log-container {
-  flex: 1;
+  flex: 1 1 0;
   overflow-y: auto;
   background: #f5f5f5;
   padding: 10px;
   border-radius: 4px;
   margin-top: 10px;
   font-family: monospace;
-  min-height: 200px;
+  min-height: 0;
 }
 
 .log-item {
