@@ -684,23 +684,23 @@
             :indicator-placement="'inside'"
             processing
           />
-          <n-scrollbar
+          <div
             class="log-container"
             ref="logContainer"
-            trigger="none"
-            :content-style="{ padding: '10px' }"
             @wheel.stop
           >
-            <div
-              v-for="(log, index) in filteredLogs"
-              :key="index"
-              class="log-item"
-              :class="log.type"
-            >
-              <span class="time">{{ log.time }}</span>
-              <span class="message">{{ log.message }}</span>
+            <div class="log-content">
+              <div
+                v-for="(log, index) in filteredLogs"
+                :key="index"
+                class="log-item"
+                :class="log.type"
+              >
+                <span class="time">{{ log.time }}</span>
+                <span class="message">{{ log.message }}</span>
+              </div>
             </div>
-          </n-scrollbar>
+          </div>
         </n-card>
       </div>
     </div>
@@ -5614,13 +5614,10 @@ const scrollLogToBottom = () => {
 
   nextTick(() => {
     const scroll = () => {
-      const scrollbar = logContainer.value;
-      if (!scrollbar || !autoScrollLog.value) return;
+      const container = logContainer.value;
+      if (!container || !autoScrollLog.value) return;
 
-      scrollbar.scrollTo?.({
-        top: Number.MAX_SAFE_INTEGER,
-        behavior: "auto",
-      });
+      container.scrollTop = container.scrollHeight;
     };
 
     requestAnimationFrame(scroll);
@@ -6415,12 +6412,14 @@ const stopBatch = () => {
   border-bottom: none;
 }
 
-.log-card :deep(.n-card__content) {
+.log-card :deep(.n-card-content) {
   flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  row-gap: 10px;
   overflow: hidden;
   min-height: 0;
+  height: 100%;
 }
 
 .log-card :deep(.n-card-header) {
@@ -6434,26 +6433,42 @@ const stopBatch = () => {
 }
 
 .log-container {
-  flex: 1 1 0;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: #8f96a3 #e8e8e8;
   background: #f5f5f5;
   border-radius: 4px;
-  margin-top: 10px;
   font-family: monospace;
-  min-height: 0;
 }
 
-.log-container :deep(.n-scrollbar-container) {
-  overscroll-behavior: contain;
+.log-container::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
 }
 
-.log-container :deep(.n-scrollbar-rail) {
-  background: #e8e8e8 !important;
-  opacity: 1 !important;
+.log-container::-webkit-scrollbar-track {
+  background: #e8e8e8;
+  border-radius: 6px;
 }
 
-.log-container :deep(.n-scrollbar-rail__scrollbar) {
-  background-color: #b8b8b8 !important;
-  width: 8px !important;
+.log-container::-webkit-scrollbar-thumb {
+  background: #8f96a3;
+  border: 2px solid #e8e8e8;
+  border-radius: 6px;
+}
+
+.log-container::-webkit-scrollbar-thumb:hover {
+  background: #6f7785;
+}
+
+.log-content {
+  padding: 10px;
 }
 
 .log-item {
@@ -6567,15 +6582,16 @@ const stopBatch = () => {
     height: auto;
   }
 
-  .log-card :deep(.n-card__content) {
+  .log-card :deep(.n-card-content) {
     flex: none;
-    display: block;
+    display: grid;
+    grid-template-rows: auto 300px;
     height: auto;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .log-container {
-    height: 300px;
+    height: 100%;
     min-height: 300px;
     flex: none;
   }
@@ -6626,15 +6642,16 @@ const stopBatch = () => {
     height: auto !important;
   }
 
-  .log-card :deep(.n-card__content) {
+  .log-card :deep(.n-card-content) {
     flex: none !important;
-    overflow: visible !important;
-    display: block !important;
+    overflow: hidden !important;
+    display: grid !important;
+    grid-template-rows: auto 300px !important;
     height: auto !important;
   }
 
   .log-container {
-    height: 300px;
+    height: 100%;
     min-height: 300px;
     flex: none !important;
   }
