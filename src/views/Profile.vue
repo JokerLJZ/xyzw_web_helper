@@ -101,9 +101,6 @@
       <h2>Token管理</h2>
       <TokenManager />
 
-      <h2>数据备份</h2>
-      <BackupSettingsPanel />
-
       <h2>账户安全</h2>
       <a-card>
         <div class="security-items">
@@ -121,6 +118,14 @@
               <p>查看最近的登录记录</p>
             </div>
             <n-button @click="viewLoginHistory"> 查看 </n-button>
+          </div>
+
+          <div class="security-item">
+            <div class="security-info">
+              <h3>数据导出</h3>
+              <p>导出您的所有数据</p>
+            </div>
+            <n-button @click="exportData"> 导出 </n-button>
           </div>
 
           <div class="security-item danger">
@@ -264,6 +269,10 @@ const setupTwoFactor = () => {
 
 const viewLoginHistory = () => {
   message.info("登录历史查看功能开发中...");
+};
+
+const exportData = () => {
+  message.info("数据导出功能开发中...");
 };
 
 const deleteAccount = () => {

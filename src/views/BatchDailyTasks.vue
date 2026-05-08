@@ -2904,10 +2904,6 @@ import {
 import { useTokenStore, gameTokens, tokenGroups } from "@/stores/tokenStore";
 import { $emit } from "@/stores/events/index.ts";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
-import {
-  buildSnapshot,
-  applySnapshot,
-} from "@/utils/backup/snapshotBuilder";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
 import { useMessage } from "naive-ui";
 import { Settings } from "@vicons/ionicons5";
@@ -4119,22 +4115,84 @@ const deselectAllTasks = () => {
 // Import/Export Config
 // ======================
 
-// Export all tokens and scheduled tasks configuration（统一走 buildSnapshot）
+// Export all tokens and scheduled tasks configuration
 const exportConfig = () => {
   try {
-    const snap = buildSnapshot("manual");
+    // Get all valid token IDs
+    const validTokenIds = new Set(tokens.value.map((t) => t.id));
 
-    // 导出时清理掉无效的 selectedTokens 引用，与历史行为一致
-    const validTokenIds = new Set(snap.tokens.map((t) => t.id));
-    snap.scheduledTasks = (snap.scheduledTasks || [])
+    // Filter scheduled tasks: remove invalid token IDs from selectedTokens
+    const filteredScheduledTasks = scheduledTasks.value
       .map((task) => ({
         ...task,
         selectedTokens:
-          task?.selectedTokens?.filter((id) => validTokenIds.has(id)) || [],
+          task.selectedTokens?.filter((tokenId) =>
+            validTokenIds.has(tokenId),
+          ) || [],
       }))
-      .filter((task) => task.selectedTokens.length > 0);
+      .filter((task) => task.selectedTokens.length > 0); // Remove tasks with no valid tokens
 
-    const blob = new Blob([JSON.stringify(snap, null, 2)], {
+    // Gather token settings
+    const tokenSettings = [];
+    tokens.value.forEach((token) => {
+      const settings = localStorage.getItem(`daily-settings:${token.id}`);
+      if (settings) {
+        try {
+          tokenSettings.push({
+            tokenId: token.id,
+            settings: JSON.parse(settings),
+          });
+        } catch (e) {
+          console.warn(`Failed to parse settings for token ${token.id}`, e);
+        }
+      }
+    });
+
+    const exportData = {
+      version: "1.1",
+      exportTime: new Date().toISOString(),
+      tokens: tokens.value.map((t) => ({
+        id: t.id,
+        name: t.name,
+        token: t.token,
+        server: t.server,
+        wsUrl: t.wsUrl,
+        remark: t.remark,
+        importMethod: t.importMethod,
+        sourceUrl: t.sourceUrl,
+        upgradedToPermanent: true,
+        upgradedAt: t.upgradedAt,
+        updatedAt: t.updatedAt,
+      })),
+      scheduledTasks: filteredScheduledTasks,
+      batchSettings: {
+        boxCount: batchSettings.boxCount,
+        fishCount: batchSettings.fishCount,
+        recruitCount: batchSettings.recruitCount,
+        defaultBoxType: batchSettings.defaultBoxType,
+        defaultFishType: batchSettings.defaultFishType,
+        carMinColor: batchSettings.carMinColor,
+        commandDelay: batchSettings.commandDelay,
+        taskDelay: batchSettings.taskDelay,
+        actionDelay: batchSettings.actionDelay,
+        battleDelay: batchSettings.battleDelay,
+        refreshDelay: batchSettings.refreshDelay,
+        longDelay: batchSettings.longDelay,
+        maxActive: batchSettings.maxActive,
+        tokenListColumns: batchSettings.tokenListColumns,
+        useGoldRefreshFallback: batchSettings.useGoldRefreshFallback,
+        smartDepartureGoldThreshold: batchSettings.smartDepartureGoldThreshold,
+        smartDepartureRecruitThreshold:
+          batchSettings.smartDepartureRecruitThreshold,
+        smartDepartureJadeThreshold: batchSettings.smartDepartureJadeThreshold,
+        smartDepartureTicketThreshold:
+          batchSettings.smartDepartureTicketThreshold,
+        smartDepartureMatchAll: batchSettings.smartDepartureMatchAll,
+      },
+      tokenSettings: tokenSettings,
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -4147,7 +4205,7 @@ const exportConfig = () => {
     URL.revokeObjectURL(url);
 
     message.success(
-      `导出成功: ${snap.tokens.length} 个账号, ${snap.scheduledTasks.length} 个定时任务`,
+      `导出成功: ${exportData.tokens.length} 个账号, ${exportData.scheduledTasks.length} 个定时任务`,
     );
   } catch (error) {
     console.error("Export failed:", error);
@@ -4155,43 +4213,91 @@ const exportConfig = () => {
   }
 };
 
-// Import tokens and scheduled tasks configuration（统一走 applySnapshot，兼容 v1.1 / v1.2）
+// Import tokens and scheduled tasks configuration
 const importConfig = async ({ file }) => {
   try {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const importData = JSON.parse(e.target.result);
-        if (!importData?.tokens && !importData?.scheduledTasks) {
+
+        // Validate structure
+        if (
+          !importData.version ||
+          !importData.tokens ||
+          !importData.scheduledTasks
+        ) {
           message.error("无效的配置文件格式");
           return;
         }
-        const result = applySnapshot(importData, { tokenStrategy: "merge" });
-        // applySnapshot 走 localStorage.setItem，同标签页内的 useLocalStorage / reactive
-        // 不会自动同步，这里手动把 in-memory ref 与 LS 对齐，避免必须刷新页面。
-        try {
-          gameTokens.value = JSON.parse(
-            localStorage.getItem("gameTokens") || "[]",
-          );
-        } catch {
-          /* ignore */
+
+        let importedTokens = 0;
+        let importedTasks = 0;
+
+        // Import tokens
+        if (Array.isArray(importData.tokens)) {
+          importData.tokens.forEach((token) => {
+            // Check if token already exists
+            const exists = gameTokens.value.some(
+              (t) => t.token === token.token || t.id === token.id,
+            );
+            if (!exists && token.token) {
+              // Add new token directly to gameTokens (useLocalStorage)
+              gameTokens.value.push({
+                id:
+                  token.id ||
+                  "token_" + Date.now() + Math.random().toString(36).slice(2),
+                name: token.name || "",
+                token: token.token,
+                server: token.server || "",
+                wsUrl: token.wsUrl || null,
+                remark: token.remark || "",
+                importMethod: "import",
+                sourceUrl: token.sourceUrl || null,
+                upgradedToPermanent: true,
+                upgradedAt: token.upgradedAt || null,
+                updatedAt: token.updatedAt || new Date().toISOString(),
+                createdAt: new Date().toISOString(),
+                lastUsed: new Date().toISOString(),
+              });
+              importedTokens++;
+            }
+          });
         }
+
+        // Import scheduled tasks
+        if (Array.isArray(importData.scheduledTasks)) {
+          importData.scheduledTasks.forEach((task) => {
+            // Check if task already exists
+            const exists = scheduledTasks.value.some((t) => t.id === task.id);
+            if (!exists && task.id) {
+              scheduledTasks.value.push(task);
+              importedTasks++;
+            }
+          });
+          saveScheduledTasks();
+        }
+
+        // Import batch settings if provided
         if (importData.batchSettings) {
           Object.assign(batchSettings, importData.batchSettings);
           saveBatchSettings();
         }
-        if (Array.isArray(importData.scheduledTasks)) {
-          const seen = new Set(scheduledTasks.value.map((t) => t.id));
-          for (const t of importData.scheduledTasks) {
-            if (t?.id && !seen.has(t.id)) {
-              scheduledTasks.value.push(t);
-              seen.add(t.id);
+
+        // Import token settings
+        if (Array.isArray(importData.tokenSettings)) {
+          importData.tokenSettings.forEach((item) => {
+            if (item.tokenId && item.settings) {
+              localStorage.setItem(
+                `daily-settings:${item.tokenId}`,
+                JSON.stringify(item.settings),
+              );
             }
-          }
-          saveScheduledTasks();
+          });
         }
+
         message.success(
-          `导入成功: ${result.importedTokens} 个新账号, ${result.importedScheduledTasks} 个新定时任务`,
+          `导入成功: ${importedTokens} 个新账号, ${importedTasks} 个新定时任务`,
         );
       } catch (parseError) {
         console.error("Parse error:", parseError);

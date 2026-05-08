@@ -53,8 +53,3 @@ applyTheme();
 
 // 挂载应用
 app.mount("#app");
-
-// 自动备份（WebDAV）：在挂载后启动定时器
-import("./utils/backup/backupManager")
-  .then(({ bootstrap }) => bootstrap())
-  .catch((err) => console.warn("[backup] bootstrap failed", err));
