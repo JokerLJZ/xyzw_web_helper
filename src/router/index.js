@@ -100,6 +100,15 @@ const my_routes = [
           requiresToken: true
         }
       },
+      {
+        path: 'data-backup',
+        name: 'DataBackup',
+        component: () => import('@/views/DataBackup.vue'),
+        meta: {
+          title: '数据备份',
+          requiresToken: false
+        }
+      },
       // 增加自动路由引用
       ...generatedRoutes,
     ]

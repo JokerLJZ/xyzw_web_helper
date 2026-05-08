@@ -66,6 +66,16 @@
             </n-icon>
             <span>实时盐场</span>
           </router-link>
+          <router-link
+            to="/admin/data-backup"
+            class="nav-item"
+            active-class="active"
+          >
+            <n-icon>
+              <CloudUploadSharp />
+            </n-icon>
+            <span>数据备份</span>
+          </router-link>
         </div>
 
         <div class="nav-user">
@@ -163,6 +173,16 @@
             <span>实时盐场</span>
           </router-link>
         <router-link
+          to="/admin/data-backup"
+          class="drawer-item"
+          @click="isMobileMenuOpen = false"
+        >
+          <n-icon>
+            <CloudUploadSharp />
+          </n-icon>
+          <span>数据备份</span>
+        </router-link>
+        <router-link
           to="/admin/profile"
           class="drawer-item"
           @click="isMobileMenuOpen = false"
@@ -197,6 +217,7 @@ import {
   LockClosedSharp,LockOpen,
   Menu,
   Layers,
+  CloudUploadSharp,
 } from "@vicons/ionicons5";
 
 import { ref } from 'vue'
