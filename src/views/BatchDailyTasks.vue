@@ -601,6 +601,20 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchLegacyBeginHangUp"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  批量开始探索功法
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchLegacyClaimChargeReward"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  批量领取特权功法
+                </n-button>
+                <n-button
+                  size="small"
                   @click="showLegacyGiftModal = true"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -3643,7 +3657,12 @@ const taskGroupDefinitions = [
   {
     name: "legacy",
     label: "功法",
-    tasks: ["batchLegacyClaim", "batchLegacyGiftSendEnhanced"],
+    tasks: [
+      "batchLegacyClaim",
+      "batchLegacyBeginHangUp",
+      "batchLegacyClaimChargeReward",
+      "batchLegacyGiftSendEnhanced",
+    ],
   },
   {
     name: "monthly",
@@ -6030,7 +6049,12 @@ const {
 } = tasksStore;
 
 const tasksLegacy = createTasksLegacy(createTaskDeps());
-const { batchLegacyClaim, batchLegacyGiftSendEnhanced } = tasksLegacy;
+const {
+  batchLegacyClaim,
+  batchLegacyBeginHangUp,
+  batchLegacyClaimChargeReward,
+  batchLegacyGiftSendEnhanced,
+} = tasksLegacy;
 
 const startBatch = async () => {
   if (selectedTokens.value.length === 0) return;

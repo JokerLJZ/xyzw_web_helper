@@ -1,6 +1,6 @@
 /**
  * 功法类任务
- * 包含: batchLegacyClaim, batchLegacyGiftSendEnhanced
+ * 包含: batchLegacyClaim, batchLegacyBeginHangUp, batchLegacyClaimChargeReward, batchLegacyGiftSendEnhanced
  */
 
 /**
@@ -29,6 +29,23 @@ export function createTasksLegacy(deps) {
     giftQuantity,
     delayConfig,
   } = deps;
+
+  const isLegacyHangUpInProgressError = (error) => {
+    const messageText = String(error?.message || error || "").toLowerCase();
+    if (messageText.includes("200160") || messageText.includes("模块未开启")) {
+      return false;
+    }
+    return ["已在", "已开始", "正在", "进行中", "already"].some((keyword) =>
+      messageText.includes(keyword.toLowerCase()),
+    );
+  };
+
+  const isAlreadyClaimedError = (error) => {
+    const messageText = String(error?.message || error || "").toLowerCase();
+    return ["已领取", "已经领取", "已领", "already", "claimed"].some((keyword) =>
+      messageText.includes(keyword.toLowerCase()),
+    );
+  };
 
   /**
    * 批量领取功法残卷
@@ -91,6 +108,193 @@ export function createTasksLegacy(deps) {
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("批量领取功法残卷结束");
+  };
+
+  /**
+   * 批量开始探索功法
+   */
+  const batchLegacyBeginHangUp = async () => {
+    if (selectedTokens.value.length === 0) return;
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    let successCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      tokenStatus.value[tokenId] = "running";
+
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始探索功法: ${tokenName} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        const resp = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "legacy_beginhangup",
+          {},
+          5000,
+        );
+        const beginTime = resp?.roleLegacy?.hangUpBeginTime;
+        const beginTimeText = beginTime
+          ? new Date(beginTime).toLocaleString()
+          : "已返回成功响应";
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${tokenName} 开始探索功法成功 (${beginTimeText}) ===`,
+          type: "success",
+        });
+        tokenStatus.value[tokenId] = "completed";
+        successCount++;
+      } catch (error) {
+        console.error(error);
+        if (isLegacyHangUpInProgressError(error)) {
+          tokenStatus.value[tokenId] = "completed";
+          skippedCount++;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `=== ${tokenName} 已在探索功法中，跳过 ===`,
+            type: "warning",
+          });
+          return;
+        }
+
+        tokenStatus.value[tokenId] = "failed";
+        failedCount++;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${tokenName} 开始探索功法失败: ${error.message || "未知错误"} ===`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 批量开始探索功法完成: 成功 ${successCount} 个，跳过 ${skippedCount} 个，失败 ${failedCount} 个 ===`,
+      type: failedCount > 0 ? "warning" : "success",
+    });
+    message.success(
+      `批量开始探索功法结束，成功 ${successCount} 个，跳过 ${skippedCount} 个，失败 ${failedCount} 个`,
+    );
+  };
+
+  /**
+   * 批量领取特权功法
+   */
+  const batchLegacyClaimChargeReward = async () => {
+    if (selectedTokens.value.length === 0) return;
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    let successCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      tokenStatus.value[tokenId] = "running";
+
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始领取特权功法: ${tokenName} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        const resp = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "legacy_claimchargereward",
+          { id: 2 },
+          5000,
+        );
+        const reward = Array.isArray(resp?.reward) ? resp.reward[0] : null;
+        const rewardValue = reward?.value ?? 0;
+        const totalFragments = resp?.role?.items?.[37007]?.quantity;
+        const totalText =
+          totalFragments !== undefined ? `，当前共有${totalFragments}个` : "";
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${tokenName} 领取特权功法成功，获得功法残卷${rewardValue}个${totalText} ===`,
+          type: "success",
+        });
+        tokenStatus.value[tokenId] = "completed";
+        successCount++;
+      } catch (error) {
+        console.error(error);
+        if (isAlreadyClaimedError(error)) {
+          tokenStatus.value[tokenId] = "completed";
+          skippedCount++;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `=== ${tokenName} 特权功法已领取，跳过 ===`,
+            type: "warning",
+          });
+          return;
+        }
+
+        tokenStatus.value[tokenId] = "failed";
+        failedCount++;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${tokenName} 领取特权功法失败: ${error.message || "未知错误"} ===`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 批量领取特权功法完成: 成功 ${successCount} 个，跳过 ${skippedCount} 个，失败 ${failedCount} 个 ===`,
+      type: failedCount > 0 ? "warning" : "success",
+    });
+    message.success(
+      `批量领取特权功法结束，成功 ${successCount} 个，跳过 ${skippedCount} 个，失败 ${failedCount} 个`,
+    );
   };
 
   /**
@@ -342,6 +546,8 @@ export function createTasksLegacy(deps) {
 
   return {
     batchLegacyClaim,
+    batchLegacyBeginHangUp,
+    batchLegacyClaimChargeReward,
     batchLegacyGiftSendEnhanced,
   };
 }

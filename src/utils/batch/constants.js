@@ -58,6 +58,8 @@ export const availableTasks = [
   { label: "一键黑市采购", value: "store_purchase" },
   { label: "免费领取珍宝阁", value: "collection_claimfreereward" },
   { label: "批量领取功法残卷", value: "batchLegacyClaim" },
+  { label: "批量开始探索功法", value: "batchLegacyBeginHangUp" },
+  { label: "批量领取特权功法", value: "batchLegacyClaimChargeReward" },
   { label: "批量赠送功法残卷", value: "batchLegacyGiftSendEnhanced" },
   { label: "一键使用怪异塔道具", value: "batchUseItems" },
   { label: "一键怪异塔合成", value: "batchMergeItems" },
