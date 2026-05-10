@@ -2417,7 +2417,12 @@
                   align-items: center;
                 "
               >
-                <label class="setting-label">漏执行自动补做</label>
+                <div class="setting-label-block">
+                  <label class="setting-label">漏执行自动补做</label>
+                  <span class="setting-description">
+                    关闭后不会检查漏执行任务，也不会发送漏执行通知或自动补做。
+                  </span>
+                </div>
                 <n-switch v-model:value="batchSettings.enableMissedTaskReExecution" />
               </div>
               <div
@@ -3834,6 +3839,10 @@ const cleanupStaleMissedKeys = () => {
 
 // 检测漏执行的定时任务
 const checkMissedExecutions = async () => {
+  if (!batchSettings.enableMissedTaskReExecution) {
+    return;
+  }
+
   const now = new Date();
 
   for (const task of scheduledTasks.value) {
@@ -3877,9 +3886,7 @@ const checkMissedExecutions = async () => {
 
     const canReExecuteByStale =
       timeSinceExpected <= MISSED_EXECUTION_MAX_STALE_MS;
-    const autoReExecutionEnabled =
-      batchSettings.enableMissedTaskReExecution !== false;
-    const willReExecute = canReExecuteByStale && autoReExecutionEnabled;
+    const willReExecute = canReExecuteByStale;
 
     // 发送漏执行通知
     const { title, content } = formatMissedExecutionNotification(task, lastExpectedTime, now, willReExecute);
@@ -3907,12 +3914,6 @@ const checkMissedExecutions = async () => {
       saveTaskExecutionHistory();
 
       await executeScheduledTask(task);
-    } else if (!autoReExecutionEnabled) {
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `=== 定时任务 ${task.name} 漏执行自动补做已关闭，仅发送通知 ===`,
-        type: "warning",
-      });
     } else {
       addLog({
         time: new Date().toLocaleTimeString(),
@@ -4372,8 +4373,10 @@ const healthCheck = () => {
 
   // 自动刷新调度已迁移至 10s scheduler（保证 cron 分钟级精度）
 
-  // 检测漏执行的定时任务
-  checkMissedExecutions();
+  // 仅在漏执行自动补做开启时检测漏执行的定时任务
+  if (batchSettings.enableMissedTaskReExecution) {
+    checkMissedExecutions();
+  }
 };
 
 // 上一次记录"任务运行中跳过刷新"日志的分钟 key，用于节流
@@ -6436,6 +6439,18 @@ const stopBatch = () => {
 .setting-label {
   font-size: 14px;
   color: #666;
+}
+
+.setting-label-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-description {
+  color: #999;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .setting-switches {

@@ -149,12 +149,15 @@
           description="暂无版本"
         />
         <n-list v-else bordered>
-          <n-list-item v-for="(rev, idx) in revisions" :key="rev.version">
+          <n-list-item
+            v-for="{ revision: rev, index: revIndex } in visibleRevisions"
+            :key="rev.version"
+          >
             <n-thing>
               <template #header>
                 <span>{{ formatTime(rev.committed_at) }}</span>
                 <n-tag
-                  v-if="idx === 0"
+                  v-if="revIndex === 0"
                   type="success"
                   size="tiny"
                   style="margin-left: 8px"
@@ -188,6 +191,37 @@
             </template>
           </n-list-item>
         </n-list>
+        <div
+          v-if="revisions.length > initialRevisionLimit"
+          class="history-actions"
+        >
+          <n-button
+            v-if="!showFullHistory"
+            size="small"
+            text
+            type="primary"
+            @click="showMoreHistory"
+          >
+            查看更多历史版本
+          </n-button>
+          <n-space
+            v-else
+            justify="space-between"
+            align="center"
+            class="history-pager"
+          >
+            <n-button size="small" text @click="collapseHistory">
+              收起历史版本
+            </n-button>
+            <n-pagination
+              v-if="revisions.length > historyPageSize"
+              v-model:page="historyPage"
+              :page-count="historyPageCount"
+              :page-slot="5"
+              size="small"
+            />
+          </n-space>
+        </div>
       </div>
 
       <n-collapse>
@@ -312,6 +346,33 @@ const creating = ref(false);
 const listing = ref(false);
 const listed = ref(false);
 const revisions = ref([]);
+const initialRevisionLimit = 3;
+const historyPageSize = 5;
+const showFullHistory = ref(false);
+const historyPage = ref(1);
+
+const historyPageCount = computed(() =>
+  Math.max(1, Math.ceil(revisions.value.length / historyPageSize)),
+);
+
+const visibleRevisions = computed(() => {
+  if (!showFullHistory.value) {
+    return revisions.value
+      .slice(0, initialRevisionLimit)
+      .map((revision, index) => ({
+        revision,
+        index,
+      }));
+  }
+
+  const start = (historyPage.value - 1) * historyPageSize;
+  return revisions.value
+    .slice(start, start + historyPageSize)
+    .map((revision, offset) => ({
+      revision,
+      index: start + offset,
+    }));
+});
 
 const restoreModalVisible = ref(false);
 const pendingRestoreSha = ref("");
@@ -384,6 +445,8 @@ async function refreshList() {
   listing.value = true;
   try {
     revisions.value = await listRevisions();
+    historyPage.value = 1;
+    showFullHistory.value = false;
     listed.value = true;
   } catch (err) {
     message.error(`版本拉取失败：${err?.message || err}`);
@@ -394,6 +457,16 @@ async function refreshList() {
 
 async function onRefreshList() {
   await refreshList();
+}
+
+function showMoreHistory() {
+  showFullHistory.value = true;
+  historyPage.value = 1;
+}
+
+function collapseHistory() {
+  showFullHistory.value = false;
+  historyPage.value = 1;
 }
 
 function onResume() {
@@ -519,5 +592,11 @@ onMounted(() => {
   margin-left: 4px;
   color: var(--text-color-3, #999);
   font-size: 12px;
+}
+.history-actions {
+  margin-top: 10px;
+}
+.history-pager {
+  width: 100%;
 }
 </style>
