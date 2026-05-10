@@ -97,7 +97,7 @@ const my_routes = [
         component: () => import('@/views/BatchDailyTasks.vue'),
         meta: {
           title: '批量日常',
-          requiresToken: true
+          requiresToken: false
         }
       },
       {
@@ -177,12 +177,12 @@ router.beforeEach((to, from, next) => {
   // if (to.meta.requiresToken  && tokenStore.getWebSocketStatus(tokenStore.selectedToken.id)=="disconnected") {
     if (to.meta.requiresToken  && !tokenStore.hasTokens) {
     next('/tokens')
-  } else if (to.path === '/' && tokenStore.hasTokens) {
+  } else if (to.path === '/') {
     // 首页重定向逻辑
-    if (tokenStore.selectedToken) {
+    if (tokenStore.hasTokens && tokenStore.selectedToken) {
       next('/admin/dashboard')
     } else {
-      next('/tokens')
+      next('/admin/batch-daily-tasks')
     }
   } else {
     next()

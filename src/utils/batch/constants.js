@@ -150,6 +150,7 @@ export const defaultBatchSettings = {
   refreshInterval: 360,
   refreshCronExpression: "",
   refreshMaxStaleHours: 0,
+  enableMissedTaskReExecution: false,
   // 智能发车阈值设置
   smartDepartureGoldThreshold: 0,
   smartDepartureRecruitThreshold: 0,

@@ -10,6 +10,13 @@
             <ThemeToggle />
           </div>
           <h1>游戏Token管理</h1>
+          <n-space class="quick-nav" justify="center">
+            <n-button @click="openshowImportForm">Token导入</n-button>
+            <n-button type="primary" @click="goToDashboard">
+              批量任务
+            </n-button>
+            <n-button @click="goToBackup">数据备份</n-button>
+          </n-space>
         </div>
       </div>
 
@@ -1501,6 +1508,10 @@ const formatTime = (timestamp) => {
 
 const goToDashboard = () => {
   router.push("/admin/batch-daily-tasks");
+};
+
+const goToBackup = () => {
+  router.push("/admin/data-backup");
 };
 
 // 开始任务管理 - 直接跳转到控制台

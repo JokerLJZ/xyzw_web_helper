@@ -51,6 +51,16 @@
             <span>批量日常</span>
           </router-link>
           <router-link
+            to="/admin/data-backup"
+            class="nav-item"
+            active-class="active"
+          >
+            <n-icon>
+              <CloudUploadSharp />
+            </n-icon>
+            <span>数据备份</span>
+          </router-link>
+          <router-link
             to="/admin/message-test"
             class="nav-item"
             active-class="active"
@@ -65,16 +75,6 @@
               <LockOpen />
             </n-icon>
             <span>实时盐场</span>
-          </router-link>
-          <router-link
-            to="/admin/data-backup"
-            class="nav-item"
-            active-class="active"
-          >
-            <n-icon>
-              <CloudUploadSharp />
-            </n-icon>
-            <span>数据备份</span>
           </router-link>
         </div>
 
@@ -157,6 +157,16 @@
           <span>批量日常</span>
         </router-link>
         <router-link
+          to="/admin/data-backup"
+          class="drawer-item"
+          @click="isMobileMenuOpen = false"
+        >
+          <n-icon>
+            <CloudUploadSharp />
+          </n-icon>
+          <span>数据备份</span>
+        </router-link>
+        <router-link
           to="/admin/message-test"
           class="drawer-item"
           @click="isMobileMenuOpen = false"
@@ -172,16 +182,6 @@
             </n-icon>
             <span>实时盐场</span>
           </router-link>
-        <router-link
-          to="/admin/data-backup"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <CloudUploadSharp />
-          </n-icon>
-          <span>数据备份</span>
-        </router-link>
         <router-link
           to="/admin/profile"
           class="drawer-item"

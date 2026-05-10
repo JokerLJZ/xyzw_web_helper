@@ -2417,6 +2417,17 @@
                   align-items: center;
                 "
               >
+                <label class="setting-label">漏执行自动补做</label>
+                <n-switch v-model:value="batchSettings.enableMissedTaskReExecution" />
+              </div>
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: row;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
                 <label class="setting-label">定时刷新页面</label>
                 <n-switch v-model:value="batchSettings.enableRefresh" />
               </div>
@@ -3485,6 +3496,7 @@ const batchSettings = reactive({
   refreshInterval: 360, // 分钟（interval 模式）
   refreshCronExpression: "", // cron 模式表达式
   refreshMaxStaleHours: 0, // 兜底：距上次刷新超过 N 小时强制刷一次；0 关闭
+  enableMissedTaskReExecution: false, // 定时任务漏执行后是否自动补做
   // 推送通知配置
   wxpusherEnabled: false,
   wxpusherAppToken: "",
@@ -3862,7 +3874,11 @@ const checkMissedExecutions = async () => {
     if (localStorage.getItem(missedKey)) continue;
     localStorage.setItem(missedKey, "1");
 
-    const willReExecute = timeSinceExpected <= MISSED_EXECUTION_MAX_STALE_MS;
+    const canReExecuteByStale =
+      timeSinceExpected <= MISSED_EXECUTION_MAX_STALE_MS;
+    const autoReExecutionEnabled =
+      batchSettings.enableMissedTaskReExecution !== false;
+    const willReExecute = canReExecuteByStale && autoReExecutionEnabled;
 
     // 发送漏执行通知
     const { title, content } = formatMissedExecutionNotification(task, lastExpectedTime, now, willReExecute);
@@ -3890,6 +3906,12 @@ const checkMissedExecutions = async () => {
       saveTaskExecutionHistory();
 
       await executeScheduledTask(task);
+    } else if (!autoReExecutionEnabled) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `=== 定时任务 ${task.name} 漏执行自动补做已关闭，仅发送通知 ===`,
+        type: "warning",
+      });
     } else {
       addLog({
         time: new Date().toLocaleTimeString(),

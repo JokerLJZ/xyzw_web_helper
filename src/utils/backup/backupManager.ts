@@ -16,10 +16,16 @@ import type {
 import { GistClient } from "./gistClient";
 import type { GistDetail, GistRevision } from "./gistClient";
 import type { AnyBackupSnapshot } from "./snapshotSchema";
+import {
+  calculateLastExpectedExecutionTime,
+  matchesCronExpression,
+} from "../batch/cronUtils";
 
 export interface BackupConfig {
   enabled: boolean;
+  scheduleType: "interval" | "cron";
   intervalMinutes: number;
+  cronExpression: string;
   token: string;
   gistId: string;
   gistHtmlUrl: string;
@@ -32,7 +38,9 @@ export interface BackupConfig {
 
 const DEFAULT_CONFIG: BackupConfig = {
   enabled: false,
+  scheduleType: "interval",
   intervalMinutes: 30,
+  cronExpression: "",
   token: "",
   gistId: "",
   gistHtmlUrl: "",
@@ -59,6 +67,11 @@ export const isConfigured = computed(() => {
 });
 
 let timer: number | null = null;
+const BACKUP_CRON_LAST_KEY = "lastBackupCronExecutionKey";
+
+function minuteKey(d: Date): string {
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}_${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}`;
+}
 
 function buildClient(): GistClient {
   return new GistClient({
@@ -201,10 +214,28 @@ export function downloadSnapshotJson(snap: AnyBackupSnapshot, filename: string) 
 
 function startTimer(): void {
   stopTimer();
-  const ms = Math.max(5, backupConfig.value.intervalMinutes) * 60 * 1000;
+  const ms =
+    backupConfig.value.scheduleType === "cron"
+      ? 10 * 1000
+      : Math.max(5, backupConfig.value.intervalMinutes) * 60 * 1000;
   timer = window.setInterval(() => {
     if (!backupConfig.value.enabled) return;
     if (isPausedByFailure.value) return;
+    if (backupConfig.value.scheduleType === "cron") {
+      const expression = backupConfig.value.cronExpression;
+      if (!expression) return;
+      const now = new Date();
+      let matched = false;
+      try {
+        matched = matchesCronExpression(expression, now);
+      } catch {
+        return;
+      }
+      if (!matched) return;
+      const key = minuteKey(now);
+      if (localStorage.getItem(BACKUP_CRON_LAST_KEY) === key) return;
+      localStorage.setItem(BACKUP_CRON_LAST_KEY, key);
+    }
     void runBackupNow("auto");
   }, ms);
 }
@@ -219,6 +250,31 @@ function stopTimer(): void {
 function maybeCatchUp(): void {
   if (!backupConfig.value.enabled || !isConfigured.value) return;
   if (isPausedByFailure.value) return;
+
+  if (backupConfig.value.scheduleType === "cron") {
+    if (!backupConfig.value.cronExpression) return;
+    const now = new Date();
+    const lastExpected = calculateLastExpectedExecutionTime(
+      {
+        runType: "cron",
+        cronExpression: backupConfig.value.cronExpression,
+      },
+      now,
+    );
+    if (!lastExpected) return;
+    const last = backupConfig.value.lastRunAt
+      ? Date.parse(backupConfig.value.lastRunAt)
+      : 0;
+    const catchUpWindowMs = 2 * 60 * 60 * 1000;
+    if (
+      last < lastExpected.getTime() &&
+      now.getTime() - lastExpected.getTime() <= catchUpWindowMs
+    ) {
+      void runBackupNow("auto");
+    }
+    return;
+  }
+
   const last = backupConfig.value.lastRunAt
     ? Date.parse(backupConfig.value.lastRunAt)
     : 0;
@@ -243,7 +299,9 @@ export function bootstrap(): void {
   watch(
     () => [
       backupConfig.value.enabled,
+      backupConfig.value.scheduleType,
       backupConfig.value.intervalMinutes,
+      backupConfig.value.cronExpression,
       backupConfig.value.token,
       backupConfig.value.gistId,
     ],

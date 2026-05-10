@@ -45,12 +45,51 @@
             需要先验证 Token 并创建/绑定 Gist
           </span>
         </n-form-item>
-        <n-form-item label="备份间隔">
+        <n-form-item label="备份方式">
+          <n-radio-group
+            v-model:value="config.scheduleType"
+            size="small"
+            @update:value="onScheduleTypeChange"
+          >
+            <n-radio value="interval">固定间隔</n-radio>
+            <n-radio value="cron">自定义时间</n-radio>
+          </n-radio-group>
+        </n-form-item>
+        <n-form-item v-if="config.scheduleType !== 'cron'" label="备份间隔">
           <n-select
             v-model:value="config.intervalMinutes"
             :options="intervalOptions"
             style="width: 200px"
           />
+        </n-form-item>
+        <n-form-item v-else label="Cron 表达式">
+          <div class="cron-field">
+            <n-input
+              v-model:value="config.cronExpression"
+              placeholder="例如 30 3 * * * 表示每天 03:30"
+            />
+            <div v-if="config.cronExpression" class="cron-parser">
+              <n-text
+                v-if="backupCronValidation.valid"
+                type="success"
+                class="cron-validation"
+              >
+                {{ backupCronValidation.message }}
+              </n-text>
+              <n-text v-else type="error" class="cron-validation">
+                {{ backupCronValidation.message }}
+              </n-text>
+              <div
+                v-if="backupCronValidation.valid && backupCronNextRuns.length > 0"
+                class="cron-next-runs"
+              >
+                <div class="cron-next-title">未来5次备份时间</div>
+                <div v-for="(run, index) in backupCronNextRuns" :key="index">
+                  {{ run }}
+                </div>
+              </div>
+            </div>
+          </div>
         </n-form-item>
       </n-form>
 
@@ -210,6 +249,10 @@
 import { computed, onMounted, ref } from "vue";
 import { useMessage, useDialog } from "naive-ui";
 import {
+  calculateNextRuns,
+  validateCronExpression,
+} from "@/utils/batch";
+import {
   backupConfig,
   isConfigured,
   isPausedByFailure,
@@ -237,6 +280,32 @@ const intervalOptions = [
   { label: "60 分钟", value: 60 },
   { label: "120 分钟", value: 120 },
 ];
+
+const defaultBackupCronExpression = "30 3 * * *";
+const backupCronValidation = computed(() => {
+  if (config.value.scheduleType !== "cron") {
+    return { valid: true, message: "" };
+  }
+  if (!config.value.cronExpression) {
+    return { valid: false, message: "请输入 Cron 表达式" };
+  }
+  return validateCronExpression(config.value.cronExpression);
+});
+
+const backupCronNextRuns = computed(() => {
+  if (!backupCronValidation.value.valid || !config.value.cronExpression) {
+    return [];
+  }
+  const cronParts = config.value.cronExpression.split(" ").filter(Boolean);
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = cronParts;
+  return calculateNextRuns(minute, hour, dayOfMonth, month, dayOfWeek, 5);
+});
+
+function onScheduleTypeChange(value) {
+  if (value === "cron" && !config.value.cronExpression) {
+    config.value.cronExpression = defaultBackupCronExpression;
+  }
+}
 
 const verifying = ref(false);
 const creating = ref(false);
@@ -389,6 +458,8 @@ function onClearAll() {
       config.value.gistHtmlUrl = "";
       config.value.ownerLogin = "";
       config.value.enabled = false;
+      config.value.scheduleType = "interval";
+      config.value.cronExpression = "";
       config.value.lastResult = null;
       config.value.lastError = null;
       config.value.lastRunAt = null;
@@ -419,6 +490,25 @@ onMounted(() => {
   margin-left: 12px;
   color: var(--text-color-3, #999);
   font-size: 12px;
+}
+.cron-field {
+  width: min(420px, 100%);
+}
+.cron-parser {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.cron-validation {
+  display: block;
+  margin-bottom: 6px;
+}
+.cron-next-runs {
+  color: var(--text-color-3, #999);
+  line-height: 1.7;
+}
+.cron-next-title {
+  color: var(--text-color-2, #666);
+  font-weight: 600;
 }
 .rev-sha {
   font-family: var(--font-family-mono, monospace);
