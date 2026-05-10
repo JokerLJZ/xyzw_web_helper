@@ -22,6 +22,15 @@ export interface BackupTokenSettingEntry {
   settings: unknown;
 }
 
+export interface BackupTokenGroupEntry {
+  id: string;
+  name: string;
+  color: string;
+  tokenIds: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface BackupSnapshotV12 {
   version: "1.2";
   exportTime: string;
@@ -33,7 +42,7 @@ export interface BackupSnapshotV12 {
   batchSettings: Record<string, unknown>;
   tokenSettings: BackupTokenSettingEntry[];
 
-  tokenGroups: unknown[];
+  tokenGroups: BackupTokenGroupEntry[];
   taskTemplates: unknown[];
   tokenSortConfig: unknown;
   userPreferences: unknown;

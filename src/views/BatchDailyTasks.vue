@@ -2918,6 +2918,7 @@ import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import {
   buildSnapshot,
   applySnapshot,
+  sanitizeScheduledTaskForSnapshot,
 } from "@/utils/backup/snapshotBuilder";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
 import { useMessage } from "naive-ui";
@@ -4205,7 +4206,7 @@ const importConfig = async ({ file }) => {
           const seen = new Set(scheduledTasks.value.map((t) => t.id));
           for (const t of importData.scheduledTasks) {
             if (t?.id && !seen.has(t.id)) {
-              scheduledTasks.value.push(t);
+              scheduledTasks.value.push(sanitizeScheduledTaskForSnapshot(t));
               seen.add(t.id);
             }
           }

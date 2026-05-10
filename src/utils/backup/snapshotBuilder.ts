@@ -8,6 +8,7 @@ import { CURRENT_BACKUP_VERSION } from "./snapshotSchema";
 import type {
   AnyBackupSnapshot,
   BackupSnapshotV12,
+  BackupTokenGroupEntry,
   BackupTokenEntry,
   BackupTokenSettingEntry,
 } from "./snapshotSchema";
@@ -66,6 +67,51 @@ function collectTokenSettings(
   return out;
 }
 
+export function sanitizeScheduledTaskForSnapshot<T>(task: T): T {
+  if (!task || typeof task !== "object" || Array.isArray(task)) {
+    return task;
+  }
+
+  const sanitized = { ...(task as Record<string, unknown>) };
+  delete sanitized.connectedTokens;
+  return sanitized as T;
+}
+
+function sanitizeScheduledTasksForSnapshot<T>(tasks: T[]): T[] {
+  return tasks.map((task) => sanitizeScheduledTaskForSnapshot(task));
+}
+
+function sanitizeTokenGroupsForSnapshot(
+  groups: unknown[],
+  tokens: BackupTokenEntry[],
+): BackupTokenGroupEntry[] {
+  const validTokenIds = new Set(tokens.map((token) => token.id).filter(Boolean));
+
+  return groups
+    .filter((group): group is Record<string, unknown> => {
+      return Boolean(group && typeof group === "object" && !Array.isArray(group));
+    })
+    .map((group) => {
+      const tokenIds = Array.isArray(group.tokenIds)
+        ? group.tokenIds
+            .filter((tokenId): tokenId is string => typeof tokenId === "string")
+            .filter((tokenId) => validTokenIds.has(tokenId))
+        : [];
+
+      return {
+        id: typeof group.id === "string" ? group.id : "",
+        name: typeof group.name === "string" ? group.name : "未命名分组",
+        color: typeof group.color === "string" ? group.color : "#1677ff",
+        tokenIds,
+        createdAt:
+          typeof group.createdAt === "string" ? group.createdAt : undefined,
+        updatedAt:
+          typeof group.updatedAt === "string" ? group.updatedAt : undefined,
+      };
+    })
+    .filter((group) => group.id);
+}
+
 export function buildSnapshot(source: "auto" | "manual"): BackupSnapshotV12 {
   const tokens = readJSON<BackupTokenEntry[]>(LS_KEYS.tokens, []);
 
@@ -78,10 +124,15 @@ export function buildSnapshot(source: "auto" | "manual"): BackupSnapshotV12 {
       appVersion: APP_VERSION,
     },
     tokens,
-    scheduledTasks: readJSON<unknown[]>(LS_KEYS.scheduledTasks, []),
+    scheduledTasks: sanitizeScheduledTasksForSnapshot(
+      readJSON<unknown[]>(LS_KEYS.scheduledTasks, []),
+    ),
     batchSettings: readJSON<Record<string, unknown>>(LS_KEYS.batchSettings, {}),
     tokenSettings: collectTokenSettings(tokens),
-    tokenGroups: readJSON<unknown[]>(LS_KEYS.tokenGroups, []),
+    tokenGroups: sanitizeTokenGroupsForSnapshot(
+      readJSON<unknown[]>(LS_KEYS.tokenGroups, []),
+      tokens,
+    ),
     taskTemplates: readJSON<unknown[]>(LS_KEYS.taskTemplates, []),
     tokenSortConfig: readJSON<unknown>(LS_KEYS.tokenSortConfig, null),
     userPreferences: readJSON<unknown>(LS_KEYS.userPreferences, null),
@@ -107,15 +158,17 @@ export interface ApplySnapshotResult {
 }
 
 function normalizeSnapshot(snap: AnyBackupSnapshot): BackupSnapshotV12 {
+  const tokens = Array.isArray((snap as any).tokens) ? (snap as any).tokens : [];
+
   // 任何旧版本都补齐缺失字段
   const v12: BackupSnapshotV12 = {
     version: CURRENT_BACKUP_VERSION,
     exportTime: (snap as any).exportTime || new Date().toISOString(),
     source: (snap as any).source || "manual",
     client: (snap as any).client || { ua: "", appVersion: "" },
-    tokens: Array.isArray((snap as any).tokens) ? (snap as any).tokens : [],
+    tokens,
     scheduledTasks: Array.isArray((snap as any).scheduledTasks)
-      ? (snap as any).scheduledTasks
+      ? sanitizeScheduledTasksForSnapshot((snap as any).scheduledTasks)
       : [],
     batchSettings:
       (snap as any).batchSettings &&
@@ -126,7 +179,7 @@ function normalizeSnapshot(snap: AnyBackupSnapshot): BackupSnapshotV12 {
       ? (snap as any).tokenSettings
       : [],
     tokenGroups: Array.isArray((snap as any).tokenGroups)
-      ? (snap as any).tokenGroups
+      ? sanitizeTokenGroupsForSnapshot((snap as any).tokenGroups, tokens)
       : [],
     taskTemplates: Array.isArray((snap as any).taskTemplates)
       ? (snap as any).taskTemplates
@@ -186,9 +239,13 @@ export function applySnapshot(
 
   // ---- scheduledTasks ----
   if (applyScheduledTasks) {
-    const existingTasks = readJSON<any[]>(LS_KEYS.scheduledTasks, []);
+    const existingTasks = sanitizeScheduledTasksForSnapshot(
+      readJSON<any[]>(LS_KEYS.scheduledTasks, []),
+    );
     const seenTaskIds = new Set(existingTasks.map((t) => t?.id));
-    const incoming = snap.scheduledTasks as any[];
+    const incoming = sanitizeScheduledTasksForSnapshot(
+      snap.scheduledTasks as any[],
+    );
     const finalTasks =
       tokenStrategy === "overwrite"
         ? incoming
