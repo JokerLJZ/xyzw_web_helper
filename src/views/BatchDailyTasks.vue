@@ -48,6 +48,18 @@
                 <n-button size="small" @click="showTasksModal = true">
                   查看定时任务
                 </n-button>
+                <n-button
+                  size="small"
+                  type="warning"
+                  secondary
+                  :disabled="isRunning || invalidScheduledTokenCount === 0"
+                  @click="cleanupInvalidBatchTokens"
+                >
+                  清理无效账号
+                  <span v-if="invalidScheduledTokenCount > 0">
+                    ({{ invalidScheduledTokenCount }})
+                  </span>
+                </n-button>
                 <n-button size="small" @click="exportConfig">
                   导出配置
                 </n-button>
@@ -4267,6 +4279,102 @@ const importConfig = async ({ file }) => {
 // Task countdowns ref
 const taskCountdowns = ref({});
 const nextExecutionTimes = ref({});
+
+const validTokenIdSet = computed(() => new Set(tokens.value.map((t) => t.id)));
+
+const invalidScheduledTokenCount = computed(() => {
+  const invalidTokenIds = new Set();
+  scheduledTasks.value.forEach((task) => {
+    (task.selectedTokens || []).forEach((tokenId) => {
+      if (!validTokenIdSet.value.has(tokenId)) {
+        invalidTokenIds.add(tokenId);
+      }
+    });
+  });
+  return invalidTokenIds.size;
+});
+
+const filterExistingTokenIds = (tokenIds = []) => {
+  return tokenIds.filter((tokenId) => validTokenIdSet.value.has(tokenId));
+};
+
+const cleanupInvalidDailySettings = () => {
+  let removedCount = 0;
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i);
+    if (!key?.startsWith("daily-settings:")) continue;
+
+    const tokenId = key.slice("daily-settings:".length);
+    if (!validTokenIdSet.value.has(tokenId)) {
+      localStorage.removeItem(key);
+      removedCount++;
+    }
+  }
+  return removedCount;
+};
+
+const cleanupInvalidBatchTokens = () => {
+  const invalidTokenIds = new Set();
+  let removedRefsCount = 0;
+  let emptiedTaskCount = 0;
+
+  scheduledTasks.value = scheduledTasks.value.map((task) => {
+    const selectedTokens = Array.isArray(task.selectedTokens)
+      ? task.selectedTokens
+      : [];
+    const cleanedSelectedTokens = selectedTokens.filter((tokenId) => {
+      const isValid = validTokenIdSet.value.has(tokenId);
+      if (!isValid) {
+        invalidTokenIds.add(tokenId);
+        removedRefsCount++;
+      }
+      return isValid;
+    });
+
+    const nextTask = {
+      ...task,
+      selectedTokens: cleanedSelectedTokens,
+    };
+
+    if (Array.isArray(task.connectedTokens)) {
+      nextTask.connectedTokens = filterExistingTokenIds(task.connectedTokens);
+    }
+
+    if (selectedTokens.length > 0 && cleanedSelectedTokens.length === 0) {
+      nextTask.enabled = false;
+      emptiedTaskCount++;
+    }
+
+    return nextTask;
+  });
+
+  selectedTokens.value = filterExistingTokenIds(selectedTokens.value);
+  selectedTokensForApply.value = filterExistingTokenIds(
+    selectedTokensForApply.value,
+  );
+  taskForm.selectedTokens = filterExistingTokenIds(taskForm.selectedTokens);
+  newGroupSelectedTokens.value = filterExistingTokenIds(
+    newGroupSelectedTokens.value,
+  );
+
+  tokenStore.cleanupInvalidTokens();
+  const removedSettingsCount = cleanupInvalidDailySettings();
+  saveScheduledTasks();
+
+  if (removedRefsCount === 0 && removedSettingsCount === 0) {
+    message.info("没有需要清理的无效账号数据");
+    return;
+  }
+
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 已清理无效账号: 定时任务引用 ${removedRefsCount} 处，账号设置 ${removedSettingsCount} 条，涉及 ${invalidTokenIds.size} 个已删除账号${emptiedTaskCount ? `，${emptiedTaskCount} 个定时任务因无可用账号已禁用` : ""} ===`,
+    type: "success",
+  });
+  message.success(
+    `已清理 ${removedRefsCount} 处无效账号引用${emptiedTaskCount ? `，并禁用 ${emptiedTaskCount} 个空任务` : ""}`,
+  );
+};
 
 // Update countdowns for all tasks
 const updateCountdowns = () => {
