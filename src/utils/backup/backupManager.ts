@@ -5,8 +5,8 @@ import { ref, computed, watch } from "vue";
 import { useLocalStorage } from "@vueuse/core";
 
 import {
-  buildSnapshot,
-  applySnapshot,
+  buildSnapshotWithIndexedDB,
+  applySnapshotWithIndexedDB,
   BACKUP_GIST_FILENAME,
 } from "./snapshotBuilder";
 import type {
@@ -105,7 +105,7 @@ export async function createInitialGist(): Promise<{
     token: backupConfig.value.token,
     filename: BACKUP_GIST_FILENAME,
   });
-  const snap = buildSnapshot("manual");
+  const snap = await buildSnapshotWithIndexedDB("manual");
   const body = JSON.stringify(snap, null, 2);
   const result = await c.createGist(
     body,
@@ -132,7 +132,7 @@ export async function runBackupNow(
   isRunning.value = true;
   try {
     const client = buildClient();
-    const snap = buildSnapshot(source);
+    const snap = await buildSnapshotWithIndexedDB(source);
     const body = JSON.stringify(snap, null, 2);
     const desc = `xyzw-web-helper backup · ${snap.exportTime} · ${snap.tokens.length} tokens`;
     await client.updateGist(body, desc);
@@ -193,7 +193,7 @@ export async function restoreFromRevision(
   options: ApplySnapshotOptions = {},
 ): Promise<ApplySnapshotResult> {
   const snap = await fetchRevisionSnapshot(sha);
-  return applySnapshot(snap, options);
+  return applySnapshotWithIndexedDB(snap, options);
 }
 
 export function downloadSnapshotJson(snap: AnyBackupSnapshot, filename: string) {

@@ -2958,8 +2958,8 @@ import { useTokenStore, gameTokens, tokenGroups } from "@/stores/tokenStore";
 import { $emit } from "@/stores/events/index.ts";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import {
-  buildSnapshot,
-  applySnapshot,
+  buildSnapshotWithIndexedDB,
+  applySnapshotWithIndexedDB,
   sanitizeScheduledTaskForSnapshot,
 } from "@/utils/backup/snapshotBuilder";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
@@ -4186,9 +4186,9 @@ const deselectAllTasks = () => {
 // ======================
 
 // Export all tokens and scheduled tasks configuration（统一走 buildSnapshot）
-const exportConfig = () => {
+const exportConfig = async () => {
   try {
-    const snap = buildSnapshot("manual");
+    const snap = await buildSnapshotWithIndexedDB("manual");
     // 与历史行为一致：清掉无效 token 引用
     const validTokenIds = new Set(snap.tokens.map((t) => t.id));
     snap.scheduledTasks = (snap.scheduledTasks || [])
@@ -4212,7 +4212,7 @@ const exportConfig = () => {
     URL.revokeObjectURL(url);
 
     message.success(
-      `导出成功: ${snap.tokens.length} 个账号, ${snap.scheduledTasks.length} 个定时任务`,
+      `导出成功: ${snap.tokens.length} 个账号, ${snap.scheduledTasks.length} 个定时任务, ${snap.tokenBinaryData?.length || 0} 份BIN数据`,
     );
   } catch (error) {
     console.error("Export failed:", error);
@@ -4224,14 +4224,16 @@ const exportConfig = () => {
 const importConfig = async ({ file }) => {
   try {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const importData = JSON.parse(e.target.result);
         if (!importData?.tokens && !importData?.scheduledTasks) {
           message.error("无效的配置文件格式");
           return;
         }
-        const result = applySnapshot(importData, { tokenStrategy: "merge" });
+        const result = await applySnapshotWithIndexedDB(importData, {
+          tokenStrategy: "merge",
+        });
         // applySnapshot 走 localStorage.setItem，同标签页内 useLocalStorage 不会
         // 自动同步，这里手动把 in-memory ref 与 LS 对齐，避免必须刷新页面。
         try {
@@ -4256,7 +4258,7 @@ const importConfig = async ({ file }) => {
           saveScheduledTasks();
         }
         message.success(
-          `导入成功: ${result.importedTokens} 个新账号, ${result.importedScheduledTasks} 个新定时任务`,
+          `导入成功: ${result.importedTokens} 个新账号, ${result.importedScheduledTasks} 个新定时任务, ${result.importedTokenBinaryData || 0} 份BIN数据`,
         );
       } catch (parseError) {
         console.error("Parse error:", parseError);

@@ -8,10 +8,12 @@ import { CURRENT_BACKUP_VERSION } from "./snapshotSchema";
 import type {
   AnyBackupSnapshot,
   BackupSnapshotV12,
+  BackupTokenBinaryEntry,
   BackupTokenGroupEntry,
   BackupTokenEntry,
   BackupTokenSettingEntry,
 } from "./snapshotSchema";
+import { openDB, type DBSchema } from "idb";
 
 const LS_KEYS = {
   tokens: "gameTokens",
@@ -26,6 +28,23 @@ const LS_KEYS = {
 } as const;
 
 const APP_VERSION = "2.0.0";
+const IDB_NAME = "xyzw";
+const IDB_VERSION = 1;
+const IDB_TOKEN_STORE = "tokens";
+
+interface TokenBinaryDB extends DBSchema {
+  tokens: {
+    key: string;
+    value: {
+      id: string;
+      data: ArrayBuffer;
+      createdAt?: Date | string;
+      updatedAt?: Date | string;
+      metadata?: Record<string, unknown>;
+    };
+    indexes: { "by-created": Date };
+  };
+}
 
 function readJSON<T>(key: string, fallback: T): T {
   const raw = localStorage.getItem(key);
@@ -48,6 +67,111 @@ function readString(key: string, fallback = ""): string {
     /* 裸字符串 */
   }
   return raw;
+}
+
+function dateLikeToISOString(value: unknown): string | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") return value;
+  return undefined;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+async function openTokenBinaryDB() {
+  return openDB<TokenBinaryDB>(IDB_NAME, IDB_VERSION, {
+    upgrade(db) {
+      if (!db.objectStoreNames.contains(IDB_TOKEN_STORE)) {
+        const store = db.createObjectStore(IDB_TOKEN_STORE, { keyPath: "id" });
+        store.createIndex("by-created", "createdAt");
+      }
+    },
+  });
+}
+
+async function collectTokenBinaryData(
+  tokens: BackupTokenEntry[],
+): Promise<BackupTokenBinaryEntry[]> {
+  const backupTokenIds = new Set(
+    tokens
+      .filter(
+        (token) =>
+          token.importMethod === "bin" || token.importMethod === "wxQrcode",
+      )
+      .map((token) => token.id)
+      .filter(Boolean),
+  );
+  if (backupTokenIds.size === 0) return [];
+
+  try {
+    const db = await openTokenBinaryDB();
+    const entries: BackupTokenBinaryEntry[] = [];
+    for (const tokenId of backupTokenIds) {
+      const item = await db.get(IDB_TOKEN_STORE, tokenId);
+      if (!item?.data) continue;
+      entries.push({
+        tokenId,
+        base64: arrayBufferToBase64(item.data),
+        byteLength: item.data.byteLength,
+        metadata: item.metadata,
+        createdAt: dateLikeToISOString(item.createdAt),
+        updatedAt: dateLikeToISOString(item.updatedAt),
+      });
+    }
+    db.close();
+    return entries;
+  } catch (error) {
+    console.warn("[backup] collect token binary data failed", error);
+    return [];
+  }
+}
+
+async function restoreTokenBinaryData(
+  entries: BackupTokenBinaryEntry[] | undefined,
+): Promise<number> {
+  if (!Array.isArray(entries) || entries.length === 0) return 0;
+
+  const db = await openTokenBinaryDB();
+  let restoredCount = 0;
+  for (const entry of entries) {
+    if (!entry?.tokenId || !entry.base64) continue;
+    try {
+      const data = base64ToArrayBuffer(entry.base64);
+      await db.put(IDB_TOKEN_STORE, {
+        id: entry.tokenId,
+        data,
+        metadata: entry.metadata,
+        createdAt: entry.createdAt ? new Date(entry.createdAt) : new Date(),
+        updatedAt: entry.updatedAt ? new Date(entry.updatedAt) : new Date(),
+      });
+      restoredCount++;
+    } catch (error) {
+      console.warn(
+        "[backup] restore token binary data failed",
+        entry.tokenId,
+        error,
+      );
+    }
+  }
+  db.close();
+  return restoredCount;
 }
 
 function collectTokenSettings(
@@ -124,6 +248,7 @@ export function buildSnapshot(source: "auto" | "manual"): BackupSnapshotV12 {
       appVersion: APP_VERSION,
     },
     tokens,
+    tokenBinaryData: [],
     scheduledTasks: sanitizeScheduledTasksForSnapshot(
       readJSON<unknown[]>(LS_KEYS.scheduledTasks, []),
     ),
@@ -141,6 +266,14 @@ export function buildSnapshot(source: "auto" | "manual"): BackupSnapshotV12 {
   };
 }
 
+export async function buildSnapshotWithIndexedDB(
+  source: "auto" | "manual",
+): Promise<BackupSnapshotV12> {
+  const snap = buildSnapshot(source);
+  snap.tokenBinaryData = await collectTokenBinaryData(snap.tokens);
+  return snap;
+}
+
 export interface ApplySnapshotOptions {
   // overwrite: 完全替换；merge: 同 id/token 跳过，仅追加新的
   tokenStrategy?: "merge" | "overwrite";
@@ -152,6 +285,7 @@ export interface ApplySnapshotOptions {
 
 export interface ApplySnapshotResult {
   importedTokens: number;
+  importedTokenBinaryData?: number;
   importedScheduledTasks: number;
   importedTokenSettings: number;
   appliedBatchSettings: boolean;
@@ -167,6 +301,9 @@ function normalizeSnapshot(snap: AnyBackupSnapshot): BackupSnapshotV12 {
     source: (snap as any).source || "manual",
     client: (snap as any).client || { ua: "", appVersion: "" },
     tokens,
+    tokenBinaryData: Array.isArray((snap as any).tokenBinaryData)
+      ? (snap as any).tokenBinaryData
+      : [],
     scheduledTasks: Array.isArray((snap as any).scheduledTasks)
       ? sanitizeScheduledTasksForSnapshot((snap as any).scheduledTasks)
       : [],
@@ -313,6 +450,18 @@ export function applySnapshot(
     if (snap.theme) localStorage.setItem(LS_KEYS.theme, snap.theme);
   }
 
+  return result;
+}
+
+export async function applySnapshotWithIndexedDB(
+  raw: AnyBackupSnapshot,
+  options: ApplySnapshotOptions = {},
+): Promise<ApplySnapshotResult> {
+  const snap = normalizeSnapshot(raw);
+  const result = applySnapshot(snap, options);
+  result.importedTokenBinaryData = await restoreTokenBinaryData(
+    snap.tokenBinaryData,
+  );
   return result;
 }
 

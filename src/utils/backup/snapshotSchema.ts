@@ -22,6 +22,15 @@ export interface BackupTokenSettingEntry {
   settings: unknown;
 }
 
+export interface BackupTokenBinaryEntry {
+  tokenId: string;
+  base64: string;
+  byteLength: number;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface BackupTokenGroupEntry {
   id: string;
   name: string;
@@ -32,12 +41,13 @@ export interface BackupTokenGroupEntry {
 }
 
 export interface BackupSnapshotV12 {
-  version: "1.2";
+  version: "1.2" | "1.3";
   exportTime: string;
   source: "auto" | "manual";
   client: { ua: string; appVersion: string };
 
   tokens: BackupTokenEntry[];
+  tokenBinaryData?: BackupTokenBinaryEntry[];
   scheduledTasks: unknown[];
   batchSettings: Record<string, unknown>;
   tokenSettings: BackupTokenSettingEntry[];
@@ -55,6 +65,7 @@ export interface BackupSnapshotV11 {
   version: "1.1" | string;
   exportTime?: string;
   tokens?: BackupTokenEntry[];
+  tokenBinaryData?: BackupTokenBinaryEntry[];
   scheduledTasks?: unknown[];
   batchSettings?: Record<string, unknown>;
   tokenSettings?: BackupTokenSettingEntry[];
@@ -62,4 +73,4 @@ export interface BackupSnapshotV11 {
 
 export type AnyBackupSnapshot = BackupSnapshotV12 | BackupSnapshotV11;
 
-export const CURRENT_BACKUP_VERSION = "1.2" as const;
+export const CURRENT_BACKUP_VERSION = "1.3" as const;
