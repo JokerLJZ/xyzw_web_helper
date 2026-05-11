@@ -1,9 +1,9 @@
 /**
  * 竞技场、补齐类任务
- * 包含: batcharenafight, batchTopUpFish, batchTopUpArena
+ * 包含: batcharenafight, batchTopUpFish, batchTopUpGoldFish, batchTopUpArena
  */
 
-import { FISH_TARGET, ARENA_TARGET } from "./constants.js";
+import { FISH_TARGET, GOLD_FISH_TARGET, ARENA_TARGET } from "./constants.js";
 
 /**
  * 创建竞技场、补齐类任务执行器
@@ -545,6 +545,186 @@ export function createTasksArena(deps) {
   };
 
   /**
+   * 一键金鱼杆月度补齐
+   */
+  const batchTopUpGoldFish = async () => {
+    if (selectedTokens.value.length === 0) return;
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((t) => t.id === tokenId);
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始金鱼杆月度补齐: ${token.name} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 获取金鱼杆月度进度...`,
+          type: "info",
+        });
+        const result = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_get",
+          {},
+          10000,
+        );
+        const act = result?.activity || result?.body?.activity || result;
+
+        if (!act) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 获取金鱼杆月度进度失败`,
+            type: "error",
+          });
+          tokenStatus.value[tokenId] = "failed";
+          return;
+        }
+
+        const myMonthInfo = act.myMonthInfo || {};
+        const goldFishNum = Number(myMonthInfo?.["3"]?.num || 0);
+        let remaining = Math.max(0, GOLD_FISH_TARGET - goldFishNum);
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 当前金鱼杆进度: ${goldFishNum}/${GOLD_FISH_TARGET}，需要补齐: ${remaining}次`,
+          type: "info",
+        });
+
+        if (remaining <= 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 金鱼杆月度进度已满，无需补齐`,
+            type: "success",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        let role = tokenStore.gameData?.roleInfo?.role;
+        if (!role) {
+          try {
+            const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+            role = roleInfo?.role;
+          } catch {}
+        }
+
+        const rodCount = role?.items?.[1012]?.quantity || 0;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 当前金鱼杆库存: ${rodCount}`,
+          type: "info",
+        });
+
+        if (rodCount < remaining) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 金鱼杆不足 (${rodCount} < ${remaining})，将仅使用现有库存`,
+            type: "warning",
+          });
+          remaining = rodCount;
+        }
+
+        if (remaining <= 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 没有可用的金鱼杆，停止任务`,
+            type: "warning",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        while (remaining > 0 && !shouldStop.value) {
+          const batch = Math.min(10, remaining);
+          try {
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "artifact_lottery",
+              { lotteryNumber: batch, newFree: true, type: 2 },
+              12000,
+            );
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 完成 ${batch} 次金鱼杆钓鱼`,
+              type: "info",
+            });
+            remaining -= batch;
+
+            await new Promise((r) => setTimeout(r, delayConfig.battle));
+          } catch (e) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 金鱼杆钓鱼失败: ${e.message}`,
+              type: "error",
+            });
+            break;
+          }
+        }
+
+        const finalResult = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_get",
+          {},
+          10000,
+        );
+        const finalAct =
+          finalResult?.activity || finalResult?.body?.activity || finalResult;
+        const finalMyMonthInfo = finalAct?.myMonthInfo || {};
+        const finalGoldFishNum = Number(finalMyMonthInfo?.["3"]?.num || 0);
+
+        if (finalGoldFishNum >= GOLD_FISH_TARGET) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 金鱼杆月度补齐完成，最终进度: ${finalGoldFishNum}/${GOLD_FISH_TARGET}`,
+            type: "success",
+          });
+        } else {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 金鱼杆月度补齐已停止，最终进度: ${finalGoldFishNum}/${GOLD_FISH_TARGET}`,
+            type: "warning",
+          });
+        }
+
+        tokenStatus.value[tokenId] = "completed";
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 金鱼杆月度补齐失败: ${error.message}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量金鱼杆月度补齐结束");
+  };
+
+  /**
    * 批量竞技场补齐
    */
   const batchTopUpArena = async () => {
@@ -913,6 +1093,7 @@ export function createTasksArena(deps) {
   return {
     batcharenafight,
     batchTopUpFish,
+    batchTopUpGoldFish,
     batchTopUpArena,
   };
 }

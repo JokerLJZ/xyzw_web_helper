@@ -78,6 +78,7 @@ export const CarresearchItem = [
 
 // 月度任务目标
 export const FISH_TARGET = 320;
+export const GOLD_FISH_TARGET = 160;
 export const ARENA_TARGET = 240;
 
 // 任务表列配置

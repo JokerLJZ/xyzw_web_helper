@@ -656,6 +656,17 @@
                 </n-button>
               </n-space>
             </n-tab-pane>
+            <n-tab-pane name="small-account" tab="小号任务">
+              <n-space>
+                <n-button
+                  size="small"
+                  @click="batchTopUpGoldFish"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键金鱼杆补齐
+                </n-button>
+              </n-space>
+            </n-tab-pane>
           </n-tabs>
         </n-card>
       </div>
@@ -6038,7 +6049,8 @@ const { batchbaoku13, batchbaoku45, batchmengjing, batchBuyDreamItems } =
   tasksDungeon;
 
 const tasksArena = createTasksArena(createTaskDeps());
-const { batcharenafight, batchTopUpFish, batchTopUpArena } = tasksArena;
+const { batcharenafight, batchTopUpFish, batchTopUpGoldFish, batchTopUpArena } =
+  tasksArena;
 
 const tasksStore = createTasksStore(createTaskDeps());
 const {
