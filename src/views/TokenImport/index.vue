@@ -56,7 +56,7 @@
             <n-radio-button value="url"> URL获取 </n-radio-button>
             <n-radio-button value="wxQrcode"> 微信扫码获取 </n-radio-button>
             <n-radio-button value="bin"> BIN多角色获取 </n-radio-button>
-            <n-radio-button value="singlebin"> BIN单角色获取 </n-radio-button>
+            <n-radio-button value="singlebin"> BIN单角色批量获取 </n-radio-button>
           </n-radio-group>
         </div>
         <div class="card-body">
