@@ -341,7 +341,7 @@ export function registerDefaultCommands(reg) {
     .register("legacy_getinfo")
     .register("legacy_claimhangup")
     .register("legacy_beginhangup")
-    .register("legacy_claimchargereward", { id: 2 })
+    .register("legacy_claimchargereward", { id: 3 })
     // 功法残卷赠送
     .register("legacy_gift_getlist")
     .register("legacy_gift_send", { recipientId: 0, itemId: 0, quantity: 0 })

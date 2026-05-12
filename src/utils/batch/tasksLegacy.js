@@ -236,7 +236,7 @@ export function createTasksLegacy(deps) {
         const resp = await tokenStore.sendMessageWithPromise(
           tokenId,
           "legacy_claimchargereward",
-          { id: 2 },
+          { id: 3 },
           5000,
         );
         const reward = Array.isArray(resp?.reward) ? resp.reward[0] : null;
