@@ -629,6 +629,7 @@ import {
   Add,
   Copy,
   Create,
+  Download,
   EllipsisHorizontal,
   Grid,
   List,
@@ -644,6 +645,11 @@ import { NIcon, NAlert, useDialog, useMessage } from "naive-ui";
 import { h, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { transformToken, scheduleAuthUserRequest } from "@/utils/token";
+import {
+  exportTokenBinFile,
+  exportTokenBinFiles,
+  isBinExportableToken,
+} from "@/utils/tokenBinExport";
 import { $emit } from "@/stores/events/index.ts";
 import useIndexedDB from "@/hooks/useIndexedDB";
 const { getArrayBuffer, storeArrayBuffer, deleteArrayBuffer, clearAll } =
@@ -821,6 +827,7 @@ const bulkOptions = [
   { label: "刷新所有Token", key: "refreshAll" },
   { label: "更新token信息", key: "updateInfo" },
   { label: "导出所有Token", key: "export" },
+  { label: "导出微信扫码BIN", key: "exportWxQrcodeBins" },
   { label: "导入Token文件", key: "import" },
   { label: "清理过期Token", key: "clean" },
   { label: "断开所有连接", key: "disconnect" },
@@ -1121,6 +1128,14 @@ const getTokenActions = (token) => {
     });
   }
 
+  if (isBinExportableToken(token)) {
+    actions.push({
+      label: "导出BIN文件",
+      key: "export-bin",
+      icon: () => h(NIcon, null, { default: () => h(Download) }),
+    });
+  }
+
   actions.push(
     { type: "divider" },
     {
@@ -1149,6 +1164,9 @@ const handleTokenAction = async (key, token) => {
     case "refresh-url":
       // URL获取的Token刷新
       refreshToken(token);
+      break;
+    case "export-bin":
+      exportSingleBin(token);
       break;
     case "delete":
       deleteToken(token);
@@ -1333,6 +1351,9 @@ const handleBulkAction = (key) => {
     case "export":
       exportTokens();
       break;
+    case "exportWxQrcodeBins":
+      exportWxQrcodeBins();
+      break;
     case "import":
       importTokenFile();
       break;
@@ -1345,6 +1366,48 @@ const handleBulkAction = (key) => {
     case "clear":
       clearAllTokens();
       break;
+  }
+};
+
+const exportSingleBin = async (token) => {
+  try {
+    const result = await exportTokenBinFile(token, getArrayBuffer);
+    if (result.success) {
+      message.success(`已导出 ${result.fileName}`);
+    } else {
+      message.error(`${token.name} 导出失败：${result.reason}`);
+    }
+  } catch (error) {
+    console.error("导出BIN失败:", error);
+    message.error(error.message || "导出BIN失败");
+  }
+};
+
+const exportWxQrcodeBins = async () => {
+  const tokens = tokenStore.gameTokens.filter(
+    (token) => token.importMethod === "wxQrcode",
+  );
+
+  if (tokens.length === 0) {
+    message.warning("没有微信扫码导入的Token可导出");
+    return;
+  }
+
+  try {
+    const results = await exportTokenBinFiles(tokens, getArrayBuffer);
+    const successCount = results.filter((item) => item.success).length;
+    const failCount = results.length - successCount;
+
+    if (successCount > 0 && failCount === 0) {
+      message.success(`已导出 ${successCount} 个微信扫码BIN文件`);
+    } else if (successCount > 0) {
+      message.warning(`已导出 ${successCount} 个，失败 ${failCount} 个`);
+    } else {
+      message.error("导出失败：未找到可用的原始BIN数据");
+    }
+  } catch (error) {
+    console.error("批量导出微信扫码BIN失败:", error);
+    message.error(error.message || "批量导出失败");
   }
 };
 
