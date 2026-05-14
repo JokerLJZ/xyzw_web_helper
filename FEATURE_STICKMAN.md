@@ -269,9 +269,168 @@ interface TokenData {
 
 ---
 
+## 6. 修复日志自动滚动 + 移除右上角清除Token菜单（2026-05-06 起，提交 `373f2f6` / `b10e2ee` / `0c31d4e` / `9c39831` / `eea4be1` / `4312e98`）
+
+### 6.1 批量任务日志滚动
+
+围绕 [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue) 的批量任务日志面板，连续修复生产构建下日志不自动滚动、滚动区域溢出、面板高度不稳定等问题：
+
+- `addLog` 截断历史日志时使用原地更新，减少响应式数组整体替换导致的 DOM 抖动。
+- 日志容器改为受控滚动区域，避免日志把整页撑高。
+- 使用 Naive UI 滚动组件后继续收敛滚动目标，确保新增日志后稳定贴到底部。
+- 恢复响应式高度约束，让不同窗口高度下批量任务面板仍可用。
+
+### 6.2 移除危险入口
+
+[src/layout/DefaultLayout.vue](src/layout/DefaultLayout.vue) 移除右上角用户下拉菜单里的"清除所有Token并退出"入口，仅保留头像和用户信息展示。清理 Token 改由专门的 Token 管理页承担，降低误触清空全部账号的风险。
+
+---
+
+## 7. GitHub Gist 数据备份体系（2026-05-08 至 2026-05-11，提交 `2a9c913` / `125dc8f` / `685a549` / `9baa4f5` / `77890f6` / `30581f5` / `40061fe` / `8467bfe`）
+
+### 7.1 方案演进
+
+先尝试 WebDAV 自动备份（`2a9c913`），随后因浏览器侧 CORS / 配置成本过高回滚（`125dc8f`），最终落地 GitHub Gist 自动备份（`685a549`）。使用 secret gist 保存 `xyzw-backup.json`，通过 Gist revision history 提供历史版本、下载和恢复能力。
+
+### 7.2 核心模块
+
+- [src/utils/backup/gistClient.ts](src/utils/backup/gistClient.ts)：封装 GitHub Gist API，负责验证 Token、创建 secret gist、更新文件、读取历史版本。
+- [src/utils/backup/backupManager.ts](src/utils/backup/backupManager.ts)：自动备份管理器，支持手动备份、定时备份、恢复指定 revision、连续失败自动暂停。
+- [src/utils/backup/snapshotBuilder.ts](src/utils/backup/snapshotBuilder.ts)：统一构建 / 应用备份快照，后续扩展 token 分组与 IndexedDB 二进制数据。
+- [src/utils/backup/snapshotSchema.ts](src/utils/backup/snapshotSchema.ts)：维护快照 schema，当前 `CURRENT_BACKUP_VERSION = "1.3"`。
+- [src/components/Backup/BackupSettingsPanel.vue](src/components/Backup/BackupSettingsPanel.vue)：备份设置、版本列表、下载和恢复 UI。
+- [src/views/DataBackup.vue](src/views/DataBackup.vue)：独立数据备份页面。
+- [BACKUP.md](BACKUP.md)：GitHub Gist 自动备份使用指南。
+
+### 7.3 功能点
+
+- 入口加入顶部 / 侧边导航：`/admin/data-backup`。
+- 无 Token 场景也允许进入备份页，便于新设备先恢复数据。
+- 自动备份支持固定间隔与 Cron 表达式；Cron 模式复用批量任务 cron 工具。
+- 备份内容包含 tokens、定时任务、批量设置、token 个性化设置、任务模板、排序配置、主题偏好等。
+- `30581f5` 将 `tokenGroups` 纳入快照，恢复时同步分组结构。
+- `8467bfe` 将 BIN / 微信扫码原始二进制 token 数据纳入快照，避免只恢复文本 token 后无法再导出原始 BIN。
+- `40061fe` 优化备份历史展示，同时给漏执行补做增加显式开关。
+
+### 7.4 配置与存储
+
+- 配置持久化 key：`backupConfig`
+- Gist 文件名：`xyzw-backup.json`
+- Cron 去重 key：`lastBackupCronExecutionKey`
+- 连续自动备份失败阈值：3 次，达到后暂停定时器，需在 UI 手动重置失败状态。
+
+---
+
+## 8. 批量任务维护增强（2026-05-10 至 2026-05-11，提交 `b294b81` / `ab89664` / `bd1219f`）
+
+### 8.1 功法批量任务
+
+[src/utils/batch/tasksLegacy.js](src/utils/batch/tasksLegacy.js) 新增功法类任务能力，并在 [src/utils/batch/constants.js](src/utils/batch/constants.js) 与 [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue) 注册入口：
+
+- `batchLegacyBeginHangUp`：批量开始探索功法，识别"已在探索中"类响应并按跳过处理。
+- `batchLegacyClaimChargeReward`：批量领取特权功法，识别"已领取"类响应并按跳过处理。
+- [src/utils/xyzwWebSocket.js](src/utils/xyzwWebSocket.js) 注册 `legacy_getinfo`、`legacy_claimhangup`、`legacy_beginhangup`、`legacy_claimchargereward` 等命令。
+
+### 8.2 金鱼杆月度补齐
+
+[src/utils/batch/tasksArena.js](src/utils/batch/tasksArena.js) 新增金鱼杆月度补齐任务：
+
+- 通过 `activity_get` 读取月度活动进度。
+- 按当月日期进度计算当前应达到的目标，避免月初一次性打满。
+- 优先消耗免费次数，再按剩余目标使用黄金鱼竿补齐。
+- 使用 `GOLD_FISH_TARGET` 常量控制月度目标。
+
+### 8.3 清理无效账号引用
+
+[src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue) 新增"清理无效账号"能力：
+
+- 扫描 `scheduledTasks.selectedTokens` / `connectedTokens` 中已删除的 token id。
+- 清理对应 `daily-settings:<tokenId>` 个性化配置。
+- 若定时任务清理后没有可用账号，自动禁用该任务。
+- 执行结果写入批量日志并通过消息提示清理数量。
+
+---
+
+## 9. Token BIN 导入导出增强（2026-05-12，提交 `a4fa45a` / `1e61644`）
+
+### 9.1 BIN 导出
+
+新增 [src/utils/tokenBinExport.ts](src/utils/tokenBinExport.ts)，支持从 IndexedDB 读取 BIN / 微信扫码导入时保存的原始二进制数据并下载：
+
+- 单个 Token 行菜单新增"导出BIN文件"。
+- Token 管理页批量菜单新增"导出微信扫码BIN"。
+- 文件名统一为 `bin-{server}-{roleIndex}-{roleId}-{name}.bin`，并对非法文件名字符做转义。
+- 仅 `importMethod` 为 `bin` 或 `wxQrcode` 的 Token 可导出；找不到原始二进制数据时给出失败原因。
+
+### 9.2 单角色 BIN 批量导入
+
+[src/views/TokenImport/singlebin.vue](src/views/TokenImport/singlebin.vue) 支持一次选择多个单角色 BIN / DMP 文件：
+
+- 逐个解析文件名中的区服、角色序号、角色 ID、角色名。
+- 通过 `transformToken` 转换 token，并用 `getTokenId` 去重。
+- 原始 ArrayBuffer 写入 IndexedDB，便于后续备份和导出。
+- 支持角色命名模板：`{name}`、`{id}`、`{index}`、`{server}`。
+- 已存在角色会更新 Token，不存在则新增。
+
+---
+
+## 10. 特权功法奖励 ID 修正与回滚（2026-05-12，提交 `5068776` / `3c7804a`）
+
+`5068776` 曾将 `legacy_claimchargereward` 默认参数和批量领取参数从 `{ id: 2 }` 调整为 `{ id: 3 }`。随后 `3c7804a` 回滚为旧版特权奖励 ID：
+
+- [src/utils/xyzwWebSocket.js](src/utils/xyzwWebSocket.js)：`legacy_claimchargereward` 默认参数恢复为 `{ id: 2 }`。
+- [src/utils/batch/tasksLegacy.js](src/utils/batch/tasksLegacy.js)：批量领取特权功法发送参数恢复为 `{ id: 2 }`。
+
+当前有效行为以 `3c7804a` 为准。
+
+---
+
+## 11. 五次领取挂机批量任务（2026-05-14，本次提交）
+
+### 11.1 功能目标
+
+新增"五次领取挂机"批量任务，适用于需要连续领取挂机奖励的场景。执行流程参考原有"领取挂机"任务，但领取阶段改为连续 5 次，并严格控制两次领取之间间隔 6 秒。
+
+### 11.2 执行流程
+
+对每个选中的 Token：
+
+1. 建立 WebSocket 连接。
+2. 连续发送 5 次 `system_claimhangupreward`。
+3. 前 4 次领取完成后等待 6 秒，再执行下一次领取。
+4. 5 次领取完成后，执行原有挂机加钟流程：发送 4 次 `system_mysharecallback`，参数 `{ isSkipShareCard: true, type: 2 }`。
+5. 关闭连接并释放批量任务连接槽位。
+
+### 11.3 涉及文件
+
+- [src/utils/batch/tasksHangUp.js](src/utils/batch/tasksHangUp.js)：新增 `claimHangUpRewardsFiveTimes`，并抽出 `addHangUpTimeForToken` 复用加钟逻辑。
+- [src/utils/batch/constants.js](src/utils/batch/constants.js)：`availableTasks` 新增"五次领取挂机"。
+- [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)：日常批量功能区新增按钮，定时任务"日常"分组新增该任务。
+
+---
+
 ## 维护索引（按时间倒序）
 
 | 日期 | 提交 | 变更摘要 |
 |---|---|---|
+| 2026-05-14 | 本次提交 | 新增五次领取挂机批量任务：连续领取 5 次，每次间隔 6 秒，完成后自动加钟 |
+| 2026-05-12 | `3c7804a` | 回滚特权功法奖励 ID，恢复 `legacy_claimchargereward` 参数 `{ id: 2 }` |
+| 2026-05-12 | `5068776` | 曾尝试调整特权功法奖励 ID 为 `{ id: 3 }`，后续已回滚 |
+| 2026-05-12 | `1e61644` | 新增单角色 BIN 批量导入 |
+| 2026-05-12 | `a4fa45a` | 新增 Token BIN / 微信扫码 BIN 导出 |
+| 2026-05-11 | `8467bfe` | 修复备份缺失 token 原始二进制数据 |
+| 2026-05-11 | `bd1219f` | 批量任务新增清理已删除 Token 引用 |
+| 2026-05-11 | `ab89664` | 新增金鱼杆月度补齐批量任务 |
+| 2026-05-10 | `b294b81` | 新增功法探索与特权功法批量任务 |
+| 2026-05-10 | `40061fe` | 优化备份历史展示，增加漏执行自动补做开关 |
+| 2026-05-10 | `30581f5` | 备份快照纳入 Token 分组 |
+| 2026-05-10 | `77890f6` | 自动备份支持调度配置，数据备份页支持无 Token 进入 |
+| 2026-05-10 | `9baa4f5` | 顶部导航新增数据备份入口 |
+| 2026-05-09 | `685a549` | 新增 GitHub Gist 自动备份体系 |
+| 2026-05-08 | `125dc8f` | 回滚 WebDAV 自动备份方案 |
+| 2026-05-08 | `2a9c913` | 曾尝试新增 WebDAV 自动备份方案 |
+| 2026-05-08 | `4312e98` | 移除右上角清除全部 Token 菜单入口 |
+| 2026-05-06 至 2026-05-08 | `b10e2ee` 等 | 连续修复批量任务日志滚动与滚动区域稳定性 |
+| 2026-05-06 | `373f2f6` / `5ba017a` | 修复批量任务日志自动滚动并记录文档 |
 | 2026-05-06 | `f0bc2da` + `0a15ab4` | cherry-pick GitHuber20th:Gacha 集成每日免费扭蛋 |
 | 2026-05-05 | `cff1b1d` | 修复长任务误判漏执行 + 自动刷新支持 cron |

@@ -32,6 +32,7 @@ export const bossTimesOptions = [0, 1, 2, 3, 4].map((v) => ({
 export const availableTasks = [
   { label: "日常任务", value: "startBatch" },
   { label: "领取挂机", value: "claimHangUpRewards" },
+  { label: "五次领取挂机", value: "claimHangUpRewardsFiveTimes" },
   { label: "一键加钟", value: "batchAddHangUpTime" },
   { label: "重置罐子", value: "resetBottles" },
   { label: "一键领取罐子", value: "batchlingguanzi" },

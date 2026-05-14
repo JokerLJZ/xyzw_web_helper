@@ -318,6 +318,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="claimHangUpRewardsFiveTimes"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  五次领取挂机
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchAddHangUpTime"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -3630,6 +3637,7 @@ const taskGroupDefinitions = [
     tasks: [
       "startBatch",
       "claimHangUpRewards",
+      "claimHangUpRewardsFiveTimes",
       "batchAddHangUpTime",
       "resetBottles",
       "batchlingguanzi",
@@ -6118,6 +6126,7 @@ const createTaskDeps = () => ({
 const tasksHangUp = createTasksHangUp(createTaskDeps());
 const {
   claimHangUpRewards,
+  claimHangUpRewardsFiveTimes,
   batchAddHangUpTime,
   batchStudy,
   batchclubsign,
