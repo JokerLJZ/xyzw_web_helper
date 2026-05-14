@@ -4416,6 +4416,38 @@ const updateCountdowns = () => {
   });
 };
 
+const getUpcomingScheduledTaskRuns = (limit = 2, fromTime = new Date()) => {
+  const upcomingRuns = [];
+
+  scheduledTasks.value
+    .filter((task) => task.enabled)
+    .forEach((task) => {
+      let cursor = new Date(fromTime);
+
+      for (let index = 0; index < limit; index++) {
+        try {
+          const startTime = calculateNextExecutionTime(task, cursor);
+          if (!startTime) break;
+
+          upcomingRuns.push({
+            id: task.id,
+            name: task.name,
+            startTime,
+          });
+
+          cursor = new Date(startTime.getTime() + 60 * 1000);
+        } catch (error) {
+          console.warn(`计算定时任务 ${task.name} 后续启动时间失败:`, error);
+          break;
+        }
+      }
+    });
+
+  return upcomingRuns
+    .sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
+    .slice(0, limit);
+};
+
 // 计算最短倒计时任务
 const shortestCountdownTask = computed(() => {
   if (scheduledTasks.value.length === 0) return null;
@@ -5010,7 +5042,13 @@ const executeScheduledTask = async (task) => {
       const token = tokens.value.find((t) => t.id === tokenId);
       return { name: token?.name || tokenId, status: tokenStatus.value[tokenId] || "completed" };
     });
-    const { title, content } = formatScheduledTaskNotification(task.name, scheduledTokenResults, scheduledTaskStartTime);
+    const upcomingScheduledTasks = getUpcomingScheduledTaskRuns(2);
+    const { title, content } = formatScheduledTaskNotification(
+      task.name,
+      scheduledTokenResults,
+      scheduledTaskStartTime,
+      upcomingScheduledTasks,
+    );
     await sendNotifications(title, content);
 
     // 记录执行成功，用于漏执行检测

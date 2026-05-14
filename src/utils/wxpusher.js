@@ -87,14 +87,33 @@ export async function sendPushPlusMessage(token, title, content) {
   return { success: true, message: result.msg || "发送成功" };
 }
 
+function formatNotificationTime(time) {
+  const date = time instanceof Date ? time : new Date(time);
+  if (isNaN(date.getTime())) return "未知";
+
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function escapeMarkdownTableCell(value) {
+  return String(value ?? "").replace(/\|/g, "\\|");
+}
+
 /**
  * 格式化定时任务完成通知 (Markdown)
  * @param {string} taskName - 定时任务名称
  * @param {Array<{name: string, status: 'completed'|'failed', error?: string}>} tokenResults
  * @param {Date} startTime - 任务开始时间
+ * @param {Array<{name: string, startTime: Date|string}>} [upcomingTasks] - 后续批量任务
  * @returns {{title: string, content: string}}
  */
-export function formatScheduledTaskNotification(taskName, tokenResults, startTime) {
+export function formatScheduledTaskNotification(taskName, tokenResults, startTime, upcomingTasks = null) {
   const total = tokenResults.length;
   const completed = tokenResults.filter((r) => r.status === "completed").length;
   const failed = tokenResults.filter((r) => r.status === "failed").length;
@@ -138,6 +157,20 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
       .forEach((r) => {
         lines.push(`- ${r.name}`);
       });
+  }
+
+  if (Array.isArray(upcomingTasks)) {
+    lines.push(``, `### 后续批量任务`);
+    if (upcomingTasks.length === 0) {
+      lines.push(`暂无已启用的后续批量任务`);
+    } else {
+      lines.push(``, `| 序号 | 任务名称 | 启动时间 |`, `|------|----------|----------|`);
+      upcomingTasks.forEach((task, index) => {
+        lines.push(
+          `| ${index + 1} | ${escapeMarkdownTableCell(task.name)} | ${formatNotificationTime(task.startTime)} |`,
+        );
+      });
+    }
   }
 
   return { title, content: lines.join("\n") };

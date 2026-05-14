@@ -545,10 +545,14 @@ export const calculateNextRuns = (
 /**
  * 计算下次执行时间（基于任务对象）
  * @param {object} task - 任务对象
+ * @param {Date|string|number} [baseTime] - 计算参考时间
  * @returns {Date|null} - 下次执行时间
  */
-export const calculateNextExecutionTime = (task) => {
-  const now = new Date();
+export const calculateNextExecutionTime = (task, baseTime = new Date()) => {
+  const parsedBaseTime = baseTime instanceof Date ? baseTime : new Date(baseTime);
+  const now = isNaN(parsedBaseTime.getTime())
+    ? new Date()
+    : new Date(parsedBaseTime);
 
   if (task.runType === "daily") {
     // For daily tasks, parse the runTime and calculate next execution
