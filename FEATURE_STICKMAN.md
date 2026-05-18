@@ -457,6 +457,8 @@ interface TokenData {
 - 定时任务可选任务列表不再展示 `batchStudy` 与 `batchmengjing`。
 - 底层函数仍保留，避免已有本地旧配置引用这些任务时直接报函数不存在。
 
+> 后续入口策略已在第 15 节调整：`batchmengjing` 入口恢复展示，改为隐藏 `batchBuyDreamItems` 独立购买入口。
+
 ### 13.3 涉及文件
 
 - [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
@@ -499,10 +501,33 @@ interface TokenData {
 
 ---
 
+## 15. 梦境批量入口策略调整（2026-05-18，本次提交）
+
+### 15.1 调整背景
+
+一键梦境已经集成梦境商品购买逻辑，因此应保留"一键梦境"作为用户主入口，隐藏单独的"一键购买梦境商品"入口，避免用户直接运行购买任务而绕过梦境前置指令。
+
+### 15.2 行为变化
+
+- 批量日常页副本功能区恢复展示"一键梦境"按钮。
+- 定时任务可选任务列表恢复 `batchmengjing`。
+- 批量日常页副本功能区隐藏"一键购买梦境商品"按钮。
+- 定时任务可选任务列表移除 `batchBuyDreamItems`。
+- 底层 `batchBuyDreamItems` 函数仍保留，兼容旧本地配置；若旧定时任务同时含 `batchmengjing` 和 `batchBuyDreamItems`，仍会过滤掉单独购买项，避免重复购买。
+- 梦境商品购买配置入口仍保留在批量设置里，供一键梦境读取购买清单。
+
+### 15.3 涉及文件
+
+- [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
+- [src/utils/batch/constants.js](src/utils/batch/constants.js)
+
+---
+
 ## 维护索引（按时间倒序）
 
 | 日期 | 提交 | 变更摘要 |
 |---|---|---|
+| 2026-05-18 | 本次提交 | 恢复一键梦境批量入口，隐藏一键购买梦境商品独立入口 |
 | 2026-05-18 | 本次提交 | 日常任务新增默认关闭的一键灯神扫荡配置，并在日常动作最后执行 |
 | 2026-05-18 | 本次提交 | 隐藏独立的一键答题和一键梦境批量任务入口，仅保留整合后的日常/梦境流程 |
 | 2026-05-18 | `3671248` | 一键梦境整合梦境商品购买；日常任务默认执行一键答题并增加开关 |

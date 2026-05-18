@@ -418,6 +418,17 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchmengjing"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !ismengjingActivityOpen
+                  "
+                >
+                  一键梦境
+                </n-button>
+                <n-button
+                  size="small"
                   @click="skinChallenge"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -429,17 +440,6 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键领取蟠桃园任务
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchBuyDreamItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !ismengjingActivityOpen
-                  "
-                >
-                  一键购买梦境商品
                 </n-button>
               </n-space>
             </n-tab-pane>
@@ -3657,9 +3657,9 @@ const taskGroupDefinitions = [
     label: "副本",
     tasks: [
       "climbTower",
+      "batchmengjing",
       "skinChallenge",
       "batchClaimPeachTasks",
-      "batchBuyDreamItems",
     ],
   },
   { name: "baoku", label: "宝库", tasks: ["batchbaoku13", "batchbaoku45"] },

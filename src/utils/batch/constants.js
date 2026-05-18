@@ -47,6 +47,7 @@ export const availableTasks = [
   { label: "批量招募", value: "batchRecruit" },
   { label: "一键宝库前3层", value: "batchbaoku13" },
   { label: "一键宝库4,5层", value: "batchbaoku45" },
+  { label: "一键梦境", value: "batchmengjing" },
   { label: "一键俱乐部签到", value: "batchclubsign" },
   { label: "一键竞技场战斗3次", value: "batcharenafight" },
   { label: "一键钓鱼补齐", value: "batchTopUpFish" },
@@ -64,7 +65,6 @@ export const availableTasks = [
   { label: "一键怪异塔合成", value: "batchMergeItems" },
   { label: "一键领取蟠桃园任务", value: "batchClaimPeachTasks" },
   { label: "一键扫荡灯神", value: "batchGenieSweep" },
-  { label: "一键购买梦境商品", value: "batchBuyDreamItems" },
 ];
 
 // 车辆研究消耗表
