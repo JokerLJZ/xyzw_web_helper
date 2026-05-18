@@ -43,6 +43,22 @@ const getTodayBossId = () => {
   return DAY_BOSS_MAP[dayOfWeek];
 };
 
+const isTimestampInCurrentWeek = (timestamp) => {
+  if (!timestamp) return false;
+
+  const date = new Date(timestamp);
+  const now = new Date();
+  const day = now.getDay() || 7;
+  const weekStart = new Date(now);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(now.getDate() - day + 1);
+
+  const nextWeekStart = new Date(weekStart);
+  nextWeekStart.setDate(weekStart.getDate() + 7);
+
+  return date >= weekStart && date < nextWeekStart;
+};
+
 export class DailyTaskRunner {
   constructor(tokenStore, delaySettings = null) {
     this.tokenStore = tokenStore;
@@ -149,6 +165,64 @@ export class DailyTaskRunner {
     }
   }
 
+  async runStudyTask(tokenId, roleData) {
+    const study = roleData.study;
+    const isCompleted =
+      study?.maxCorrectNum >= 10 &&
+      isTimestampInCurrentWeek((study.beginTime || 0) * 1000);
+
+    if (isCompleted) {
+      this.log("本周答题已完成，跳过", "success");
+      return;
+    }
+
+    const { preloadQuestions } = await import("@/utils/studyQuestionsFromJSON.js");
+    this.log("正在加载题库...");
+    await preloadQuestions();
+
+    this.tokenStore.gameData.studyStatus = {
+      isAnswering: false,
+      questionCount: 0,
+      answeredCount: 0,
+      status: "",
+      timestamp: null,
+    };
+
+    await this.executeGameCommand(
+      tokenId,
+      "study_startgame",
+      {},
+      "一键答题",
+      5000,
+    );
+
+    let maxWait = 90;
+    let lastStatus = "";
+
+    while (maxWait > 0) {
+      const status = this.tokenStore.gameData.studyStatus;
+
+      if (status.status !== lastStatus) {
+        lastStatus = status.status;
+        if (status.status === "answering") {
+          this.log("开始答题...");
+        } else if (status.status === "claiming_rewards") {
+          this.log("领取答题奖励...");
+        }
+      }
+
+      if (status.status === "completed") {
+        this.log("答题完成", "success");
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      maxWait--;
+    }
+
+    throw new Error("答题超时或未开始");
+  }
+
   loadSettings(roleId) {
     try {
       const raw = localStorage.getItem(`daily-settings:${roleId}`);
@@ -164,6 +238,7 @@ export class DailyTaskRunner {
         claimEmail: true,
         blackMarketPurchase: true,
         freeGachaEnable: true,
+        studyEnable: true,
       };
       return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
     } catch (error) {
@@ -598,6 +673,13 @@ export class DailyTaskRunner {
             {},
             `领取免费扫荡卷 ${i + 1}`,
           ),
+      });
+    }
+
+    if (settings.studyEnable !== false) {
+      taskList.push({
+        name: "一键答题",
+        execute: () => this.runStudyTask(tokenId, roleData),
       });
     }
 

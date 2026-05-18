@@ -185,6 +185,11 @@
               <span class="switch-label">付费招募</span>
               <n-switch v-model:value="settings.payRecruit" />
             </div>
+
+            <div class="switch-row">
+              <span class="switch-label">一键答题</span>
+              <n-switch v-model:value="settings.studyEnable" />
+            </div>
           </div>
         </div>
       </div>
@@ -318,9 +323,26 @@ const settings = reactive({
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  studyEnable: true,
   commandDelay: 500,
   taskDelay: 500,
 });
+
+const defaultDailySettings = {
+  arenaFormation: 1,
+  bossFormation: 1,
+  bossTimes: 2,
+  claimBottle: true,
+  payRecruit: true,
+  openBox: true,
+  arenaEnable: true,
+  claimHangUp: true,
+  claimEmail: true,
+  blackMarketPurchase: true,
+  studyEnable: true,
+  commandDelay: 500,
+  taskDelay: 500,
+};
 
 // 每日任务列表
 const tasks = ref([
@@ -562,6 +584,10 @@ const saveSettings = (roleId, s) => {
   }
 };
 
+const applySettings = (saved) => {
+  Object.assign(settings, defaultDailySettings, saved || {});
+};
+
 // 监听设置变化
 watch(
   settings,
@@ -581,7 +607,7 @@ watch(
 
       // 加载新token的设置
       const saved = loadSettings(newToken.id);
-      if (saved) Object.assign(settings, saved);
+      applySettings(saved);
 
       // 如果WebSocket已连接，尝试获取最新角色信息
       if (isConnected.value) {
@@ -624,7 +650,7 @@ onMounted(async () => {
   const role = getCurrentRole();
   if (role) {
     const saved = loadSettings(role.roleId);
-    if (saved) Object.assign(settings, saved);
+    applySettings(saved);
   }
 
   // 初始化时的任务状态同步会通过 watch selectedTokenRoleInfo 自动处理

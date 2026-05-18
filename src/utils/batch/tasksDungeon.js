@@ -1,4 +1,4 @@
-import { isDungeonOpen, merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
+import { isDungeonOpen, merchantConfig } from "@/utils/dreamConstants";
 
 /**
  * 宝库、梦境类任务
@@ -26,6 +26,129 @@ export function createTasksDungeon(deps) {
     message,
     currentRunningTokenId,
   } = deps;
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const getDreamPurchaseList = () => batchSettings.dreamPurchaseList || [];
+
+  const runDreamPurchaseForToken = async (tokenId, token, purchaseList) => {
+    if (purchaseList.length === 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${token.name} 未配置梦境购买清单，跳过购买`,
+        type: "warning",
+      });
+      return { successCount: 0, failCount: 0, skipped: true };
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 开始梦境购买: ${token.name} ===`,
+      type: "info",
+    });
+
+    const roleInfo = await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "role_getroleinfo",
+      {},
+      15000,
+    );
+
+    if (
+      !roleInfo ||
+      !roleInfo.role ||
+      !roleInfo.role.dungeon ||
+      !roleInfo.role.dungeon.merchant
+    ) {
+      throw new Error("无法获取梦境商店数据");
+    }
+
+    const merchantData = roleInfo.role.dungeon.merchant;
+    const levelId = roleInfo.role.levelId || 0;
+
+    if (levelId < 4000) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${token.name} 关卡数小于4000，无法购买`,
+        type: "warning",
+      });
+      return { successCount: 0, failCount: 0, skipped: true };
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+    const operations = [];
+
+    for (const itemKey of purchaseList) {
+      const [targetMerchantId, targetItemIndex] = itemKey
+        .split("-")
+        .map(Number);
+      const merchantItems = merchantData[targetMerchantId];
+
+      if (merchantItems) {
+        for (let pos = 0; pos < merchantItems.length; pos++) {
+          if (merchantItems[pos] === targetItemIndex) {
+            operations.push({
+              merchantId: targetMerchantId,
+              index: targetItemIndex,
+              pos,
+            });
+          }
+        }
+      }
+    }
+
+    operations.sort((a, b) => {
+      if (a.merchantId !== b.merchantId) return a.merchantId - b.merchantId;
+      return b.pos - a.pos;
+    });
+
+    for (const op of operations) {
+      if (shouldStop.value) break;
+
+      try {
+        const response = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "dungeon_buymerchant",
+          {
+            id: op.merchantId,
+            index: op.index,
+            pos: op.pos,
+          },
+          5000,
+        );
+
+        if (response && response.reward) {
+          successCount++;
+          const merchantName =
+            merchantConfig[op.merchantId]?.name || `商人${op.merchantId}`;
+          const itemName =
+            merchantConfig[op.merchantId]?.items?.[op.index] ||
+            `商品${op.index}`;
+
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 购买成功: ${merchantName} - ${itemName}`,
+            type: "success",
+          });
+        } else {
+          failCount++;
+        }
+      } catch (err) {
+        failCount++;
+      }
+
+      await sleep(500);
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== ${token.name} 梦境购买完成: 成功${successCount}, 失败${failCount} ===`,
+      type: "success",
+    });
+
+    return { successCount, failCount, skipped: false };
+  };
 
   /**
    * 一键宝库前3层
@@ -183,6 +306,14 @@ export function createTasksDungeon(deps) {
    */
   const batchmengjing = async () => {
     if (selectedTokens.value.length === 0) return;
+
+    if (!isDungeonOpen()) {
+      message.warning("当前不是梦境开放时间（周三/周四/周日/周一）");
+      return;
+    }
+
+    const purchaseList = getDreamPurchaseList();
+
     isRunning.value = true;
     shouldStop.value = false;
 
@@ -203,33 +334,28 @@ export function createTasksDungeon(deps) {
         await ensureConnection(tokenId);
         if (shouldStop.value) return;
         const mjbattleTeam = { 0: 107 };
-        const dayOfWeek = new Date().getDay();
-        if (
-          dayOfWeek === 0 ||
-          dayOfWeek === 1 ||
-          dayOfWeek === 3 ||
-          dayOfWeek === 4
-        ) {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "dungeon_selecthero",
-            { battleTeam: mjbattleTeam },
-            5000,
-          );
-          await new Promise((r) => setTimeout(r, 500));
-          tokenStatus.value[tokenId] = "completed";
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `=== ${token.name} 咸王梦境已完成 ===`,
-            type: "success",
-          });
-        } else {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `=== ${token.name} 当前未在开放时间 ===`,
-            type: "error",
-          });
-        }
+
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "dungeon_selecthero",
+          { battleTeam: mjbattleTeam },
+          5000,
+        );
+        await sleep(500);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${token.name} 咸王梦境指令已完成，开始执行梦境购买 ===`,
+          type: "success",
+        });
+
+        await runDreamPurchaseForToken(tokenId, token, purchaseList);
+
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${token.name} 咸王梦境已完成 ===`,
+          type: "success",
+        });
       } catch (error) {
         console.error(error);
         tokenStatus.value[tokenId] = "failed";
@@ -266,7 +392,7 @@ export function createTasksDungeon(deps) {
       return;
     }
 
-    const purchaseList = batchSettings.dreamPurchaseList || [];
+    const purchaseList = getDreamPurchaseList();
     if (purchaseList.length === 0) {
       message.warning("请先在设置中配置购买清单");
       return;
@@ -291,96 +417,9 @@ export function createTasksDungeon(deps) {
         });
         await ensureConnection(tokenId);
 
-        // 1. 获取角色信息以获得商店数据
-        const roleInfo = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "role_getroleinfo",
-          {},
-          15000
-        );
-
-        if (!roleInfo || !roleInfo.role || !roleInfo.role.dungeon || !roleInfo.role.dungeon.merchant) {
-          throw new Error("无法获取梦境商店数据");
-        }
-
-        const merchantData = roleInfo.role.dungeon.merchant;
-        const levelId = roleInfo.role.levelId || 0;
-        let successCount = 0;
-        let failCount = 0;
-
-        const operations = [];
-
-        for (const itemKey of purchaseList) {
-          const [targetMerchantId, targetItemIndex] = itemKey.split("-").map(Number);
-
-          const merchantItems = merchantData[targetMerchantId];
-          if (merchantItems) {
-            for (let pos = 0; pos < merchantItems.length; pos++) {
-              if (merchantItems[pos] === targetItemIndex) {
-                operations.push({
-                  merchantId: targetMerchantId,
-                  index: targetItemIndex,
-                  pos: pos
-                });
-              }
-            }
-          }
-        }
-        operations.sort((a, b) => {
-          if (a.merchantId !== b.merchantId) return a.merchantId - b.merchantId;
-          return b.pos - a.pos;
-        });
-
-        for (const op of operations) {
-          if (shouldStop.value) break;
-
-          if (levelId < 4000) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 关卡数小于4000，无法购买`,
-              type: "warning",
-            });
-            return;
-          }
-
-          try {
-
-            const response = await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "dungeon_buymerchant",
-              {
-                id: op.merchantId,
-                index: op.index,
-                pos: op.pos,
-              },
-              5000
-            );
-
-            if (response && response.reward) {
-              successCount++;
-              const merchantName = merchantConfig[op.merchantId] ? merchantConfig[op.merchantId].name : `商人${op.merchantId}`;
-              const itemName = merchantConfig[op.merchantId] && merchantConfig[op.merchantId].items[op.index] ? merchantConfig[op.merchantId].items[op.index] : `商品${op.index}`;
-
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 购买成功: ${merchantName} - ${itemName}`,
-                type: "success",
-              });
-            } else {
-              failCount++;
-            }
-          } catch (err) {
-            failCount++;
-          }
-          await new Promise((r) => setTimeout(r, 500));
-        }
+        await runDreamPurchaseForToken(tokenId, token, purchaseList);
 
         tokenStatus.value[tokenId] = "completed";
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 梦境购买完成: 成功${successCount}, 失败${failCount} ===`,
-          type: "success",
-        });
       } catch (error) {
         console.error(error);
         tokenStatus.value[tokenId] = "failed";

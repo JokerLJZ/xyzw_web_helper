@@ -819,6 +819,10 @@
               <span class="switch-label">付费招募</span
               ><n-switch v-model:value="currentSettings.payRecruit" />
             </div>
+            <div class="switch-row">
+              <span class="switch-label">一键答题</span
+              ><n-switch v-model:value="currentSettings.studyEnable" />
+            </div>
           </div>
         </div>
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
@@ -904,6 +908,10 @@
             <div class="switch-row">
               <span class="switch-label">付费招募</span
               ><n-switch v-model:value="currentTemplate.payRecruit" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">一键答题</span
+              ><n-switch v-model:value="currentTemplate.studyEnable" />
             </div>
           </div>
         </div>
@@ -3434,6 +3442,7 @@ const currentSettings = reactive({
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  studyEnable: true,
 });
 
 // Task Template State
@@ -3458,6 +3467,7 @@ const currentTemplate = reactive({
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  studyEnable: true,
 });
 
 // Account Template References
@@ -4926,8 +4936,22 @@ const executeScheduledTask = async (task) => {
     // Always use the latest selectedTokens from the task that exist in current tokens.value
     selectedTokens.value = [...availableTokens];
 
+    const selectedTaskNames = task.selectedTasks.includes("batchmengjing")
+      ? task.selectedTasks.filter(
+          (taskName) => taskName !== "batchBuyDreamItems",
+        )
+      : task.selectedTasks;
+
+    if (selectedTaskNames.length !== task.selectedTasks.length) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: "一键购买梦境商品已整合进一键梦境，本次定时任务跳过单独购买项",
+        type: "info",
+      });
+    }
+
     // Execute selected tasks in parallel
-    const taskPromises = task.selectedTasks.map(async (taskName) => {
+    const taskPromises = selectedTaskNames.map(async (taskName) => {
       if (shouldStop.value) return;
 
       if (
@@ -5400,6 +5424,7 @@ const loadSettings = (tokenId) => {
       claimHangUp: true,
       claimEmail: true,
       blackMarketPurchase: true,
+      studyEnable: true,
     };
     return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
   } catch (error) {
@@ -5444,6 +5469,7 @@ const openTaskTemplateModal = () => {
     claimHangUp: true,
     claimEmail: true,
     blackMarketPurchase: true,
+    studyEnable: true,
   });
   currentTemplateName.value = "";
   showTaskTemplateModal.value = true;
@@ -5515,6 +5541,7 @@ const openTemplateManagerModal = () => {
 
 const openEditTemplateModal = (template) => {
   // 加载模板数据到当前编辑模板
+  resetTemplateForm();
   currentTemplateId.value = template.id;
   currentTemplateName.value = template.name;
   Object.assign(currentTemplate, template.settings);
@@ -5592,6 +5619,7 @@ const resetTemplateForm = () => {
     claimHangUp: true,
     claimEmail: true,
     blackMarketPurchase: true,
+    studyEnable: true,
   });
 };
 

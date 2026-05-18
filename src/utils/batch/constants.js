@@ -128,6 +128,7 @@ export const defaultSettings = {
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  studyEnable: true,
 };
 
 // 默认批量设置
@@ -176,6 +177,7 @@ export const defaultTemplate = {
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  studyEnable: true,
 };
 
 // 默认任务表单
