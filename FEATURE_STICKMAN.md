@@ -1,7 +1,8 @@
 # Stickman 自维护功能说明
 
 > 本文件记录由 Stickman 维护的所有新增 / 增强功能。
-> **维护约定：以后每新增或增强一个功能，必须在此文件追加对应章节，与代码改动同步提交。**
+> **强制维护规则：本项目所有功能变更（新增、增强、行为调整、回滚、从其他分支/会话/开发者带来的功能改动）都必须同步更新本文件，并与对应代码改动一起提交。**
+> **无论功能变更是否由当前会话发起，都必须补写 `FEATURE_STICKMAN.md` 后再提交/推送。**
 
 ---
 
@@ -409,10 +410,45 @@ interface TokenData {
 
 ---
 
+## 12. 梦境购买整合与日常答题默认执行（2026-05-18，提交 `3671248`）
+
+### 12.1 一键梦境整合梦境商品购买
+
+将"一键购买梦境商品"整合进"一键梦境"执行链，保证同一账号连接内先执行梦境指令，再执行购买指令：
+
+1. `batchmengjing` 建立连接后先发送 `dungeon_selecthero`，使用梦境阵容 `{ 0: 107 }`。
+2. 梦境指令成功后调用复用的 `runDreamPurchaseForToken`。
+3. 购买逻辑读取 `batchSettings.dreamPurchaseList`，通过 `role_getroleinfo` 获取商店数据，再按商人和位置顺序发送 `dungeon_buymerchant`。
+4. 如果未配置购买清单，"一键梦境"仅记录跳过购买，不中断梦境流程。
+5. 独立的"一键购买梦境商品"入口保留，用于手动补买。
+6. 定时任务若同时选择 `batchmengjing` 和 `batchBuyDreamItems`，执行前自动过滤单独购买项，避免重复购买。
+
+**涉及文件**：
+- [src/utils/batch/tasksDungeon.js](src/utils/batch/tasksDungeon.js)
+- [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
+
+### 12.2 一键答题纳入日常任务默认执行
+
+将"一键答题"纳入 `DailyTaskRunner.run()` 的日常任务流水线，默认启用：
+
+1. 新增 `studyEnable: true` 默认配置，旧账号缺失该字段时也按启用处理。
+2. 日常任务执行过程中加载题库，发送 `study_startgame`，等待答题插件提交答案并领取奖励。
+3. 若本周已达到 `maxCorrectNum >= 10` 且 `beginTime` 在本周内，则跳过答题。
+4. 批量日常设置与单账号日常设置均新增"一键答题"开关，可显式关闭。
+
+**涉及文件**：
+- [src/utils/dailyTaskRunner.js](src/utils/dailyTaskRunner.js)
+- [src/utils/batch/constants.js](src/utils/batch/constants.js)
+- [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
+- [src/components/Daily/DailyTaskStatus.vue](src/components/Daily/DailyTaskStatus.vue)
+
+---
+
 ## 维护索引（按时间倒序）
 
 | 日期 | 提交 | 变更摘要 |
 |---|---|---|
+| 2026-05-18 | `3671248` | 一键梦境整合梦境商品购买；日常任务默认执行一键答题并增加开关 |
 | 2026-05-14 | 本次提交 | 新增五次领取挂机批量任务：连续领取 5 次，每次间隔 6 秒，完成后自动加钟 |
 | 2026-05-12 | `3c7804a` | 回滚特权功法奖励 ID，恢复 `legacy_claimchargereward` 参数 `{ id: 2 }` |
 | 2026-05-12 | `5068776` | 曾尝试调整特权功法奖励 ID 为 `{ id: 3 }`，后续已回滚 |
