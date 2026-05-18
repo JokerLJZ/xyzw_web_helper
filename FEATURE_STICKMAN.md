@@ -444,10 +444,67 @@ interface TokenData {
 
 ---
 
+## 13. 隐藏独立批量答题与梦境入口（2026-05-18，本次提交）
+
+### 13.1 背景
+
+`batchStudy` 已纳入日常任务默认执行，`batchmengjing` 已承载梦境指令与梦境购买的整合流程。为避免用户在批量任务页误以为需要额外单独执行，隐藏两个独立批量任务入口。
+
+### 13.2 行为变化
+
+- 批量日常页顶部功能按钮不再展示"一键答题"。
+- 批量日常页副本功能按钮不再展示"一键梦境"。
+- 定时任务可选任务列表不再展示 `batchStudy` 与 `batchmengjing`。
+- 底层函数仍保留，避免已有本地旧配置引用这些任务时直接报函数不存在。
+
+### 13.3 涉及文件
+
+- [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
+- [src/utils/batch/constants.js](src/utils/batch/constants.js)
+
+---
+
+## 14. 日常任务可选执行一键灯神扫荡（2026-05-18，本次提交）
+
+### 14.1 功能目标
+
+将现有"一键灯神扫荡"能力接入日常任务，但默认保持关闭，避免日常流程自动消耗扫荡券。用户可在日常任务配置中按账号或模板启用。
+
+### 14.2 执行位置
+
+`DailyTaskRunner.run()` 中的一键灯神扫荡会追加在任务列表最后，位于日常积分、周常、通行证等奖励领取动作之后执行，确保它是日常任务执行动作的最后一项。
+
+### 14.3 执行逻辑
+
+- 执行前重新发送 `role_getroleinfo` 获取最新角色数据与扫荡券数量。
+- 读取道具 `1021` 作为灯神扫荡券数量。
+- 在魏 / 蜀 / 吴 / 群四个灯神中选择已通过层数最高的灯神。
+- 使用 `genie_sweep` 按每批最多 20 次消耗扫荡券，直到扫荡券耗尽或命令失败。
+- 若无扫荡券或无可扫荡关卡，仅记录跳过，不影响日常任务整体完成。
+
+### 14.4 配置项
+
+`daily-settings:<tokenId>` / 任务模板新增：
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `genieSweepEnable` | `false` | 是否在日常任务最后执行一键灯神扫荡 |
+
+### 14.5 涉及文件
+
+- [src/utils/dailyTaskRunner.js](src/utils/dailyTaskRunner.js)
+- [src/utils/batch/constants.js](src/utils/batch/constants.js)
+- [src/views/BatchDailyTasks.vue](src/views/BatchDailyTasks.vue)
+- [src/components/Daily/DailyTaskStatus.vue](src/components/Daily/DailyTaskStatus.vue)
+
+---
+
 ## 维护索引（按时间倒序）
 
 | 日期 | 提交 | 变更摘要 |
 |---|---|---|
+| 2026-05-18 | 本次提交 | 日常任务新增默认关闭的一键灯神扫荡配置，并在日常动作最后执行 |
+| 2026-05-18 | 本次提交 | 隐藏独立的一键答题和一键梦境批量任务入口，仅保留整合后的日常/梦境流程 |
 | 2026-05-18 | `3671248` | 一键梦境整合梦境商品购买；日常任务默认执行一键答题并增加开关 |
 | 2026-05-14 | 本次提交 | 新增五次领取挂机批量任务：连续领取 5 次，每次间隔 6 秒，完成后自动加钟 |
 | 2026-05-12 | `3c7804a` | 回滚特权功法奖励 ID，恢复 `legacy_claimchargereward` 参数 `{ id: 2 }` |

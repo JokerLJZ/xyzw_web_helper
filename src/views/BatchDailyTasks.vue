@@ -353,13 +353,6 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="batchStudy"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键答题
-                </n-button>
-                <n-button
-                  size="small"
                   @click="batcharenafight"
                   :disabled="
                     isRunning ||
@@ -422,17 +415,6 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键爬塔
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchmengjing"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !ismengjingActivityOpen
-                  "
-                >
-                  一键梦境
                 </n-button>
                 <n-button
                   size="small"
@@ -823,6 +805,10 @@
               <span class="switch-label">一键答题</span
               ><n-switch v-model:value="currentSettings.studyEnable" />
             </div>
+            <div class="switch-row">
+              <span class="switch-label">一键灯神扫荡</span
+              ><n-switch v-model:value="currentSettings.genieSweepEnable" />
+            </div>
           </div>
         </div>
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
@@ -912,6 +898,10 @@
             <div class="switch-row">
               <span class="switch-label">一键答题</span
               ><n-switch v-model:value="currentTemplate.studyEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">一键灯神扫荡</span
+              ><n-switch v-model:value="currentTemplate.genieSweepEnable" />
             </div>
           </div>
         </div>
@@ -3443,6 +3433,7 @@ const currentSettings = reactive({
   claimEmail: true,
   blackMarketPurchase: true,
   studyEnable: true,
+  genieSweepEnable: false,
 });
 
 // Task Template State
@@ -3468,6 +3459,7 @@ const currentTemplate = reactive({
   claimEmail: true,
   blackMarketPurchase: true,
   studyEnable: true,
+  genieSweepEnable: false,
 });
 
 // Account Template References
@@ -3652,7 +3644,6 @@ const taskGroupDefinitions = [
       "resetBottles",
       "batchlingguanzi",
       "batchclubsign",
-      "batchStudy",
       "batcharenafight",
       "batchSmartSendCar",
       "batchClaimCars",
@@ -3666,7 +3657,6 @@ const taskGroupDefinitions = [
     label: "副本",
     tasks: [
       "climbTower",
-      "batchmengjing",
       "skinChallenge",
       "batchClaimPeachTasks",
       "batchBuyDreamItems",
@@ -5425,6 +5415,7 @@ const loadSettings = (tokenId) => {
       claimEmail: true,
       blackMarketPurchase: true,
       studyEnable: true,
+      genieSweepEnable: false,
     };
     return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
   } catch (error) {
@@ -5470,6 +5461,7 @@ const openTaskTemplateModal = () => {
     claimEmail: true,
     blackMarketPurchase: true,
     studyEnable: true,
+    genieSweepEnable: false,
   });
   currentTemplateName.value = "";
   showTaskTemplateModal.value = true;
@@ -5620,6 +5612,7 @@ const resetTemplateForm = () => {
     claimEmail: true,
     blackMarketPurchase: true,
     studyEnable: true,
+    genieSweepEnable: false,
   });
 };
 

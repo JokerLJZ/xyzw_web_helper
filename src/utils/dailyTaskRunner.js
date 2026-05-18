@@ -223,6 +223,75 @@ export class DailyTaskRunner {
     throw new Error("答题超时或未开始");
   }
 
+  async runGenieSweepTask(tokenId) {
+    const roleInfoRes = await this.executeGameCommand(
+      tokenId,
+      "role_getroleinfo",
+      {},
+      "获取灯神扫荡信息",
+      5000,
+    );
+
+    const role = roleInfoRes?.role || roleInfoRes?.data?.role || {};
+    const genieData = role.genie || {};
+    const sweepTicketCount = role.items?.[1021]?.quantity || 0;
+
+    this.log(`当前扫荡券数量: ${sweepTicketCount}`);
+
+    if (sweepTicketCount <= 0) {
+      this.log("扫荡券不足，跳过一键灯神扫荡", "warning");
+      return;
+    }
+
+    let maxLayer = -1;
+    let bestGenieId = -1;
+
+    for (let genieId = 1; genieId <= 4; genieId++) {
+      if (genieData[genieId] !== undefined) {
+        const currentLayer = genieData[genieId] + 1;
+        if (currentLayer > maxLayer) {
+          maxLayer = currentLayer;
+          bestGenieId = genieId;
+        }
+      }
+    }
+
+    if (bestGenieId === -1) {
+      this.log("未找到可扫荡的灯神关卡", "warning");
+      return;
+    }
+
+    const genieNames = { 1: "魏国", 2: "蜀国", 3: "吴国", 4: "群雄" };
+    this.log(
+      `开始扫荡: ${genieNames[bestGenieId]}灯神 (第${maxLayer}层)`,
+    );
+
+    let remainingTickets = sweepTicketCount;
+
+    while (remainingTickets > 0) {
+      const sweepCnt = Math.min(remainingTickets, 20);
+      const res = await this.executeGameCommand(
+        tokenId,
+        "genie_sweep",
+        { genieId: bestGenieId, sweepCnt },
+        `灯神扫荡 ${sweepCnt} 次`,
+        5000,
+      );
+
+      const nextTicketCount = res?.role?.items?.[1021]?.quantity;
+      if (
+        typeof nextTicketCount === "number" &&
+        nextTicketCount < remainingTickets
+      ) {
+        remainingTickets = nextTicketCount;
+      } else {
+        remainingTickets -= sweepCnt;
+      }
+    }
+
+    this.log("一键灯神扫荡完成", "success");
+  }
+
   loadSettings(roleId) {
     try {
       const raw = localStorage.getItem(`daily-settings:${roleId}`);
@@ -239,6 +308,7 @@ export class DailyTaskRunner {
         blackMarketPurchase: true,
         freeGachaEnable: true,
         studyEnable: true,
+        genieSweepEnable: false,
       };
       return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
     } catch (error) {
@@ -795,6 +865,13 @@ export class DailyTaskRunner {
           ),
       },
     );
+
+    if (settings.genieSweepEnable === true) {
+      taskList.push({
+        name: "一键灯神扫荡",
+        execute: () => this.runGenieSweepTask(tokenId),
+      });
+    }
 
     // 执行
     const totalTasks = taskList.length;

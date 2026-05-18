@@ -38,7 +38,6 @@ export const availableTasks = [
   { label: "一键领取罐子", value: "batchlingguanzi" },
   { label: "一键爬塔", value: "climbTower" },
   { label: "一键爬怪异塔", value: "climbWeirdTower" },
-  { label: "一键答题", value: "batchStudy" },
   { label: "智能发车", value: "batchSmartSendCar" },
   { label: "一键收车", value: "batchClaimCars" },
   { label: "批量开箱", value: "batchOpenBox" },
@@ -48,7 +47,6 @@ export const availableTasks = [
   { label: "批量招募", value: "batchRecruit" },
   { label: "一键宝库前3层", value: "batchbaoku13" },
   { label: "一键宝库4,5层", value: "batchbaoku45" },
-  { label: "一键梦境", value: "batchmengjing" },
   { label: "一键俱乐部签到", value: "batchclubsign" },
   { label: "一键竞技场战斗3次", value: "batcharenafight" },
   { label: "一键钓鱼补齐", value: "batchTopUpFish" },
@@ -129,6 +127,7 @@ export const defaultSettings = {
   claimEmail: true,
   blackMarketPurchase: true,
   studyEnable: true,
+  genieSweepEnable: false,
 };
 
 // 默认批量设置
@@ -178,6 +177,7 @@ export const defaultTemplate = {
   claimEmail: true,
   blackMarketPurchase: true,
   studyEnable: true,
+  genieSweepEnable: false,
 };
 
 // 默认任务表单

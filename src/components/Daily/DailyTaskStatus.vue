@@ -190,6 +190,11 @@
               <span class="switch-label">一键答题</span>
               <n-switch v-model:value="settings.studyEnable" />
             </div>
+
+            <div class="switch-row">
+              <span class="switch-label">一键灯神扫荡</span>
+              <n-switch v-model:value="settings.genieSweepEnable" />
+            </div>
           </div>
         </div>
       </div>
@@ -324,6 +329,7 @@ const settings = reactive({
   claimEmail: true,
   blackMarketPurchase: true,
   studyEnable: true,
+  genieSweepEnable: false,
   commandDelay: 500,
   taskDelay: 500,
 });
@@ -340,6 +346,7 @@ const defaultDailySettings = {
   claimEmail: true,
   blackMarketPurchase: true,
   studyEnable: true,
+  genieSweepEnable: false,
   commandDelay: 500,
   taskDelay: 500,
 };
