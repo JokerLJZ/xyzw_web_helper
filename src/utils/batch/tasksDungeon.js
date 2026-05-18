@@ -31,6 +31,14 @@ export function createTasksDungeon(deps) {
 
   const getDreamPurchaseList = () => batchSettings.dreamPurchaseList || [];
 
+  const getServerErrorCode = (error) => {
+    const messageText = error?.message || "";
+    const match = messageText.match(/服务器错误:\s*(\d+)/);
+    return match ? Number(match[1]) : null;
+  };
+
+  const DREAM_SELECT_CONTINUE_ERROR_CODES = new Set([2600040]);
+
   const runDreamPurchaseForToken = async (tokenId, token, purchaseList) => {
     if (purchaseList.length === 0) {
       addLog({
@@ -335,12 +343,26 @@ export function createTasksDungeon(deps) {
         if (shouldStop.value) return;
         const mjbattleTeam = { 0: 107 };
 
-        await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "dungeon_selecthero",
-          { battleTeam: mjbattleTeam },
-          5000,
-        );
+        try {
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "dungeon_selecthero",
+            { battleTeam: mjbattleTeam },
+            5000,
+          );
+        } catch (dreamError) {
+          const errorCode = getServerErrorCode(dreamError);
+          if (!DREAM_SELECT_CONTINUE_ERROR_CODES.has(errorCode)) {
+            throw dreamError;
+          }
+
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 咸王梦境指令返回 ${errorCode}，继续执行梦境购买`,
+            type: "warning",
+          });
+        }
+
         await sleep(500);
         addLog({
           time: new Date().toLocaleTimeString(),
