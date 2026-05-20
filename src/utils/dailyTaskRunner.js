@@ -59,6 +59,8 @@ const isTimestampInCurrentWeek = (timestamp) => {
   return date >= weekStart && date < nextWeekStart;
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class DailyTaskRunner {
   constructor(tokenStore, delaySettings = null) {
     this.tokenStore = tokenStore;
@@ -103,6 +105,22 @@ export class DailyTaskRunner {
         this.log(`[${tokenName}] ${description} - 失败: ${error.message}`, "error");
       }
       throw error;
+    }
+  }
+
+  async claimHangUpRewardsFiveTimes(tokenId) {
+    for (let i = 0; i < 5; i++) {
+      await this.executeGameCommand(
+        tokenId,
+        "system_claimhangupreward",
+        {},
+        `领取挂机奖励 ${i + 1}/5`,
+        5000,
+      );
+
+      if (i < 4) {
+        await sleep(6000);
+      }
     }
   }
 
@@ -432,14 +450,8 @@ export class DailyTaskRunner {
 
     if (!isTaskCompleted(5) && settings.claimHangUp) {
       taskList.push({
-        name: "领取挂机奖励",
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "system_claimhangupreward",
-            {},
-            "领取挂机奖励",
-          ),
+        name: "领取5次挂机奖励",
+        execute: () => this.claimHangUpRewardsFiveTimes(tokenId),
       });
       for (let i = 0; i < 4; i++) {
         taskList.push({

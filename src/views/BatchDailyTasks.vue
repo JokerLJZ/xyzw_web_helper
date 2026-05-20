@@ -318,13 +318,6 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="claimHangUpRewardsFiveTimes"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  五次领取挂机
-                </n-button>
-                <n-button
-                  size="small"
                   @click="batchAddHangUpTime"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -3631,6 +3624,8 @@ const taskForm = reactive({
   enabled: true, // Whether the task is enabled
 });
 
+const integratedDailyTaskNames = ["claimHangUpRewardsFiveTimes"];
+
 // 任务分组定义
 const taskGroupDefinitions = [
   {
@@ -3639,7 +3634,6 @@ const taskGroupDefinitions = [
     tasks: [
       "startBatch",
       "claimHangUpRewards",
-      "claimHangUpRewardsFiveTimes",
       "batchAddHangUpTime",
       "resetBottles",
       "batchlingguanzi",
@@ -4826,6 +4820,8 @@ const verifyTaskDependencies = async (task) => {
 
   // Verify task functions exist
   for (const taskName of task.selectedTasks) {
+    if (integratedDailyTaskNames.includes(taskName)) continue;
+
     const taskFunction = eval(taskName);
     if (typeof taskFunction !== "function") {
       addLog({
@@ -4926,18 +4922,40 @@ const executeScheduledTask = async (task) => {
     // Always use the latest selectedTokens from the task that exist in current tokens.value
     selectedTokens.value = [...availableTokens];
 
-    const selectedTaskNames = task.selectedTasks.includes("batchmengjing")
-      ? task.selectedTasks.filter(
-          (taskName) => taskName !== "batchBuyDreamItems",
-        )
-      : task.selectedTasks;
+    const selectedTaskNames = task.selectedTasks.filter((taskName) => {
+      if (integratedDailyTaskNames.includes(taskName)) return false;
+      if (
+        task.selectedTasks.includes("batchmengjing") &&
+        taskName === "batchBuyDreamItems"
+      ) {
+        return false;
+      }
+      return true;
+    });
 
     if (selectedTaskNames.length !== task.selectedTasks.length) {
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: "一键购买梦境商品已整合进一键梦境，本次定时任务跳过单独购买项",
-        type: "info",
-      });
+      if (
+        task.selectedTasks.some((taskName) =>
+          integratedDailyTaskNames.includes(taskName),
+        )
+      ) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: "五次领取挂机已整合进日常任务，本次定时任务跳过单独项",
+          type: "info",
+        });
+      }
+
+      if (
+        task.selectedTasks.includes("batchmengjing") &&
+        task.selectedTasks.includes("batchBuyDreamItems")
+      ) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: "一键购买梦境商品已整合进一键梦境，本次定时任务跳过单独购买项",
+          type: "info",
+        });
+      }
     }
 
     // Execute selected tasks in parallel
@@ -6185,7 +6203,6 @@ const createTaskDeps = () => ({
 const tasksHangUp = createTasksHangUp(createTaskDeps());
 const {
   claimHangUpRewards,
-  claimHangUpRewardsFiveTimes,
   batchAddHangUpTime,
   batchStudy,
   batchclubsign,
