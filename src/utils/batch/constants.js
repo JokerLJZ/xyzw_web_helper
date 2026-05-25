@@ -48,6 +48,7 @@ export const availableTasks = [
   { label: "一键宝库4,5层", value: "batchbaoku45" },
   { label: "一键梦境", value: "batchmengjing" },
   { label: "一键俱乐部签到", value: "batchclubsign" },
+  { label: "一键盐场报名", value: "batchSaltSignup" },
   { label: "一键竞技场战斗3次", value: "batcharenafight" },
   { label: "一键钓鱼补齐", value: "batchTopUpFish" },
   { label: "一键竞技场补齐", value: "batchTopUpArena" },

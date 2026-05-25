@@ -346,6 +346,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchSaltSignup"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键盐场报名
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batcharenafight"
                   :disabled="
                     isRunning ||
@@ -3018,6 +3025,7 @@ import {
   createTasksArena,
   createTasksStore,
   createTasksLegacy,
+  createTasksSalt,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
@@ -3638,6 +3646,7 @@ const taskGroupDefinitions = [
       "resetBottles",
       "batchlingguanzi",
       "batchclubsign",
+      "batchSaltSignup",
       "batcharenafight",
       "batchSmartSendCar",
       "batchClaimCars",
@@ -6262,6 +6271,9 @@ const {
   batchLegacyClaimChargeReward,
   batchLegacyGiftSendEnhanced,
 } = tasksLegacy;
+
+const tasksSalt = createTasksSalt(createTaskDeps());
+const { batchSaltSignup } = tasksSalt;
 
 const startBatch = async () => {
   if (selectedTokens.value.length === 0) return;
