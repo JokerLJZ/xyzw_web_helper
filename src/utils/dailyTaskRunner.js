@@ -1,4 +1,5 @@
 import { useTokenStore } from "@/stores/tokenStore";
+import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
 
 // 辅助函数
 const pickArenaTargetId = (targets) => {
@@ -41,6 +42,20 @@ const getTodayBossId = () => {
   const DAY_BOSS_MAP = [9904, 9905, 9901, 9902, 9903, 9904, 9905]; // 周日~周六
   const dayOfWeek = new Date().getDay();
   return DAY_BOSS_MAP[dayOfWeek];
+};
+
+const calculateMonthShouldBe = (target) => {
+  const now = new Date();
+  const daysInMonth = new Date(
+    now.getFullYear(),
+    now.getMonth() + 1,
+    0,
+  ).getDate();
+  const dayOfMonth = now.getDate();
+  const remainingDays = Math.max(0, daysInMonth - dayOfMonth);
+
+  if (remainingDays === 0) return target;
+  return Math.min(target, Math.ceil((dayOfMonth / daysInMonth) * target));
 };
 
 const isTimestampInCurrentWeek = (timestamp) => {
@@ -310,6 +325,275 @@ export class DailyTaskRunner {
     this.log("一键灯神扫荡完成", "success");
   }
 
+  async getLatestRole(tokenId, description = "获取最新角色信息") {
+    const roleInfoRes = await this.executeGameCommand(
+      tokenId,
+      "role_getroleinfo",
+      {},
+      description,
+      8000,
+    );
+
+    return roleInfoRes?.role || roleInfoRes?.data?.role || {};
+  }
+
+  async getActivityInfo(tokenId, description = "获取月度任务进度") {
+    const result = await this.executeGameCommand(
+      tokenId,
+      "activity_get",
+      {},
+      description,
+      10000,
+    );
+
+    return result?.activity || result?.body?.activity || result;
+  }
+
+  async runMonthlyFishTopUp(tokenId) {
+    this.log("开始月度钓鱼补齐");
+
+    const act = await this.getActivityInfo(tokenId);
+    if (!act) {
+      this.log("获取月度任务进度失败，跳过钓鱼补齐", "error");
+      return;
+    }
+
+    const fishNum = Number(act.myMonthInfo?.["2"]?.num || 0);
+    const shouldBe = calculateMonthShouldBe(FISH_TARGET);
+    let need = Math.max(0, shouldBe - fishNum);
+    this.log(`钓鱼月度进度: ${fishNum}/${FISH_TARGET}，今日应达: ${shouldBe}，需补齐: ${need}`);
+
+    if (need <= 0) {
+      this.log("钓鱼月度进度已达标，跳过", "success");
+      return;
+    }
+
+    let role = await this.getLatestRole(tokenId, "获取钓鱼库存信息");
+    const lastFreeTime = Number(
+      role?.statisticsTime?.["artifact:normal:lottery:time"] || 0,
+    );
+
+    if (isTodayAvailable(lastFreeTime)) {
+      this.log("检测到今日免费钓鱼次数，开始消耗 3 次");
+      let freeUsed = 0;
+      for (let i = 0; i < 3 && freeUsed < need; i++) {
+        try {
+          await this.executeGameCommand(
+            tokenId,
+            "artifact_lottery",
+            { lotteryNumber: 1, newFree: true, type: 1 },
+            `免费钓鱼 ${i + 1}/3`,
+            8000,
+          );
+          freeUsed++;
+        } catch (error) {
+          this.log(`免费钓鱼失败: ${error.message}`, "warning");
+          break;
+        }
+      }
+    }
+
+    const updatedAct = await this.getActivityInfo(
+      tokenId,
+      "刷新钓鱼月度进度",
+    );
+    const updatedFishNum = Number(updatedAct?.myMonthInfo?.["2"]?.num || 0);
+    let remaining = Math.max(0, shouldBe - updatedFishNum);
+    this.log(`免费次数后钓鱼进度: ${updatedFishNum}/${FISH_TARGET}，还需: ${remaining}`);
+
+    if (remaining <= 0) {
+      this.log("钓鱼补齐完成", "success");
+      return;
+    }
+
+    role = await this.getLatestRole(tokenId, "刷新普通鱼竿库存");
+    const rodCount = role?.items?.[1011]?.quantity || 0;
+    this.log(`当前普通鱼竿: ${rodCount}`);
+
+    if (rodCount < remaining) {
+      this.log(`普通鱼竿不足 (${rodCount} < ${remaining})，将仅使用现有鱼竿`, "warning");
+      remaining = rodCount;
+    }
+
+    while (remaining > 0) {
+      const batch = Math.min(10, remaining);
+      await this.executeGameCommand(
+        tokenId,
+        "artifact_lottery",
+        { lotteryNumber: batch, newFree: true, type: 1 },
+        `付费钓鱼 ${batch} 次`,
+        12000,
+      );
+      remaining -= batch;
+    }
+
+    const finalAct = await this.getActivityInfo(
+      tokenId,
+      "确认钓鱼月度进度",
+    );
+    const finalFishNum = Number(finalAct?.myMonthInfo?.["2"]?.num || 0);
+    if (finalFishNum >= shouldBe || finalFishNum >= FISH_TARGET) {
+      this.log(`钓鱼补齐完成，最终进度: ${finalFishNum}/${FISH_TARGET}`, "success");
+    } else {
+      this.log(`钓鱼补齐已停止，最终进度: ${finalFishNum}/${FISH_TARGET}`, "warning");
+    }
+
+    try {
+      const currentRole = await this.getLatestRole(tokenId, "检查鱼竿累计奖励");
+      const points = currentRole?.statistics?.["artifact:point"] || 0;
+      const exchangeCount = Math.floor(points / 20);
+
+      if (exchangeCount > 0) {
+        this.log(`检测到鱼竿累计使用 ${points}，开始领取 ${exchangeCount} 次累计奖励`);
+        for (let i = 0; i < exchangeCount; i++) {
+          await this.executeGameCommand(
+            tokenId,
+            "artifact_exchange",
+            {},
+            `领取鱼竿累计奖励 ${i + 1}/${exchangeCount}`,
+            3000,
+          );
+        }
+        this.log("鱼竿累计奖励领取结束", "success");
+      }
+    } catch (error) {
+      this.log(`检查鱼竿累计奖励失败: ${error.message}`, "warning");
+    }
+  }
+
+  async runMonthlyArenaTopUp(tokenId, settings) {
+    const hour = new Date().getHours();
+    if (hour < 6 || hour >= 22) {
+      this.log("当前不在竞技场开放时间 (6:00-22:00)，跳过月度竞技场补齐", "warning");
+      return;
+    }
+
+    this.log("开始月度竞技场补齐");
+    await this.switchToFormationIfNeeded(
+      tokenId,
+      settings.arenaFormation,
+      "竞技场阵容",
+    );
+
+    const act = await this.getActivityInfo(tokenId);
+    if (!act) {
+      this.log("获取月度任务进度失败，跳过竞技场补齐", "error");
+      return;
+    }
+
+    const arenaNum = Number(act.myArenaInfo?.num || 0);
+    const shouldBe = calculateMonthShouldBe(ARENA_TARGET);
+    const need = Math.max(0, shouldBe - arenaNum);
+    this.log(`竞技场月度进度: ${arenaNum}/${ARENA_TARGET}，今日应达: ${shouldBe}，需补齐: ${need}`);
+
+    if (need <= 0) {
+      this.log("竞技场月度进度已达标，跳过", "success");
+      return;
+    }
+
+    let role = await this.getLatestRole(tokenId, "获取咸神门票库存");
+    let ticketsLeft = role?.items?.[1007]?.quantity || 0;
+    this.log(`当前咸神门票: ${ticketsLeft}`);
+
+    if (ticketsLeft <= 0) {
+      this.log("咸神门票不足，跳过竞技场补齐", "warning");
+      return;
+    }
+
+    if (ticketsLeft < need) {
+      this.log(`咸神门票不足 (${ticketsLeft} < ${need})，将仅使用现有门票`, "warning");
+    }
+
+    await this.executeGameCommand(
+      tokenId,
+      "arena_startarea",
+      {},
+      "开始竞技场",
+      6000,
+    );
+
+    let remaining = Math.min(need, ticketsLeft);
+    let safetyCounter = 0;
+    const safetyMaxFights = 100;
+    let round = 1;
+
+    while (remaining > 0 && ticketsLeft > 0 && safetyCounter < safetyMaxFights) {
+      const planFights = Math.min(Math.ceil(remaining / 2), ticketsLeft);
+      this.log(`竞技场补齐第${round}轮：计划战斗 ${planFights} 场，剩余门票 ${ticketsLeft}`);
+
+      for (let i = 0; i < planFights && safetyCounter < safetyMaxFights; i++) {
+        let targets;
+        try {
+          targets = await this.executeGameCommand(
+            tokenId,
+            "arena_getareatarget",
+            {},
+            `获取竞技场目标 ${i + 1}/${planFights}`,
+            8000,
+          );
+        } catch (error) {
+          this.log(`获取竞技场目标失败: ${error.message}`, "error");
+          break;
+        }
+
+        const targetId = pickArenaTargetId(targets);
+        if (!targetId) {
+          this.log(`未找到可用的竞技场目标: ${JSON.stringify(targets)}`, "warning");
+          break;
+        }
+
+        try {
+          await this.executeGameCommand(
+            tokenId,
+            "fight_startareaarena",
+            { targetId },
+            `竞技场补齐战斗 ${i + 1}/${planFights}`,
+            15000,
+          );
+          ticketsLeft--;
+        } catch (error) {
+          this.log(`竞技场对决失败: ${error.message}`, "error");
+        }
+
+        safetyCounter++;
+      }
+
+      const updatedAct = await this.getActivityInfo(
+        tokenId,
+        "刷新竞技场月度进度",
+      );
+      const updatedArenaNum = Number(updatedAct?.myArenaInfo?.num || 0);
+
+      try {
+        role = await this.getLatestRole(tokenId, "同步咸神门票库存");
+        const latestTickets = role?.items?.[1007]?.quantity || 0;
+        if (latestTickets !== ticketsLeft) {
+          this.log(`同步最新门票数量: ${latestTickets}`);
+          ticketsLeft = latestTickets;
+        }
+      } catch (error) {
+        this.log(`同步咸神门票失败: ${error.message}`, "warning");
+      }
+
+      remaining = Math.min(Math.max(0, shouldBe - updatedArenaNum), ticketsLeft);
+      this.log(`第${round}轮后竞技场进度: ${updatedArenaNum}/${ARENA_TARGET}，还需: ${remaining}`);
+      round++;
+    }
+
+    const finalAct = await this.getActivityInfo(
+      tokenId,
+      "确认竞技场月度进度",
+    );
+    const finalArenaNum = Number(finalAct?.myArenaInfo?.num || 0);
+    if (finalArenaNum >= shouldBe || finalArenaNum >= ARENA_TARGET) {
+      this.log(`竞技场补齐完成，最终进度: ${finalArenaNum}/${ARENA_TARGET}`, "success");
+    } else if (safetyCounter >= safetyMaxFights) {
+      this.log(`达到安全上限，竞技场补齐已停止，最终进度: ${finalArenaNum}/${ARENA_TARGET}`, "warning");
+    } else {
+      this.log(`竞技场补齐已停止，最终进度: ${finalArenaNum}/${ARENA_TARGET}`, "warning");
+    }
+  }
+
   loadSettings(roleId) {
     try {
       const raw = localStorage.getItem(`daily-settings:${roleId}`);
@@ -327,6 +611,8 @@ export class DailyTaskRunner {
         freeGachaEnable: true,
         studyEnable: true,
         genieSweepEnable: false,
+        monthlyFishTopUpEnable: true,
+        monthlyArenaTopUpEnable: true,
       };
       return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
     } catch (error) {
@@ -814,6 +1100,20 @@ export class DailyTaskRunner {
             { genieId: 5, sweepCnt: 1 },
             "深海灯神",
           ),
+      });
+    }
+
+    if (settings.monthlyFishTopUpEnable !== false) {
+      taskList.push({
+        name: "月度钓鱼补齐",
+        execute: () => this.runMonthlyFishTopUp(tokenId),
+      });
+    }
+
+    if (settings.monthlyArenaTopUpEnable !== false) {
+      taskList.push({
+        name: "月度竞技场补齐",
+        execute: () => this.runMonthlyArenaTopUp(tokenId, settings),
       });
     }
 

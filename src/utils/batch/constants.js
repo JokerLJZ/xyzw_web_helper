@@ -128,6 +128,8 @@ export const defaultSettings = {
   blackMarketPurchase: true,
   studyEnable: true,
   genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
 };
 
 // 默认批量设置
@@ -178,6 +180,8 @@ export const defaultTemplate = {
   blackMarketPurchase: true,
   studyEnable: true,
   genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
 };
 
 // 默认任务表单

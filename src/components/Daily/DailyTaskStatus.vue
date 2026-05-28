@@ -195,6 +195,16 @@
               <span class="switch-label">一键灯神扫荡</span>
               <n-switch v-model:value="settings.genieSweepEnable" />
             </div>
+
+            <div class="switch-row">
+              <span class="switch-label">月度钓鱼补齐</span>
+              <n-switch v-model:value="settings.monthlyFishTopUpEnable" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">月度竞技场补齐</span>
+              <n-switch v-model:value="settings.monthlyArenaTopUpEnable" />
+            </div>
           </div>
         </div>
       </div>
@@ -330,6 +340,8 @@ const settings = reactive({
   blackMarketPurchase: true,
   studyEnable: true,
   genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
   commandDelay: 500,
   taskDelay: 500,
 });
@@ -347,6 +359,8 @@ const defaultDailySettings = {
   blackMarketPurchase: true,
   studyEnable: true,
   genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
   commandDelay: 500,
   taskDelay: 500,
 };

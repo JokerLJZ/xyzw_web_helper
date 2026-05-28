@@ -809,6 +809,14 @@
               <span class="switch-label">一键灯神扫荡</span
               ><n-switch v-model:value="currentSettings.genieSweepEnable" />
             </div>
+            <div class="switch-row">
+              <span class="switch-label">月度钓鱼补齐</span
+              ><n-switch v-model:value="currentSettings.monthlyFishTopUpEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">月度竞技场补齐</span
+              ><n-switch v-model:value="currentSettings.monthlyArenaTopUpEnable" />
+            </div>
           </div>
         </div>
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
@@ -902,6 +910,14 @@
             <div class="switch-row">
               <span class="switch-label">一键灯神扫荡</span
               ><n-switch v-model:value="currentTemplate.genieSweepEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">月度钓鱼补齐</span
+              ><n-switch v-model:value="currentTemplate.monthlyFishTopUpEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">月度竞技场补齐</span
+              ><n-switch v-model:value="currentTemplate.monthlyArenaTopUpEnable" />
             </div>
           </div>
         </div>
@@ -3435,6 +3451,8 @@ const currentSettings = reactive({
   blackMarketPurchase: true,
   studyEnable: true,
   genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
 });
 
 // Task Template State
@@ -3461,6 +3479,8 @@ const currentTemplate = reactive({
   blackMarketPurchase: true,
   studyEnable: true,
   genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
 });
 
 // Account Template References
@@ -5443,6 +5463,8 @@ const loadSettings = (tokenId) => {
       blackMarketPurchase: true,
       studyEnable: true,
       genieSweepEnable: false,
+      monthlyFishTopUpEnable: true,
+      monthlyArenaTopUpEnable: true,
     };
     return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
   } catch (error) {
@@ -5489,6 +5511,8 @@ const openTaskTemplateModal = () => {
     blackMarketPurchase: true,
     studyEnable: true,
     genieSweepEnable: false,
+    monthlyFishTopUpEnable: true,
+    monthlyArenaTopUpEnable: true,
   });
   currentTemplateName.value = "";
   showTaskTemplateModal.value = true;
@@ -5640,6 +5664,8 @@ const resetTemplateForm = () => {
     blackMarketPurchase: true,
     studyEnable: true,
     genieSweepEnable: false,
+    monthlyFishTopUpEnable: true,
+    monthlyArenaTopUpEnable: true,
   });
 };
 
