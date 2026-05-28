@@ -359,7 +359,7 @@ export function createTasksTower(deps) {
         });
 
         let count = 0;
-        const MAX_CLIMB = 100;
+        const MAX_CLIMB = 50;
         let consecutiveFailures = 0;
 
         while (currentEnergy > 0 && count < MAX_CLIMB && !shouldStop.value) {
