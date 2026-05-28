@@ -473,47 +473,14 @@
               <n-space>
                 <n-button
                   size="small"
-                  @click="climbWeirdTower"
+                  @click="batchWeirdTower"
                   :disabled="
                     isRunning ||
                     selectedTokens.length === 0 ||
                     !isWeirdTowerActivityOpen
                   "
                 >
-                  一键爬怪异塔
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchUseItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键使用怪异塔道具
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchMergeItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键怪异塔合成
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimFreeEnergy"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键领取怪异塔免费道具
+                  一键怪异塔
                 </n-button>
               </n-space>
             </n-tab-pane>
@@ -3689,12 +3656,7 @@ const taskGroupDefinitions = [
   {
     name: "weirdTower",
     label: "怪异塔",
-    tasks: [
-      "climbWeirdTower",
-      "batchUseItems",
-      "batchMergeItems",
-      "batchClaimFreeEnergy",
-    ],
+    tasks: ["batchWeirdTower"],
   },
   {
     name: "resource",
@@ -5041,6 +5003,7 @@ const executeScheduledTask = async (task) => {
 
       if (
         [
+          "batchWeirdTower",
           "climbWeirdTower",
           "batchUseItems",
           "batchMergeItems",
@@ -6251,6 +6214,7 @@ const tasksTower = createTasksTower(createTaskDeps());
 const {
   climbTower,
   climbWeirdTower,
+  batchWeirdTower,
   batchClaimFreeEnergy,
   skinChallenge,
   batchUseItems,

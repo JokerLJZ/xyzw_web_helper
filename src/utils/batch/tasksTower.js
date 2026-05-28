@@ -1,6 +1,6 @@
 /**
  * 爬塔类任务
- * 包含: climbTower, climbWeirdTower, batchClaimFreeEnergy
+ * 包含: climbTower, batchWeirdTower, climbWeirdTower, batchClaimFreeEnergy
  */
 
 /**
@@ -389,7 +389,7 @@ export function createTasksTower(deps) {
               type: "info",
             });
 
-            await new Promise((r) => setTimeout(r, 500));
+            await new Promise((r) => setTimeout(r, 1500));
 
             const evotowerinfo2 = await tokenStore.sendMessageWithPromise(
               tokenId,
@@ -1217,9 +1217,42 @@ export function createTasksTower(deps) {
     message.success("批量一键合成结束");
   };
 
+  /**
+   * 一键怪异塔
+   * 执行顺序: 自动爬塔 -> 领取免费道具 -> 使用道具 -> 合成
+   */
+  const batchWeirdTower = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: "=== 开始一键怪异塔 ===",
+      type: "info",
+    });
+
+    await climbWeirdTower();
+    if (shouldStop.value) return;
+
+    await batchClaimFreeEnergy();
+    if (shouldStop.value) return;
+
+    await batchUseItems();
+    if (shouldStop.value) return;
+
+    await batchMergeItems();
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: "=== 一键怪异塔执行完成 ===",
+      type: "success",
+    });
+    message.success("一键怪异塔结束");
+  };
+
   return {
     climbTower,
     climbWeirdTower,
+    batchWeirdTower,
     batchClaimFreeEnergy,
     skinChallenge,
     batchUseItems,
