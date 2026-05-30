@@ -473,7 +473,7 @@ const startTowerClimb = async () => {
   isClimbing.value = true;
   stopFlag = false;
   let climbCount = 0;
-  let maxClimb = 100; // 最多批量次数，防止死循环
+  let maxClimb = 20; // 最多批量次数，防止死循环
   // 设置超时保护，60秒后自动重置状态
   climbTimeout.value = setTimeout(() => {
     isClimbing.value = false;
