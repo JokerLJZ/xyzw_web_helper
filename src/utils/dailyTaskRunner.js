@@ -1,5 +1,6 @@
 import { useTokenStore } from "@/stores/tokenStore";
 import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
+import { goldItemsConfig, merchantConfig } from "@/utils/dreamConstants";
 
 // 辅助函数
 const pickArenaTargetId = (targets) => {
@@ -43,6 +44,34 @@ const getTodayBossId = () => {
   const dayOfWeek = new Date().getDay();
   return DAY_BOSS_MAP[dayOfWeek];
 };
+
+const isFreeGachaOpenDay = () => {
+  const dayOfWeek = new Date().getDay();
+  return dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 6;
+};
+
+const isDailyDreamOpenDay = () => {
+  const dayOfWeek = new Date().getDay();
+  return dayOfWeek === 0 || dayOfWeek === 3;
+};
+
+const getDefaultDreamPurchaseList = () => {
+  const list = [];
+  for (const merchantId in goldItemsConfig) {
+    goldItemsConfig[merchantId].forEach((index) => {
+      list.push(`${merchantId}-${index}`);
+    });
+  }
+  return list;
+};
+
+const getServerErrorCode = (error) => {
+  const messageText = error?.message || "";
+  const match = messageText.match(/服务器错误:\s*(\d+)/);
+  return match ? Number(match[1]) : null;
+};
+
+const DREAM_SELECT_CONTINUE_ERROR_CODES = new Set([2600040]);
 
 const calculateMonthShouldBe = (target) => {
   const now = new Date();
@@ -594,6 +623,130 @@ export class DailyTaskRunner {
     }
   }
 
+  loadDreamPurchaseList() {
+    try {
+      const raw = localStorage.getItem("batchSettings");
+      const saved = raw ? JSON.parse(raw) : null;
+      return saved?.dreamPurchaseList || getDefaultDreamPurchaseList();
+    } catch (error) {
+      console.error("Failed to load dream purchase list:", error);
+      return getDefaultDreamPurchaseList();
+    }
+  }
+
+  async runDreamPurchaseForToken(tokenId, purchaseList) {
+    if (purchaseList.length === 0) {
+      this.log("未配置梦境购买清单，跳过购买", "warning");
+      return;
+    }
+
+    const roleInfo = await this.executeGameCommand(
+      tokenId,
+      "role_getroleinfo",
+      {},
+      "获取梦境商店数据",
+      15000,
+    );
+
+    if (!roleInfo?.role?.dungeon?.merchant) {
+      throw new Error("无法获取梦境商店数据");
+    }
+
+    const merchantData = roleInfo.role.dungeon.merchant;
+    const levelId = roleInfo.role.levelId || 0;
+
+    if (levelId < 4000) {
+      this.log("关卡数小于4000，跳过梦境购买", "warning");
+      return;
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+    const operations = [];
+
+    for (const itemKey of purchaseList) {
+      const [targetMerchantId, targetItemIndex] = itemKey
+        .split("-")
+        .map(Number);
+      const merchantItems = merchantData[targetMerchantId];
+
+      if (merchantItems) {
+        for (let pos = 0; pos < merchantItems.length; pos++) {
+          if (merchantItems[pos] === targetItemIndex) {
+            operations.push({
+              merchantId: targetMerchantId,
+              index: targetItemIndex,
+              pos,
+            });
+          }
+        }
+      }
+    }
+
+    operations.sort((a, b) => {
+      if (a.merchantId !== b.merchantId) return a.merchantId - b.merchantId;
+      return b.pos - a.pos;
+    });
+
+    for (const op of operations) {
+      try {
+        const response = await this.executeGameCommand(
+          tokenId,
+          "dungeon_buymerchant",
+          {
+            id: op.merchantId,
+            index: op.index,
+            pos: op.pos,
+          },
+          "购买梦境商品",
+          5000,
+        );
+
+        if (response?.reward) {
+          successCount++;
+          const merchantName =
+            merchantConfig[op.merchantId]?.name || `商人${op.merchantId}`;
+          const itemName =
+            merchantConfig[op.merchantId]?.items?.[op.index] ||
+            `商品${op.index}`;
+          this.log(`梦境购买成功: ${merchantName} - ${itemName}`, "success");
+        } else {
+          failCount++;
+        }
+      } catch (error) {
+        failCount++;
+      }
+    }
+
+    this.log(`梦境购买完成: 成功${successCount}, 失败${failCount}`, "success");
+  }
+
+  async runDreamTask(tokenId) {
+    if (!isDailyDreamOpenDay()) {
+      this.log("咸王梦境跳过：仅周日、周三开放", "info");
+      return;
+    }
+
+    const battleTeam = { 0: 107 };
+    try {
+      await this.executeGameCommand(
+        tokenId,
+        "dungeon_selecthero",
+        { battleTeam },
+        "咸王梦境",
+        5000,
+      );
+    } catch (error) {
+      const errorCode = getServerErrorCode(error);
+      if (!DREAM_SELECT_CONTINUE_ERROR_CODES.has(errorCode)) {
+        throw error;
+      }
+      this.log(`咸王梦境指令返回 ${errorCode}，继续执行梦境购买`, "warning");
+    }
+
+    await this.runDreamPurchaseForToken(tokenId, this.loadDreamPurchaseList());
+  }
+
   loadSettings(roleId) {
     try {
       const raw = localStorage.getItem(`daily-settings:${roleId}`);
@@ -610,6 +763,7 @@ export class DailyTaskRunner {
         blackMarketPurchase: true,
         freeGachaEnable: true,
         studyEnable: true,
+        dreamEnable: true,
         genieSweepEnable: false,
         monthlyFishTopUpEnable: true,
         monthlyArenaTopUpEnable: true,
@@ -933,7 +1087,6 @@ export class DailyTaskRunner {
       { name: "福利签到", cmd: "system_signinreward" },
       { name: "俱乐部", cmd: "legion_signin" },
       { name: "领取每日礼包", cmd: "discount_claimreward" },
-      { name: "领取每日免费奖励", cmd: "collection_claimfreereward" },
       { name: "领取免费礼包", cmd: "card_claimreward" },
       {
         name: "领取永久卡礼包",
@@ -985,6 +1138,7 @@ export class DailyTaskRunner {
 
     if (
       settings.freeGachaEnable !== false
+      && isFreeGachaOpenDay()
       && isTodayAvailable(statisticsTime["gacha:free"])
     ) {
       taskList.push({
@@ -997,6 +1151,12 @@ export class DailyTaskRunner {
             "免费扭蛋",
           ),
       });
+    } else if (
+      settings.freeGachaEnable !== false
+      && !isFreeGachaOpenDay()
+      && isTodayAvailable(statisticsTime["gacha:free"])
+    ) {
+      this.log("免费扭蛋跳过：仅周二、周四、周六执行", "info");
     }
 
     // 5. 免费活动
@@ -1066,29 +1226,17 @@ export class DailyTaskRunner {
     }
 
     // 咸王梦境
-    const mengyandayOfWeek = new Date().getDay();
-    if (
-      (mengyandayOfWeek === 0) |
-      (mengyandayOfWeek === 1) |
-      (mengyandayOfWeek === 3) |
-      (mengyandayOfWeek === 4)
-    ) {
-      const mjbattleTeam = { 0: 107 };
+    if (settings.dreamEnable !== false) {
       taskList.push({
         name: "咸王梦境",
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "dungeon_selecthero",
-            { battleTeam: mjbattleTeam },
-            "咸王梦境",
-          ),
+        execute: () => this.runDreamTask(tokenId),
       });
     }
 
     // 深海灯神
+    const dayOfWeek = new Date().getDay();
     if (
-      mengyandayOfWeek === 1 &&
+      dayOfWeek === 1 &&
       isTodayAvailable(statisticsTime[`genie:daily:free:5`])
     ) {
       taskList.push({

@@ -192,6 +192,11 @@
             </div>
 
             <div class="switch-row">
+              <span class="switch-label">咸王梦境</span>
+              <n-switch v-model:value="settings.dreamEnable" />
+            </div>
+
+            <div class="switch-row">
               <span class="switch-label">一键灯神扫荡</span>
               <n-switch v-model:value="settings.genieSweepEnable" />
             </div>
@@ -339,6 +344,7 @@ const settings = reactive({
   claimEmail: true,
   blackMarketPurchase: true,
   studyEnable: true,
+  dreamEnable: true,
   genieSweepEnable: false,
   monthlyFishTopUpEnable: true,
   monthlyArenaTopUpEnable: true,
@@ -358,6 +364,7 @@ const defaultDailySettings = {
   claimEmail: true,
   blackMarketPurchase: true,
   studyEnable: true,
+  dreamEnable: true,
   genieSweepEnable: false,
   monthlyFishTopUpEnable: true,
   monthlyArenaTopUpEnable: true,

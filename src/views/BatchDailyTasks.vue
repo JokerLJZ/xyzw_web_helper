@@ -773,6 +773,10 @@
               ><n-switch v-model:value="currentSettings.studyEnable" />
             </div>
             <div class="switch-row">
+              <span class="switch-label">咸王梦境</span
+              ><n-switch v-model:value="currentSettings.dreamEnable" />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">一键灯神扫荡</span
               ><n-switch v-model:value="currentSettings.genieSweepEnable" />
             </div>
@@ -873,6 +877,10 @@
             <div class="switch-row">
               <span class="switch-label">一键答题</span
               ><n-switch v-model:value="currentTemplate.studyEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">咸王梦境</span
+              ><n-switch v-model:value="currentTemplate.dreamEnable" />
             </div>
             <div class="switch-row">
               <span class="switch-label">一键灯神扫荡</span
@@ -3417,6 +3425,7 @@ const currentSettings = reactive({
   claimEmail: true,
   blackMarketPurchase: true,
   studyEnable: true,
+  dreamEnable: true,
   genieSweepEnable: false,
   monthlyFishTopUpEnable: true,
   monthlyArenaTopUpEnable: true,
@@ -3445,6 +3454,7 @@ const currentTemplate = reactive({
   claimEmail: true,
   blackMarketPurchase: true,
   studyEnable: true,
+  dreamEnable: true,
   genieSweepEnable: false,
   monthlyFishTopUpEnable: true,
   monthlyArenaTopUpEnable: true,
@@ -5425,6 +5435,7 @@ const loadSettings = (tokenId) => {
       claimEmail: true,
       blackMarketPurchase: true,
       studyEnable: true,
+      dreamEnable: true,
       genieSweepEnable: false,
       monthlyFishTopUpEnable: true,
       monthlyArenaTopUpEnable: true,
@@ -5473,6 +5484,7 @@ const openTaskTemplateModal = () => {
     claimEmail: true,
     blackMarketPurchase: true,
     studyEnable: true,
+    dreamEnable: true,
     genieSweepEnable: false,
     monthlyFishTopUpEnable: true,
     monthlyArenaTopUpEnable: true,
@@ -5626,6 +5638,7 @@ const resetTemplateForm = () => {
     claimEmail: true,
     blackMarketPurchase: true,
     studyEnable: true,
+    dreamEnable: true,
     genieSweepEnable: false,
     monthlyFishTopUpEnable: true,
     monthlyArenaTopUpEnable: true,
