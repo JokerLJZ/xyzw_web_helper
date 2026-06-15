@@ -84,7 +84,7 @@
       v-model:show="showSettings"
       preset="card"
       title="任务设置"
-      style="width: 90%; max-width: 400px"
+      style="width: 92%; max-width: 720px"
     >
       <template #header>
         <div class="modal-header">
@@ -179,6 +179,11 @@
             <div class="switch-row">
               <span class="switch-label">黑市购买物品</span>
               <n-switch v-model:value="settings.blackMarketPurchase" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">周一购买四圣碎片</span>
+              <n-switch v-model:value="settings.holyBeastFragmentPurchase" />
             </div>
 
             <div class="switch-row">
@@ -343,6 +348,7 @@ const settings = reactive({
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  holyBeastFragmentPurchase: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -363,6 +369,7 @@ const defaultDailySettings = {
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  holyBeastFragmentPurchase: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -866,8 +873,8 @@ onBeforeUnmount(() => {
 }
 
 .settings-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--spacing-lg);
 }
 
@@ -883,8 +890,9 @@ onBeforeUnmount(() => {
 }
 
 .setting-switches {
-  display: flex;
-  flex-direction: column;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--spacing-md);
 }
 
@@ -898,6 +906,11 @@ onBeforeUnmount(() => {
   &:last-child {
     border-bottom: none;
   }
+}
+
+.setting-item :deep(.n-input-number),
+.setting-item :deep(.n-select) {
+  width: 100%;
 }
 
 .switch-label {
@@ -996,6 +1009,11 @@ onBeforeUnmount(() => {
     width: 100%;
     justify-content: space-between;
     margin-top: var(--spacing-sm);
+  }
+
+  .settings-grid,
+  .setting-switches {
+    grid-template-columns: 1fr;
   }
 }
 </style>

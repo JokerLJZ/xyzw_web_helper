@@ -50,6 +50,10 @@ const isFreeGachaOpenDay = () => {
   return dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 6;
 };
 
+const isMonday = () => {
+  return new Date().getDay() === 1;
+};
+
 const isDailyDreamOpenDay = () => {
   const dayOfWeek = new Date().getDay();
   return dayOfWeek === 0 || dayOfWeek === 3;
@@ -352,6 +356,34 @@ export class DailyTaskRunner {
     }
 
     this.log("一键灯神扫荡完成", "success");
+  }
+
+  async runHolyBeastFragmentPurchase(tokenId) {
+    this.log("开始购买四圣碎片");
+
+    const result = await this.executeGameCommand(
+      tokenId,
+      "legion_storebuygoods",
+      { id: 6 },
+      "购买四圣碎片",
+      5000,
+    );
+
+    if (result?.error) {
+      if (result.error.includes("俱乐部商品购买数量超出上限")) {
+        this.log("本周已购买过四圣碎片，跳过", "info");
+        return;
+      }
+
+      if (result.error.includes("物品不存在")) {
+        this.log("盐锭不足或未加入军团，购买四圣碎片失败", "warning");
+        return;
+      }
+
+      throw new Error(result.error);
+    }
+
+    this.log("四圣碎片购买成功", "success");
   }
 
   async getLatestRole(tokenId, description = "获取最新角色信息") {
@@ -761,6 +793,7 @@ export class DailyTaskRunner {
         claimHangUp: true,
         claimEmail: true,
         blackMarketPurchase: true,
+        holyBeastFragmentPurchase: false,
         freeGachaEnable: true,
         studyEnable: true,
         dreamEnable: true,
@@ -1114,6 +1147,17 @@ export class DailyTaskRunner {
           ),
       });
     });
+
+    if (settings.holyBeastFragmentPurchase === true) {
+      if (isMonday()) {
+        taskList.push({
+          name: "购买四圣碎片",
+          execute: () => this.runHolyBeastFragmentPurchase(tokenId),
+        });
+      } else {
+        this.log("四圣碎片购买跳过：仅周一执行", "info");
+      }
+    }
 
     taskList.push({
       name: "开始领取珍宝阁礼包",
