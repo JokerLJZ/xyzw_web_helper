@@ -198,9 +198,10 @@
             </n-space>
           </div>
 
-          <!-- 排序按钮组 -->
+          <!-- 手动顺序控制 -->
           <div class="sort-buttons" style="margin-bottom: 12px">
             <n-space align="center">
+              <span style="font-size: 12px; color: #86909c">按字段重排：</span>
               <n-button-group size="small">
                 <n-button
                   @click="toggleSort('name')"
@@ -248,7 +249,10 @@
                 :y-gap="8"
                 :cols="batchSettings.tokenListColumns"
               >
-                <n-grid-item v-for="token in sortedTokens" :key="token.id">
+                <n-grid-item
+                  v-for="(token, index) in sortedTokens"
+                  :key="token.id"
+                >
                   <div class="token-row">
                     <n-checkbox
                       :value="token.id"
@@ -286,6 +290,26 @@
                         </div>
                       </div>
                     </n-checkbox>
+                    <n-button
+                      size="tiny"
+                      circle
+                      quaternary
+                      :disabled="index === 0"
+                      title="上移"
+                      @click.stop="moveTokenOrder(token.id, -1)"
+                    >
+                      ↑
+                    </n-button>
+                    <n-button
+                      size="tiny"
+                      circle
+                      quaternary
+                      :disabled="index === sortedTokens.length - 1"
+                      title="下移"
+                      @click.stop="moveTokenOrder(token.id, 1)"
+                    >
+                      ↓
+                    </n-button>
                     <n-button
                       size="tiny"
                       circle
@@ -3045,31 +3069,85 @@ const sortConfig = ref(
       },
 );
 
-// 计算属性 - 从gameData中获取塔相关信息
-const evoTowerInfo = computed(() => {
-  const data = tokenStore.gameData?.evoTowerInfo || null;
-  return data;
-});
+const TOKEN_ORDER_STORAGE_KEY = "batchTokenOrder";
 
-const weirdTowerData = computed(() => {
-  return evoTowerInfo.value?.evoTower || null;
-});
+const loadBatchTokenOrder = () => {
+  try {
+    const raw = localStorage.getItem(TOKEN_ORDER_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error("Failed to load token order:", error);
+    return [];
+  }
+};
 
-const currentTowerId = computed(() => {
-  return weirdTowerData.value?.towerId || 0;
-});
+const batchTokenOrder = ref(loadBatchTokenOrder());
 
-const towerEnergy = computed(() => {
-  return weirdTowerData.value?.energy || 0;
-});
+const saveBatchTokenOrder = () => {
+  try {
+    localStorage.setItem(
+      TOKEN_ORDER_STORAGE_KEY,
+      JSON.stringify(batchTokenOrder.value),
+    );
+  } catch (error) {
+    console.error("Failed to save token order:", error);
+  }
+};
 
-// 排序后的游戏角色Token列表
-const sortedTokens = computed(() => {
+const buildNormalizedTokenOrder = (order = batchTokenOrder.value) => {
+  const validIds = new Set(tokenStore.gameTokens.map((token) => token.id));
+  const normalized = [];
+  const seen = new Set();
+
+  order.forEach((tokenId) => {
+    if (validIds.has(tokenId) && !seen.has(tokenId)) {
+      normalized.push(tokenId);
+      seen.add(tokenId);
+    }
+  });
+
+  tokenStore.gameTokens.forEach((token) => {
+    if (!seen.has(token.id)) {
+      normalized.push(token.id);
+      seen.add(token.id);
+    }
+  });
+
+  return normalized;
+};
+
+const normalizeStoredTokenOrder = () => {
+  const normalized = buildNormalizedTokenOrder();
+  if (JSON.stringify(normalized) !== JSON.stringify(batchTokenOrder.value)) {
+    batchTokenOrder.value = normalized;
+    saveBatchTokenOrder();
+  }
+  return normalized;
+};
+
+const getManualOrderedTokens = () => {
+  const order = buildNormalizedTokenOrder();
+  const tokenMap = new Map(tokenStore.gameTokens.map((token) => [token.id, token]));
+  return order.map((tokenId) => tokenMap.get(tokenId)).filter(Boolean);
+};
+
+const normalizeTokenIdsByBatchOrder = (tokenIds = []) => {
+  const selectedIdSet = new Set(tokenIds);
+  return buildNormalizedTokenOrder().filter((tokenId) =>
+    selectedIdSet.has(tokenId),
+  );
+};
+
+const setSelectedTokensInBatchOrder = (tokenIds = []) => {
+  selectedTokens.value = normalizeTokenIdsByBatchOrder(tokenIds);
+};
+
+const sortTokensByField = (field, direction) => {
   return [...tokenStore.gameTokens].sort((tokenA, tokenB) => {
     let valueA, valueB;
 
-    // 根据排序字段获取比较值
-    switch (sortConfig.value.field) {
+    switch (field) {
       case "name":
         valueA = tokenA.name?.toLowerCase() || "";
         valueB = tokenB.name?.toLowerCase() || "";
@@ -3091,15 +3169,37 @@ const sortedTokens = computed(() => {
         valueB = tokenB.name?.toLowerCase() || "";
     }
 
-    // 根据排序方向比较值
     if (valueA < valueB) {
-      return sortConfig.value.direction === "asc" ? -1 : 1;
+      return direction === "asc" ? -1 : 1;
     }
     if (valueA > valueB) {
-      return sortConfig.value.direction === "asc" ? 1 : -1;
+      return direction === "asc" ? 1 : -1;
     }
     return 0;
   });
+};
+
+// 计算属性 - 从gameData中获取塔相关信息
+const evoTowerInfo = computed(() => {
+  const data = tokenStore.gameData?.evoTowerInfo || null;
+  return data;
+});
+
+const weirdTowerData = computed(() => {
+  return evoTowerInfo.value?.evoTower || null;
+});
+
+const currentTowerId = computed(() => {
+  return weirdTowerData.value?.towerId || 0;
+});
+
+const towerEnergy = computed(() => {
+  return weirdTowerData.value?.energy || 0;
+});
+
+// 排序后的游戏角色Token列表
+const sortedTokens = computed(() => {
+  return getManualOrderedTokens();
 });
 
 // 切换排序
@@ -3116,12 +3216,46 @@ const toggleSort = (field) => {
 
   // 保存排序设置到localStorage
   localStorage.setItem("tokenSortConfig", JSON.stringify(sortConfig.value));
+
+  batchTokenOrder.value = sortTokensByField(
+    sortConfig.value.field,
+    sortConfig.value.direction,
+  ).map((token) => token.id);
+  saveBatchTokenOrder();
+  selectedTokens.value = normalizeTokenIdsByBatchOrder(selectedTokens.value);
+  taskForm.selectedTokens = normalizeTokenIdsByBatchOrder(
+    taskForm.selectedTokens,
+  );
 };
 
 // 获取排序图标
 const getSortIcon = (field) => {
   if (sortConfig.value.field !== field) return null;
   return sortConfig.value.direction === "asc" ? "↑" : "↓";
+};
+
+const moveTokenOrder = (tokenId, direction) => {
+  const order = normalizeStoredTokenOrder();
+  const currentIndex = order.indexOf(tokenId);
+  if (currentIndex === -1) return;
+
+  const nextIndex = currentIndex + direction;
+  if (nextIndex < 0 || nextIndex >= order.length) return;
+
+  const nextOrder = [...order];
+  [nextOrder[currentIndex], nextOrder[nextIndex]] = [
+    nextOrder[nextIndex],
+    nextOrder[currentIndex],
+  ];
+  batchTokenOrder.value = nextOrder;
+  saveBatchTokenOrder();
+  selectedTokens.value = normalizeTokenIdsByBatchOrder(selectedTokens.value);
+  selectedTokensForApply.value = normalizeTokenIdsByBatchOrder(
+    selectedTokensForApply.value,
+  );
+  taskForm.selectedTokens = normalizeTokenIdsByBatchOrder(
+    taskForm.selectedTokens,
+  );
 };
 
 const tokens = computed(() => tokenStore.gameTokens);
@@ -3639,6 +3773,76 @@ const taskForm = reactive({
   enabled: true, // Whether the task is enabled
 });
 
+const syncTokenIdListOrder = (getValue, setValue) => {
+  const current = getValue();
+  const normalized = normalizeTokenIdsByBatchOrder(current);
+  if (JSON.stringify(current) !== JSON.stringify(normalized)) {
+    setValue(normalized);
+  }
+};
+
+watch(
+  () => tokenStore.gameTokens.map((token) => token.id),
+  () => {
+    normalizeStoredTokenOrder();
+    syncTokenIdListOrder(
+      () => selectedTokens.value,
+      (orderedIds) => {
+        selectedTokens.value = orderedIds;
+      },
+    );
+    syncTokenIdListOrder(
+      () => selectedTokensForApply.value,
+      (orderedIds) => {
+        selectedTokensForApply.value = orderedIds;
+      },
+    );
+    syncTokenIdListOrder(
+      () => taskForm.selectedTokens,
+      (orderedIds) => {
+        taskForm.selectedTokens = orderedIds;
+      },
+    );
+  },
+  { immediate: true },
+);
+
+watch(
+  selectedTokens,
+  () =>
+    syncTokenIdListOrder(
+      () => selectedTokens.value,
+      (orderedIds) => {
+        selectedTokens.value = orderedIds;
+      },
+    ),
+  { deep: true },
+);
+
+watch(
+  selectedTokensForApply,
+  () =>
+    syncTokenIdListOrder(
+      () => selectedTokensForApply.value,
+      (orderedIds) => {
+        selectedTokensForApply.value = orderedIds;
+      },
+    ),
+  { deep: true },
+);
+
+watch(
+  () => taskForm.selectedTokens,
+  () =>
+    syncTokenIdListOrder(
+      () => taskForm.selectedTokens,
+      (orderedIds) => {
+        taskForm.selectedTokens = orderedIds;
+      },
+    ),
+  { deep: true },
+);
+
 const integratedDailyTaskNames = ["claimHangUpRewardsFiveTimes"];
 
 // 任务分组定义
@@ -4104,7 +4308,7 @@ const saveTask = () => {
     runType: taskForm.runType,
     runTime: formattedRunTime,
     cronExpression: taskForm.runType === "cron" ? taskForm.cronExpression : "",
-    selectedTokens: [...taskForm.selectedTokens],
+    selectedTokens: normalizeTokenIdsByBatchOrder(taskForm.selectedTokens),
     selectedTasks: [...taskForm.selectedTasks],
     enabled: taskForm.enabled,
   };
@@ -4176,7 +4380,7 @@ const resetRunType = () => {
 
 // Select all tokens
 const selectAllTokens = () => {
-  taskForm.selectedTokens = tokens.value.map((token) => token.id);
+  taskForm.selectedTokens = sortedTokens.value.map((token) => token.id);
 };
 
 // Deselect all tokens
@@ -4846,7 +5050,9 @@ const verifyTaskDependencies = async (task) => {
 
   // 直接使用所有选中的token，WebSocket连接由具体任务函数内部管理
   // ensureConnection函数会自动处理并行连接和连接池管理
-  const connectedTokens = task.selectedTokens.map((tokenId) => {
+  const connectedTokens = normalizeTokenIdsByBatchOrder(
+    task.selectedTokens,
+  ).map((tokenId) => {
     const tokenName =
       tokenStore.gameTokens.find((t) => t.id === tokenId)?.name || tokenId;
     return { id: tokenId, name: tokenName };
@@ -4901,8 +5107,8 @@ const executeScheduledTask = async (task) => {
     }
 
     // Filter out tokens that don't exist in current tokens.value
-    const availableTokens = (
-      task.connectedTokens || task.selectedTokens
+    const availableTokens = normalizeTokenIdsByBatchOrder(
+      task.connectedTokens || task.selectedTokens,
     ).filter((tokenId) => {
       return tokens.value.some((t) => t.id === tokenId);
     });
@@ -5814,7 +6020,7 @@ const isIndeterminate = computed(
 
 const handleSelectAll = (checked) => {
   if (checked) {
-    selectedTokens.value = tokens.value.map((t) => t.id);
+    selectedTokens.value = sortedTokens.value.map((t) => t.id);
   } else {
     selectedTokens.value = [];
   }
@@ -5961,7 +6167,7 @@ const updateSelectedTokensFromGroups = () => {
     validTokenIds.forEach((id) => tokenIds.add(id));
   });
 
-  selectedTokens.value = Array.from(tokenIds);
+  setSelectedTokensInBatchOrder(Array.from(tokenIds));
 };
 
 /**
@@ -6294,6 +6500,7 @@ const { batchSaltSignup } = tasksSalt;
 const startBatch = async () => {
   if (selectedTokens.value.length === 0) return;
 
+  selectedTokens.value = normalizeTokenIdsByBatchOrder(selectedTokens.value);
   isRunning.value = true;
   shouldStop.value = false;
   const batchStartTime = new Date();
