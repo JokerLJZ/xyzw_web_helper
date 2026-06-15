@@ -703,10 +703,10 @@
       v-model:show="showSettingsModal"
       preset="card"
       :title="`任务设置 - ${currentSettingsTokenName}`"
-      style="width: 90%; max-width: 400px"
+      style="width: 92%; max-width: 720px"
     >
       <div class="settings-content">
-        <div class="settings-grid">
+        <div class="settings-grid daily-settings-grid">
           <div class="setting-item">
             <label class="setting-label">竞技场阵容</label>
             <n-select
@@ -739,7 +739,7 @@
               size="small"
             />
           </div>
-          <div class="setting-switches">
+          <div class="setting-switches daily-setting-switches">
             <div class="switch-row">
               <span class="switch-label">领罐子</span
               ><n-switch v-model:value="currentSettings.claimBottle" />
@@ -763,6 +763,10 @@
             <div class="switch-row">
               <span class="switch-label">黑市购买物品</span
               ><n-switch v-model:value="currentSettings.blackMarketPurchase" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">周一购买四圣碎片</span
+              ><n-switch v-model:value="currentSettings.holyBeastFragmentPurchase" />
             </div>
             <div class="switch-row">
               <span class="switch-label">付费招募</span
@@ -801,11 +805,11 @@
       v-model:show="showTaskTemplateModal"
       preset="card"
       :title="currentTemplateId ? '编辑任务模板' : '任务模板设置'"
-      style="width: 90%; max-width: 400px"
+      style="width: 92%; max-width: 720px"
     >
       <div class="settings-content">
-        <div class="settings-grid">
-          <div class="setting-item">
+        <div class="settings-grid daily-settings-grid">
+          <div class="setting-item daily-settings-full">
             <label class="setting-label">模板名称</label>
             <n-input
               v-model:value="currentTemplateName"
@@ -845,7 +849,7 @@
               size="small"
             />
           </div>
-          <div class="setting-switches">
+          <div class="setting-switches daily-setting-switches">
             <div class="switch-row">
               <span class="switch-label">领罐子</span
               ><n-switch v-model:value="currentTemplate.claimBottle" />
@@ -869,6 +873,10 @@
             <div class="switch-row">
               <span class="switch-label">黑市购买物品</span
               ><n-switch v-model:value="currentTemplate.blackMarketPurchase" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">周一购买四圣碎片</span
+              ><n-switch v-model:value="currentTemplate.holyBeastFragmentPurchase" />
             </div>
             <div class="switch-row">
               <span class="switch-label">付费招募</span
@@ -3424,6 +3432,7 @@ const currentSettings = reactive({
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  holyBeastFragmentPurchase: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -3453,6 +3462,7 @@ const currentTemplate = reactive({
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  holyBeastFragmentPurchase: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -5434,6 +5444,7 @@ const loadSettings = (tokenId) => {
       claimHangUp: true,
       claimEmail: true,
       blackMarketPurchase: true,
+      holyBeastFragmentPurchase: false,
       studyEnable: true,
       dreamEnable: true,
       genieSweepEnable: false,
@@ -5483,6 +5494,7 @@ const openTaskTemplateModal = () => {
     claimHangUp: true,
     claimEmail: true,
     blackMarketPurchase: true,
+    holyBeastFragmentPurchase: false,
     studyEnable: true,
     dreamEnable: true,
     genieSweepEnable: false,
@@ -5637,6 +5649,7 @@ const resetTemplateForm = () => {
     claimHangUp: true,
     claimEmail: true,
     blackMarketPurchase: true,
+    holyBeastFragmentPurchase: false,
     studyEnable: true,
     dreamEnable: true,
     genieSweepEnable: false,
@@ -6676,6 +6689,15 @@ const stopBatch = () => {
   gap: 16px;
 }
 
+.daily-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.daily-settings-full {
+  grid-column: 1 / -1;
+}
+
 .setting-item {
   display: flex;
   flex-direction: column;
@@ -6703,6 +6725,12 @@ const stopBatch = () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.daily-setting-switches {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .switch-row {
@@ -6771,6 +6799,13 @@ const stopBatch = () => {
     height: 100%;
     min-height: 300px;
     flex: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .daily-settings-grid,
+  .daily-setting-switches {
+    grid-template-columns: 1fr;
   }
 }
 
