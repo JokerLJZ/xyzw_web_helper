@@ -51,6 +51,7 @@ export const availableTasks = [
   { label: "一键盐场报名", value: "batchSaltSignup" },
   { label: "一键竞技场战斗3次", value: "batcharenafight" },
   { label: "一键钓鱼补齐", value: "batchTopUpFish" },
+  { label: "一键金鱼杆补齐", value: "batchTopUpGoldFish" },
   { label: "一键竞技场补齐", value: "batchTopUpArena" },
   { label: "一键换皮闯关", value: "skinChallenge" },
   { label: "一键购买四圣碎片", value: "legion_storebuygoods" },
@@ -62,7 +63,7 @@ export const availableTasks = [
   { label: "批量赠送功法残卷", value: "batchLegacyGiftSendEnhanced" },
   { label: "一键领取蟠桃园任务", value: "batchClaimPeachTasks" },
   { label: "一键扫荡灯神", value: "batchGenieSweep" },
-  { label: "推送主线关卡", value: "batchPushMainLevelInfo" },
+  { label: "主线关卡信息获取", value: "batchPushMainLevelInfo" },
 ];
 
 // 车辆研究消耗表

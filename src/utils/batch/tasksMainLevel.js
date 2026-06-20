@@ -5,8 +5,36 @@
 
 import { sendWxPusherMessage } from "../wxpusher.js";
 
+const MAIN_LEVEL_HISTORY_KEY = "mainLevelInfoHistory";
+
 const escapeMarkdownTableCell = (value) =>
   String(value ?? "-").replace(/\|/g, "\\|");
+
+const toFiniteNumber = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
+const loadMainLevelHistory = () => {
+  try {
+    const saved = localStorage.getItem(MAIN_LEVEL_HISTORY_KEY);
+    if (!saved) return {};
+
+    const parsed = JSON.parse(saved);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    console.warn("Failed to load main level history:", error);
+    return {};
+  }
+};
+
+const saveMainLevelHistory = (history) => {
+  try {
+    localStorage.setItem(MAIN_LEVEL_HISTORY_KEY, JSON.stringify(history));
+  } catch (error) {
+    console.warn("Failed to save main level history:", error);
+  }
+};
 
 const toNumberList = (value) =>
   Object.values(value || {})
@@ -42,6 +70,51 @@ const extractMainLevelInfo = (token, result) => {
   };
 };
 
+const getLevelDeltaText = (previousLevelId, levelDelta) => {
+  if (previousLevelId === null) return "首次记录";
+  if (levelDelta === null) return "-";
+  return levelDelta > 0 ? `+${levelDelta}` : String(levelDelta);
+};
+
+const attachMainLevelComparison = (results, history) =>
+  results.map((item) => {
+    const currentLevelId = toFiniteNumber(item.levelId);
+    const previousLevelId = toFiniteNumber(history[item.tokenId]?.levelId);
+    const levelDelta =
+      currentLevelId !== null && previousLevelId !== null
+        ? currentLevelId - previousLevelId
+        : null;
+
+    return {
+      ...item,
+      previousLevelId: previousLevelId ?? "-",
+      levelDelta,
+      levelDeltaText: item.error
+        ? "-"
+        : getLevelDeltaText(previousLevelId, levelDelta),
+    };
+  });
+
+const updateMainLevelHistory = (history, results) => {
+  const nextHistory = { ...history };
+
+  results.forEach((item) => {
+    if (item.error) return;
+
+    const levelId = toFiniteNumber(item.levelId);
+    if (levelId === null) return;
+
+    nextHistory[item.tokenId] = {
+      levelId,
+      name: item.name,
+      server: item.server,
+      pushedAt: new Date().toISOString(),
+    };
+  });
+
+  saveMainLevelHistory(nextHistory);
+};
+
 const hasMainLevelInfo = (result) =>
   Boolean(
     result?.battleData ||
@@ -54,21 +127,23 @@ const formatMainLevelNotification = (results, startTime) => {
   const completed = results.filter((item) => !item.error).length;
   const failed = total - completed;
   const duration = Math.round((Date.now() - startTime.getTime()) / 1000);
-  const title = `主线关卡信息 (${completed}/${total})`;
+  const progressed = results.filter((item) => item.levelDelta > 0).length;
+  const title = `主线关卡信息获取 (${completed}/${total})`;
 
   const lines = [
-    `## 主线推图当前关卡信息`,
+    `## 主线关卡信息获取`,
     ``,
     `| 项目 | 数值 |`,
     `|------|------|`,
     `| 总账号 | ${total} |`,
     `| 成功 | ${completed} |`,
     `| 失败 | ${failed} |`,
+    `| 推关增加账号 | ${progressed} |`,
     `| 耗时 | ${duration}秒 |`,
     `| 推送时间 | ${new Date().toLocaleString()} |`,
     ``,
-    `| 账号 | 区服 | 当前关卡 | 敌方等级 | 战斗版本 | 随机种子 | 状态 |`,
-    `|------|------|----------|----------|----------|----------|------|`,
+    `| 账号 | 区服 | 当前关卡 | 上次关卡 | 增加数量 | 敌方等级 | 战斗版本 | 随机种子 | 状态 |`,
+    `|------|------|----------|----------|----------|----------|----------|----------|------|`,
   ];
 
   results.forEach((item) => {
@@ -76,6 +151,8 @@ const formatMainLevelNotification = (results, startTime) => {
       item.name,
       item.server,
       item.levelId,
+      item.previousLevelId,
+      item.levelDeltaText,
       item.enemyLevel,
       item.battleVersion,
       item.randomSeed,
@@ -83,7 +160,7 @@ const formatMainLevelNotification = (results, startTime) => {
     ].map(escapeMarkdownTableCell);
 
     lines.push(
-      `| ${cells[0]} | ${cells[1]} | ${cells[2]} | ${cells[3]} | ${cells[4]} | ${cells[5]} | ${cells[6]} |`,
+      `| ${cells[0]} | ${cells[1]} | ${cells[2]} | ${cells[3]} | ${cells[4]} | ${cells[5]} | ${cells[6]} | ${cells[7]} | ${cells[8]} |`,
     );
   });
 
@@ -115,14 +192,20 @@ export function createTasksMainLevel(deps) {
     ) {
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: "WxPusher 未启用或配置不完整，已跳过主线关卡信息推送",
+        message: "WxPusher 未启用或配置不完整，已跳过主线关卡信息获取推送",
         type: "warning",
       });
       message.warning("WxPusher 未启用或配置不完整，已跳过推送");
       return;
     }
 
-    const { title, content } = formatMainLevelNotification(results, startTime);
+    const history = loadMainLevelHistory();
+    const comparedResults = attachMainLevelComparison(results, history);
+    const { title, content } = formatMainLevelNotification(
+      comparedResults,
+      startTime,
+    );
+
     await sendWxPusherMessage(
       {
         appToken: batchSettings.wxpusherAppToken,
@@ -131,10 +214,11 @@ export function createTasksMainLevel(deps) {
       title,
       content,
     );
+    updateMainLevelHistory(history, comparedResults);
 
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: "主线关卡信息已推送到 WxPusher",
+      message: "主线关卡信息获取已推送到 WxPusher",
       type: "success",
     });
   };

@@ -429,13 +429,6 @@
                 >
                   一键灯神扫荡
                 </n-button>
-                <n-button
-                  size="small"
-                  @click="batchPushMainLevelInfo"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  推送主线关卡
-                </n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="dungeon" tab="副本">
@@ -663,6 +656,13 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键金鱼杆补齐
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchPushMainLevelInfo"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  主线关卡信息获取
                 </n-button>
               </n-space>
             </n-tab-pane>
@@ -3872,7 +3872,6 @@ const taskGroupDefinitions = [
       "store_purchase",
       "collection_claimfreereward",
       "batchGenieSweep",
-      "batchPushMainLevelInfo",
     ],
   },
   {
@@ -3917,6 +3916,11 @@ const taskGroupDefinitions = [
     name: "monthly",
     label: "月度",
     tasks: ["batchTopUpFish", "batchTopUpArena"],
+  },
+  {
+    name: "small-account",
+    label: "小号任务",
+    tasks: ["batchTopUpGoldFish", "batchPushMainLevelInfo"],
   },
 ];
 
@@ -5308,7 +5312,9 @@ const executeScheduledTask = async (task) => {
       scheduledTaskStartTime,
       upcomingScheduledTasks,
     );
-    await sendNotifications(title, content);
+    await sendNotifications(title, content, {
+      skipWxPusher: selectedTaskNames.includes("batchPushMainLevelInfo"),
+    });
 
     // 记录执行成功，用于漏执行检测
     recordTaskExecution(task.id);
@@ -6623,10 +6629,15 @@ const startBatch = async () => {
 };
 
 // 发送推送通知到所有已启用渠道
-const sendNotifications = async (title, content) => {
+const sendNotifications = async (title, content, options = {}) => {
   const promises = [];
 
-  if (batchSettings.wxpusherEnabled && batchSettings.wxpusherAppToken && batchSettings.wxpusherUids) {
+  if (
+    !options.skipWxPusher &&
+    batchSettings.wxpusherEnabled &&
+    batchSettings.wxpusherAppToken &&
+    batchSettings.wxpusherUids
+  ) {
     promises.push(
       sendWxPusherMessage(
         { appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids },
@@ -6636,6 +6647,12 @@ const sendNotifications = async (title, content) => {
         .then(() => addLog({ time: new Date().toLocaleTimeString(), message: "WxPusher 推送已发送", type: "success" }))
         .catch((err) => addLog({ time: new Date().toLocaleTimeString(), message: `WxPusher 推送失败: ${err.message}`, type: "error" })),
     );
+  } else if (options.skipWxPusher) {
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: "已跳过定时任务完成通知的 WxPusher 推送，避免主线关卡信息重复推送",
+      type: "info",
+    });
   }
 
   if (batchSettings.pushplusEnabled && batchSettings.pushplusToken) {
