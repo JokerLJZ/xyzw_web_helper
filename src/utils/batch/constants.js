@@ -62,6 +62,7 @@ export const availableTasks = [
   { label: "批量赠送功法残卷", value: "batchLegacyGiftSendEnhanced" },
   { label: "一键领取蟠桃园任务", value: "batchClaimPeachTasks" },
   { label: "一键扫荡灯神", value: "batchGenieSweep" },
+  { label: "推送主线关卡", value: "batchPushMainLevelInfo" },
 ];
 
 // 车辆研究消耗表
@@ -155,6 +156,12 @@ export const defaultBatchSettings = {
   refreshCronExpression: "",
   refreshMaxStaleHours: 0,
   enableMissedTaskReExecution: false,
+  // 推送通知配置
+  wxpusherEnabled: false,
+  wxpusherAppToken: "",
+  wxpusherUids: "",
+  pushplusEnabled: false,
+  pushplusToken: "",
   // 智能发车阈值设置
   smartDepartureGoldThreshold: 0,
   smartDepartureRecruitThreshold: 0,

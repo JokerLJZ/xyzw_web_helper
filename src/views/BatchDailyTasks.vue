@@ -429,6 +429,13 @@
                 >
                   一键灯神扫荡
                 </n-button>
+                <n-button
+                  size="small"
+                  @click="batchPushMainLevelInfo"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  推送主线关卡
+                </n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="dungeon" tab="副本">
@@ -3049,6 +3056,7 @@ import {
   createTasksStore,
   createTasksLegacy,
   createTasksSalt,
+  createTasksMainLevel,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
@@ -3864,6 +3872,7 @@ const taskGroupDefinitions = [
       "store_purchase",
       "collection_claimfreereward",
       "batchGenieSweep",
+      "batchPushMainLevelInfo",
     ],
   },
   {
@@ -6350,6 +6359,7 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
   // 连接成功，槽位保持占用，直到任务完成后手动释放
 
   // Initialize Game Data (Critical for Battle Version and Session)
+  let mainLevelResult = null;
   try {
     // Fetch Role Info first (Standard flow)
     await tokenStore.sendMessageWithPromise(
@@ -6366,6 +6376,7 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
       {},
       5000,
     );
+    mainLevelResult = res;
     if (res?.battleData?.version) {
       tokenStore.setBattleVersion(res.battleData.version);
     }
@@ -6377,7 +6388,7 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     });
   }
 
-  return true;
+  return mainLevelResult || true;
 };
 
 const createTaskDeps = () => ({
@@ -6496,6 +6507,9 @@ const {
 
 const tasksSalt = createTasksSalt(createTaskDeps());
 const { batchSaltSignup } = tasksSalt;
+
+const tasksMainLevel = createTasksMainLevel(createTaskDeps());
+const { batchPushMainLevelInfo } = tasksMainLevel;
 
 const startBatch = async () => {
   if (selectedTokens.value.length === 0) return;

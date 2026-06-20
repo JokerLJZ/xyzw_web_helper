@@ -1041,6 +1041,7 @@ export class XyzwWebSocketClient {
     const responseToCommandMap = {
       // 1:1 响应映射（优先级高）
       fight_startpvpresp: "fight_startpvp",
+      fight_startlevelresp: "fight_startlevel",
       activity_getresp: "activity_get",
       collection_goodslistresp: "collection_goodslist",
       collection_claimfreerewardresp: "collection_claimfreereward",

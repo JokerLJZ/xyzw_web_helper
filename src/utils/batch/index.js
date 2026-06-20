@@ -27,3 +27,4 @@ export { createTasksArena } from './tasksArena.js';
 export { createTasksStore } from './tasksStore.js';
 export { createTasksLegacy } from './tasksLegacy.js';
 export { createTasksSalt } from './tasksSalt.js';
+export { createTasksMainLevel } from './tasksMainLevel.js';
