@@ -142,8 +142,8 @@ const formatMainLevelNotification = (results, startTime) => {
     `| 耗时 | ${duration}秒 |`,
     `| 推送时间 | ${new Date().toLocaleString()} |`,
     ``,
-    `| 账号 | 区服 | 当前关卡 | 上次关卡 | 增加数量 | 敌方等级 | 战斗版本 | 随机种子 | 状态 |`,
-    `|------|------|----------|----------|----------|----------|----------|----------|------|`,
+    `| 账号 | 区服 | 当前关卡 | 上次关卡 | 增加数量 | 状态 |`,
+    `|------|------|----------|----------|----------|------|`,
   ];
 
   results.forEach((item) => {
@@ -153,14 +153,11 @@ const formatMainLevelNotification = (results, startTime) => {
       item.levelId,
       item.previousLevelId,
       item.levelDeltaText,
-      item.enemyLevel,
-      item.battleVersion,
-      item.randomSeed,
       item.error || "成功",
     ].map(escapeMarkdownTableCell);
 
     lines.push(
-      `| ${cells[0]} | ${cells[1]} | ${cells[2]} | ${cells[3]} | ${cells[4]} | ${cells[5]} | ${cells[6]} | ${cells[7]} | ${cells[8]} |`,
+      `| ${cells[0]} | ${cells[1]} | ${cells[2]} | ${cells[3]} | ${cells[4]} | ${cells[5]} |`,
     );
   });
 
