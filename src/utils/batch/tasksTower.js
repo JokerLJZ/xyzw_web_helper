@@ -2,6 +2,7 @@
  * 爬塔类任务
  * 包含: climbTower, batchWeirdTower, climbWeirdTower, batchClaimFreeEnergy
  */
+import { getTowerActId } from "../towerActId.js";
 
 /**
  * 创建爬塔类任务执行器
@@ -648,17 +649,19 @@ export function createTasksTower(deps) {
         await ensureConnection(tokenId);
 
         // 获取活动信息
+        const fallbackActId = getTowerActId();
         let res = await tokenStore.sendMessageWithPromise(
           tokenId,
           "towers_getinfo",
-          {},
+          { actId: fallbackActId },
           5000
         );
         
-        let towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
+        let towerData = (res?.actId ? res : (res?.towerData?.actId ? res.towerData : res)) || {};
+        const challengeActId = towerData.actId || fallbackActId;
 
         // 检查活动是否有效
-        if (!towerData.actId) {
+        if (!challengeActId) {
            addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 换皮闯关活动信息获取失败`,
@@ -668,7 +671,7 @@ export function createTasksTower(deps) {
           return;
         }
 
-        const actId = String(towerData.actId);
+        const actId = String(challengeActId);
         if (actId.length >= 6) {
            const year = "20" + actId.substring(0, 2);
            const month = actId.substring(2, 4);
@@ -765,12 +768,12 @@ export function createTasksTower(deps) {
 
             while (loop && !shouldStop.value) {
                 if (needStart) {
-                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { towerType: type }, 5000);
+                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { actId: challengeActId, towerType: type }, 5000);
                     // 稍微等待一下
                     await new Promise(r => setTimeout(r, 500));
                 }
 
-                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { towerType: type }, 5000);
+                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { actId: challengeActId, towerType: type }, 5000);
                 const battleData = fightRes?.battleData;
                 const curHP = battleData?.result?.accept?.ext?.curHP;
                 
@@ -787,8 +790,8 @@ export function createTasksTower(deps) {
                      failCount = 0;
 
                      // 刷新数据
-                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", {}, 5000);
-                     towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
+                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: challengeActId }, 5000);
+                     towerData = (res?.actId ? res : (res?.towerData?.actId ? res.towerData : res)) || {};
                      levelRewardMap = towerData.levelRewardMap || {};
 
                      if (isTowerCleared(type, levelRewardMap)) {
