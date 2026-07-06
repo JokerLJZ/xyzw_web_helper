@@ -108,7 +108,7 @@ function escapeMarkdownTableCell(value) {
 /**
  * 格式化定时任务完成通知 (Markdown)
  * @param {string} taskName - 定时任务名称
- * @param {Array<{name: string, status: 'completed'|'failed', error?: string}>} tokenResults
+ * @param {Array<{name: string, status: 'completed'|'failed'|'skipped', error?: string}>} tokenResults
  * @param {Date} startTime - 任务开始时间
  * @param {Array<{name: string, startTime: Date|string}>} [upcomingTasks] - 后续批量任务
  * @returns {{title: string, content: string}}
@@ -117,6 +117,7 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
   const total = tokenResults.length;
   const completed = tokenResults.filter((r) => r.status === "completed").length;
   const failed = tokenResults.filter((r) => r.status === "failed").length;
+  const skipped = tokenResults.filter((r) => r.status === "skipped").length;
 
   const duration = Math.round((Date.now() - startTime.getTime()) / 1000);
   const minutes = Math.floor(duration / 60);
@@ -137,6 +138,7 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
     `| 总账号 | ${total} |`,
     `| 成功 | ${completed} |`,
     `| 失败 | ${failed} |`,
+    ...(skipped > 0 ? [`| 跳过 | ${skipped} |`] : []),
     `| 耗时 | ${durationStr} |`,
     `| 完成时间 | ${endTime} |`,
   ];
@@ -147,6 +149,15 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
       .filter((r) => r.status === "failed")
       .forEach((r) => {
         lines.push(`- **${r.name}**${r.error ? `：${r.error}` : ""}`);
+      });
+  }
+
+  if (skipped > 0) {
+    lines.push(``, `### 跳过账号`);
+    tokenResults
+      .filter((r) => r.status === "skipped")
+      .forEach((r) => {
+        lines.push(`- ${r.name}`);
       });
   }
 

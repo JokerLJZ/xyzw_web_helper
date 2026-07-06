@@ -47,19 +47,31 @@ export function createTasksLegacy(deps) {
     );
   };
 
+  const getRunTokenIds = (options = {}) => {
+    if (
+      options &&
+      typeof options === "object" &&
+      Array.isArray(options.tokenIds)
+    ) {
+      return options.tokenIds;
+    }
+    return selectedTokens.value;
+  };
+
   /**
    * 批量领取功法残卷
    */
-  const batchLegacyClaim = async () => {
-    if (selectedTokens.value.length === 0) return;
+  const batchLegacyClaim = async (options = {}) => {
+    const runTokenIds = getRunTokenIds(options);
+    if (runTokenIds.length === 0) return;
     isRunning.value = true;
     shouldStop.value = false;
 
-    selectedTokens.value.forEach((id) => {
+    runTokenIds.forEach((id) => {
       tokenStatus.value[id] = "waiting";
     });
 
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+    const taskPromises = runTokenIds.map(async (tokenId) => {
       if (shouldStop.value) return;
       tokenStatus.value[tokenId] = "running";
 
@@ -113,12 +125,13 @@ export function createTasksLegacy(deps) {
   /**
    * 批量开始探索功法
    */
-  const batchLegacyBeginHangUp = async () => {
-    if (selectedTokens.value.length === 0) return;
+  const batchLegacyBeginHangUp = async (options = {}) => {
+    const runTokenIds = getRunTokenIds(options);
+    if (runTokenIds.length === 0) return;
     isRunning.value = true;
     shouldStop.value = false;
 
-    selectedTokens.value.forEach((id) => {
+    runTokenIds.forEach((id) => {
       tokenStatus.value[id] = "waiting";
     });
 
@@ -126,7 +139,7 @@ export function createTasksLegacy(deps) {
     let skippedCount = 0;
     let failedCount = 0;
 
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+    const taskPromises = runTokenIds.map(async (tokenId) => {
       if (shouldStop.value) return;
       tokenStatus.value[tokenId] = "running";
 
@@ -206,12 +219,13 @@ export function createTasksLegacy(deps) {
   /**
    * 批量领取特权功法
    */
-  const batchLegacyClaimChargeReward = async () => {
-    if (selectedTokens.value.length === 0) return;
+  const batchLegacyClaimChargeReward = async (options = {}) => {
+    const runTokenIds = getRunTokenIds(options);
+    if (runTokenIds.length === 0) return;
     isRunning.value = true;
     shouldStop.value = false;
 
-    selectedTokens.value.forEach((id) => {
+    runTokenIds.forEach((id) => {
       tokenStatus.value[id] = "waiting";
     });
 
@@ -219,7 +233,7 @@ export function createTasksLegacy(deps) {
     let skippedCount = 0;
     let failedCount = 0;
 
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+    const taskPromises = runTokenIds.map(async (tokenId) => {
       if (shouldStop.value) return;
       tokenStatus.value[tokenId] = "running";
 
@@ -300,8 +314,14 @@ export function createTasksLegacy(deps) {
   /**
    * 增强版批量赠送功法残卷（含完善的验证和错误处理）
    */
-  const batchLegacyGiftSendEnhanced = async (isScheduledTask = false) => {
-    if (selectedTokens.value.length === 0) {
+  const batchLegacyGiftSendEnhanced = async (options = false) => {
+    const isScheduledTask =
+      typeof options === "object" ? Boolean(options.isScheduledTask) : options;
+    const runTokenIds = getRunTokenIds(
+      typeof options === "object" ? options : {},
+    );
+
+    if (runTokenIds.length === 0) {
       message.warning("请先选择要操作的角色");
       return;
     }
@@ -336,14 +356,14 @@ export function createTasksLegacy(deps) {
     isRunning.value = true;
     shouldStop.value = false;
 
-    selectedTokens.value.forEach((id) => {
+    runTokenIds.forEach((id) => {
       tokenStatus.value[id] = "waiting";
     });
 
     let totalSuccess = 0;
     let totalFailed = 0;
 
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+    const taskPromises = runTokenIds.map(async (tokenId) => {
       if (shouldStop.value) return;
       tokenStatus.value[tokenId] = "running";
 

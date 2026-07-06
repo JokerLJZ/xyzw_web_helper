@@ -1704,6 +1704,13 @@
             <span style="color: #6b7280">选中任务：</span>
             <span>{{ task.selectedTasks.length }} 个</span>
           </div>
+          <div
+            v-if="task.legacyExcludedTokens?.length"
+            style="margin-bottom: 8px"
+          >
+            <span style="color: #6b7280">功法跳过：</span>
+            <span>{{ task.legacyExcludedTokens.length }} 个</span>
+          </div>
           <div style="display: flex; gap: 8px">
             <n-button size="tiny" @click="editTask(task)"> 编辑 </n-button>
             <n-button size="tiny" type="error" @click="deleteTask(task.id)">
@@ -1955,6 +1962,42 @@
                 </n-tab-pane>
               </n-tabs>
             </n-checkbox-group>
+          </div>
+          <div class="setting-item" v-if="hasLegacyTaskSelected">
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 8px;
+              "
+            >
+              <label class="setting-label">功法跳过账号</label>
+              <n-space size="small">
+                <n-button size="small" @click="selectAllLegacyExcludedTokens">
+                  全选
+                </n-button>
+                <n-button size="small" @click="clearLegacyExcludedTokens">
+                  全不选
+                </n-button>
+              </n-space>
+            </div>
+            <n-checkbox-group v-model:value="taskForm.legacyExcludedTokens">
+              <n-grid :cols="2" :x-gap="12" :y-gap="8">
+                <n-grid-item
+                  v-for="token in legacyExcludableTokens"
+                  :key="token.id"
+                >
+                  <n-checkbox :value="token.id">{{ token.name }}</n-checkbox>
+                </n-grid-item>
+              </n-grid>
+            </n-checkbox-group>
+            <div
+              v-if="legacyExcludableTokens.length === 0"
+              style="font-size: 12px; color: #86909c; margin-top: 8px"
+            >
+              请先选择账号
+            </div>
           </div>
         </div>
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
@@ -3778,8 +3821,23 @@ const taskForm = reactive({
   cronExpression: "", // Cron expression for complex scheduling
   selectedTokens: [], // Selected token IDs
   selectedTasks: [], // Selected task function names
+  legacyExcludedTokens: [], // Token IDs skipped by legacy tasks
   enabled: true, // Whether the task is enabled
 });
+
+const integratedDailyTaskNames = ["claimHangUpRewardsFiveTimes"];
+const legacyTaskNames = [
+  "batchLegacyClaim",
+  "batchLegacyBeginHangUp",
+  "batchLegacyClaimChargeReward",
+  "batchLegacyGiftSendEnhanced",
+];
+
+const isLegacyTaskName = (taskName) => legacyTaskNames.includes(taskName);
+
+const hasLegacyTaskSelected = computed(() =>
+  taskForm.selectedTasks.some((taskName) => isLegacyTaskName(taskName)),
+);
 
 const syncTokenIdListOrder = (getValue, setValue) => {
   const current = getValue();
@@ -3809,6 +3867,14 @@ watch(
       () => taskForm.selectedTokens,
       (orderedIds) => {
         taskForm.selectedTokens = orderedIds;
+      },
+    );
+    syncTokenIdListOrder(
+      () => taskForm.legacyExcludedTokens,
+      (orderedIds) => {
+        taskForm.legacyExcludedTokens = orderedIds.filter((id) =>
+          taskForm.selectedTokens.includes(id),
+        );
       },
     );
   },
@@ -3841,17 +3907,31 @@ watch(
 
 watch(
   () => taskForm.selectedTokens,
-  () =>
+  () => {
     syncTokenIdListOrder(
       () => taskForm.selectedTokens,
       (orderedIds) => {
         taskForm.selectedTokens = orderedIds;
       },
-    ),
+    );
+    taskForm.legacyExcludedTokens = normalizeTokenIdsByBatchOrder(
+      taskForm.legacyExcludedTokens.filter((id) =>
+        taskForm.selectedTokens.includes(id),
+      ),
+    );
+  },
   { deep: true },
 );
 
-const integratedDailyTaskNames = ["claimHangUpRewardsFiveTimes"];
+watch(
+  () => taskForm.selectedTasks,
+  () => {
+    if (!hasLegacyTaskSelected.value) {
+      taskForm.legacyExcludedTokens = [];
+    }
+  },
+  { deep: true },
+);
 
 // 任务分组定义
 const taskGroupDefinitions = [
@@ -3944,6 +4024,21 @@ const groupedAvailableTasks = computed(() => {
 
   return groups;
 });
+
+const legacyExcludableTokens = computed(() => {
+  const selectedTokenIds = new Set(taskForm.selectedTokens);
+  return sortedTokens.value.filter((token) => selectedTokenIds.has(token.id));
+});
+
+const selectAllLegacyExcludedTokens = () => {
+  taskForm.legacyExcludedTokens = normalizeTokenIdsByBatchOrder(
+    legacyExcludableTokens.value.map((token) => token.id),
+  );
+};
+
+const clearLegacyExcludedTokens = () => {
+  taskForm.legacyExcludedTokens = [];
+};
 
 // Cron表达式解析相关变量
 const cronValidation = ref({ valid: true, message: "" });
@@ -4206,6 +4301,7 @@ const openTaskModal = () => {
     cronExpression: "",
     selectedTokens: [],
     selectedTasks: [],
+    legacyExcludedTokens: [],
     enabled: true,
   });
   taskScheduleSelectedGroupIds.value = [];
@@ -4231,6 +4327,12 @@ const editTask = (task) => {
       minutes,
     );
   }
+  taskData.selectedTokens = normalizeTokenIdsByBatchOrder(
+    taskData.selectedTokens || [],
+  );
+  taskData.legacyExcludedTokens = normalizeTokenIdsByBatchOrder(
+    taskData.legacyExcludedTokens || [],
+  ).filter((tokenId) => taskData.selectedTokens.includes(tokenId));
   Object.assign(taskForm, taskData);
   taskScheduleSelectedGroupIds.value = [];
   showTaskModal.value = true;
@@ -4323,6 +4425,9 @@ const saveTask = () => {
     cronExpression: taskForm.runType === "cron" ? taskForm.cronExpression : "",
     selectedTokens: normalizeTokenIdsByBatchOrder(taskForm.selectedTokens),
     selectedTasks: [...taskForm.selectedTasks],
+    legacyExcludedTokens: normalizeTokenIdsByBatchOrder(
+      taskForm.legacyExcludedTokens,
+    ).filter((tokenId) => taskForm.selectedTokens.includes(tokenId)),
     enabled: taskForm.enabled,
   };
 
@@ -4426,6 +4531,9 @@ const exportConfig = async () => {
         ...task,
         selectedTokens:
           task?.selectedTokens?.filter((id) => validTokenIds.has(id)) || [],
+        legacyExcludedTokens:
+          task?.legacyExcludedTokens?.filter((id) => validTokenIds.has(id)) ||
+          [],
       }))
       .filter((task) => task.selectedTokens.length > 0);
 
@@ -4481,7 +4589,19 @@ const importConfig = async ({ file }) => {
           const seen = new Set(scheduledTasks.value.map((t) => t.id));
           for (const t of importData.scheduledTasks) {
             if (t?.id && !seen.has(t.id)) {
-              scheduledTasks.value.push(sanitizeScheduledTaskForSnapshot(t));
+              const sanitizedTask = sanitizeScheduledTaskForSnapshot(t);
+              if (Array.isArray(sanitizedTask?.legacyExcludedTokens)) {
+                const selectedTokenIds = Array.isArray(
+                  sanitizedTask.selectedTokens,
+                )
+                  ? sanitizedTask.selectedTokens
+                  : [];
+                sanitizedTask.legacyExcludedTokens =
+                  sanitizedTask.legacyExcludedTokens.filter((tokenId) =>
+                    selectedTokenIds.includes(tokenId),
+                  );
+              }
+              scheduledTasks.value.push(sanitizedTask);
               seen.add(t.id);
             }
           }
@@ -4562,10 +4682,25 @@ const cleanupInvalidBatchTokens = () => {
       }
       return isValid;
     });
+    const cleanedLegacyExcludedTokens = Array.isArray(
+      task.legacyExcludedTokens,
+    )
+      ? task.legacyExcludedTokens.filter((tokenId) => {
+          const isValid =
+            validTokenIdSet.value.has(tokenId) &&
+            cleanedSelectedTokens.includes(tokenId);
+          if (!isValid) {
+            invalidTokenIds.add(tokenId);
+            removedRefsCount++;
+          }
+          return isValid;
+        })
+      : [];
 
     const nextTask = {
       ...task,
       selectedTokens: cleanedSelectedTokens,
+      legacyExcludedTokens: cleanedLegacyExcludedTokens,
     };
 
     if (Array.isArray(task.connectedTokens)) {
@@ -5188,6 +5323,37 @@ const executeScheduledTask = async (task) => {
       }
     }
 
+    const legacyExcludedTokens = normalizeTokenIdsByBatchOrder(
+      Array.isArray(task.legacyExcludedTokens) ? task.legacyExcludedTokens : [],
+    ).filter((tokenId) => availableTokens.includes(tokenId));
+    const legacyAvailableTokens = availableTokens.filter(
+      (tokenId) => !legacyExcludedTokens.includes(tokenId),
+    );
+    const hasLegacyTasksToRun = selectedTaskNames.some((taskName) =>
+      isLegacyTaskName(taskName),
+    );
+    const onlyLegacyTasks =
+      selectedTaskNames.length > 0 &&
+      selectedTaskNames.every((taskName) => isLegacyTaskName(taskName));
+
+    if (hasLegacyTasksToRun && legacyExcludedTokens.length > 0) {
+      const skippedNames = legacyExcludedTokens.map((tokenId) => {
+        const token = tokens.value.find((t) => t.id === tokenId);
+        return token?.name || tokenId;
+      });
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `功法任务跳过 ${legacyExcludedTokens.length} 个账号: ${skippedNames.join(", ")}`,
+        type: "info",
+      });
+
+      if (onlyLegacyTasks) {
+        legacyExcludedTokens.forEach((tokenId) => {
+          tokenStatus.value[tokenId] = "skipped";
+        });
+      }
+    }
+
     // Execute selected tasks in parallel
     const taskPromises = selectedTaskNames.map(async (taskName) => {
       if (shouldStop.value) return;
@@ -5267,6 +5433,23 @@ const executeScheduledTask = async (task) => {
       // Call the task function dynamically
       const taskFunction = eval(taskName);
       if (typeof taskFunction === "function") {
+        if (isLegacyTaskName(taskName)) {
+          if (legacyAvailableTokens.length === 0) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (功法可执行账号为空)`,
+              type: "warning",
+            });
+            return;
+          }
+
+          await taskFunction({
+            tokenIds: legacyAvailableTokens,
+            isScheduledTask: true,
+          });
+          return;
+        }
+
         // For batch operations, pass isScheduledTask = true
         // 具体的batch任务函数内部会使用ensureConnection管理并行连接
         if (
