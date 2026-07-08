@@ -270,7 +270,7 @@
               每 token 任务设置
             </n-checkbox>
             <n-checkbox v-model:checked="restoreOptions.applyMisc">
-              分组 / 模板 / 主题
+              分组 / 模板 / 排序 / 主题
             </n-checkbox>
           </n-space>
         </n-form-item>

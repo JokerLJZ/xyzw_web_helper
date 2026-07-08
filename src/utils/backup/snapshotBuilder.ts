@@ -23,6 +23,7 @@ const LS_KEYS = {
   batchSettings: "batchSettings",
   taskTemplates: "task-templates",
   tokenSortConfig: "tokenSortConfig",
+  batchTokenOrder: "batchTokenOrder",
   userPreferences: "userPreferences",
   theme: "theme",
 } as const;
@@ -236,6 +237,86 @@ function sanitizeTokenGroupsForSnapshot(
     .filter((group) => group.id);
 }
 
+function normalizeBatchTokenOrderForTokens(
+  order: unknown,
+  tokens: BackupTokenEntry[],
+  appendMissingTokens = true,
+): string[] {
+  const validTokenIds = new Set(
+    tokens
+      .map((token) => token?.id)
+      .filter((tokenId): tokenId is string => Boolean(tokenId)),
+  );
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  if (Array.isArray(order)) {
+    for (const tokenId of order) {
+      if (
+        typeof tokenId === "string" &&
+        validTokenIds.has(tokenId) &&
+        !seen.has(tokenId)
+      ) {
+        normalized.push(tokenId);
+        seen.add(tokenId);
+      }
+    }
+  }
+
+  if (appendMissingTokens) {
+    for (const token of tokens) {
+      if (token?.id && !seen.has(token.id)) {
+        normalized.push(token.id);
+        seen.add(token.id);
+      }
+    }
+  }
+
+  return normalized;
+}
+
+function mergeBatchTokenOrder(
+  currentOrder: unknown,
+  snapshotOrder: unknown,
+  tokens: BackupTokenEntry[],
+): string[] {
+  const normalizedCurrent = normalizeBatchTokenOrderForTokens(
+    currentOrder,
+    tokens,
+    false,
+  );
+  const normalizedSnapshot = normalizeBatchTokenOrderForTokens(
+    snapshotOrder,
+    tokens,
+    false,
+  );
+  const merged: string[] = [];
+  const seen = new Set<string>();
+
+  for (const tokenId of normalizedSnapshot) {
+    if (!seen.has(tokenId)) {
+      merged.push(tokenId);
+      seen.add(tokenId);
+    }
+  }
+
+  for (const tokenId of normalizedCurrent) {
+    if (!seen.has(tokenId)) {
+      merged.push(tokenId);
+      seen.add(tokenId);
+    }
+  }
+
+  for (const token of tokens) {
+    if (token?.id && !seen.has(token.id)) {
+      merged.push(token.id);
+      seen.add(token.id);
+    }
+  }
+
+  return merged;
+}
+
 export function buildSnapshot(source: "auto" | "manual"): BackupSnapshotV12 {
   const tokens = readJSON<BackupTokenEntry[]>(LS_KEYS.tokens, []);
 
@@ -260,6 +341,10 @@ export function buildSnapshot(source: "auto" | "manual"): BackupSnapshotV12 {
     ),
     taskTemplates: readJSON<unknown[]>(LS_KEYS.taskTemplates, []),
     tokenSortConfig: readJSON<unknown>(LS_KEYS.tokenSortConfig, null),
+    batchTokenOrder: normalizeBatchTokenOrderForTokens(
+      readJSON<unknown[]>(LS_KEYS.batchTokenOrder, []),
+      tokens,
+    ),
     userPreferences: readJSON<unknown>(LS_KEYS.userPreferences, null),
     theme: readString(LS_KEYS.theme, "auto"),
     selectedTokenId: readString(LS_KEYS.selectedTokenId, "") || null,
@@ -322,6 +407,11 @@ function normalizeSnapshot(snap: AnyBackupSnapshot): BackupSnapshotV12 {
       ? (snap as any).taskTemplates
       : [],
     tokenSortConfig: (snap as any).tokenSortConfig ?? null,
+    batchTokenOrder: normalizeBatchTokenOrderForTokens(
+      (snap as any).batchTokenOrder,
+      tokens,
+      Array.isArray((snap as any).batchTokenOrder),
+    ),
     userPreferences: (snap as any).userPreferences ?? null,
     theme: (snap as any).theme || "",
     selectedTokenId: (snap as any).selectedTokenId ?? null,
@@ -341,6 +431,9 @@ export function applySnapshot(
     applyMisc = true,
   } = options;
 
+  const shouldRestoreBatchTokenOrder = Array.isArray(
+    (raw as any).batchTokenOrder,
+  );
   const snap = normalizeSnapshot(raw);
   const result: ApplySnapshotResult = {
     importedTokens: 0,
@@ -442,6 +535,17 @@ export function applySnapshot(
         LS_KEYS.tokenSortConfig,
         JSON.stringify(snap.tokenSortConfig),
       );
+    if (shouldRestoreBatchTokenOrder) {
+      const nextOrder =
+        tokenStrategy === "overwrite"
+          ? normalizeBatchTokenOrderForTokens(snap.batchTokenOrder, merged)
+          : mergeBatchTokenOrder(
+              readJSON<unknown[]>(LS_KEYS.batchTokenOrder, []),
+              snap.batchTokenOrder,
+              merged,
+            );
+      localStorage.setItem(LS_KEYS.batchTokenOrder, JSON.stringify(nextOrder));
+    }
     if (snap.userPreferences != null)
       localStorage.setItem(
         LS_KEYS.userPreferences,
@@ -458,7 +562,7 @@ export async function applySnapshotWithIndexedDB(
   options: ApplySnapshotOptions = {},
 ): Promise<ApplySnapshotResult> {
   const snap = normalizeSnapshot(raw);
-  const result = applySnapshot(snap, options);
+  const result = applySnapshot(raw, options);
   result.importedTokenBinaryData = await restoreTokenBinaryData(
     snap.tokenBinaryData,
   );

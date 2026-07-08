@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(grep -iE \"md$\")",
+      "Bash(git revert *)",
+      "Bash(git checkout *)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(git stash *)"
+    ]
+  }
+}

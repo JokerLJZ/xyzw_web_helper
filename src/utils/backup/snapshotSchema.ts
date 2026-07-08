@@ -41,7 +41,7 @@ export interface BackupTokenGroupEntry {
 }
 
 export interface BackupSnapshotV12 {
-  version: "1.2" | "1.3";
+  version: "1.2" | "1.3" | "1.4";
   exportTime: string;
   source: "auto" | "manual";
   client: { ua: string; appVersion: string };
@@ -55,6 +55,7 @@ export interface BackupSnapshotV12 {
   tokenGroups: BackupTokenGroupEntry[];
   taskTemplates: unknown[];
   tokenSortConfig: unknown;
+  batchTokenOrder: string[];
   userPreferences: unknown;
   theme: string;
   selectedTokenId: string | null;
@@ -73,4 +74,4 @@ export interface BackupSnapshotV11 {
 
 export type AnyBackupSnapshot = BackupSnapshotV12 | BackupSnapshotV11;
 
-export const CURRENT_BACKUP_VERSION = "1.3" as const;
+export const CURRENT_BACKUP_VERSION = "1.4" as const;
