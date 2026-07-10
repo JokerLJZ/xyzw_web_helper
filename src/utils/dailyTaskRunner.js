@@ -59,6 +59,15 @@ const isDailyDreamOpenDay = () => {
   return dayOfWeek === 0 || dayOfWeek === 3;
 };
 
+const DIAMOND_BOX_ITEM_ID = 2005;
+const AUTO_DAILY_DIAMOND_BOX_COUNT = 10;
+
+const getRoleItemQuantity = (roleData, itemId) => {
+  const item = roleData?.items?.[itemId] || roleData?.items?.[String(itemId)];
+  const quantity = Number(item?.quantity ?? item?.count ?? item?.num ?? 0);
+  return Number.isFinite(quantity) ? Math.max(0, Math.trunc(quantity)) : 0;
+};
+
 const getDefaultDreamPurchaseList = () => {
   const list = [];
   for (const merchantId in goldItemsConfig) {
@@ -787,8 +796,9 @@ export class DailyTaskRunner {
         bossFormation: 1,
         bossTimes: 2,
         claimBottle: true,
-        payRecruit: true,
-        openBox: true,
+        payRecruit: false,
+        openBox: false,
+        autoDiamondBoxPaidRecruit: false,
         arenaEnable: true,
         claimHangUp: true,
         claimEmail: true,
@@ -855,8 +865,63 @@ export class DailyTaskRunner {
     const isTaskCompleted = (taskId) => completedTasks[taskId] === -1;
     const statistics = roleData.statistics ?? {};
     const statisticsTime = roleData.statisticsTime ?? {};
+    const diamondBoxCount = getRoleItemQuantity(roleData, DIAMOND_BOX_ITEM_ID);
+    const isRecruitTaskCompleted = isTaskCompleted(4);
+    const isOpenBoxTaskCompleted = isTaskCompleted(7);
+    const shouldRunDiamondBoxPaidRecruit =
+      settings.autoDiamondBoxPaidRecruit === true;
+    const canRunDiamondBoxPaidRecruit =
+      shouldRunDiamondBoxPaidRecruit &&
+      !isRecruitTaskCompleted &&
+      !isOpenBoxTaskCompleted &&
+      diamondBoxCount >= AUTO_DAILY_DIAMOND_BOX_COUNT;
 
     const taskList = [];
+
+    if (canRunDiamondBoxPaidRecruit) {
+      this.log(
+        `自动钻石宝箱与付费招募已触发：钻石宝箱 ${diamondBoxCount} 个`,
+        "info",
+      );
+      taskList.push(
+        {
+          name: "开启钻石宝箱",
+          execute: () =>
+            this.executeGameCommand(
+              tokenId,
+              "item_openbox",
+              {
+                itemId: DIAMOND_BOX_ITEM_ID,
+                number: AUTO_DAILY_DIAMOND_BOX_COUNT,
+              },
+              `开启钻石宝箱${AUTO_DAILY_DIAMOND_BOX_COUNT}个`,
+            ),
+        },
+        {
+          name: "付费招募",
+          execute: () =>
+            this.executeGameCommand(
+              tokenId,
+              "hero_recruit",
+              { recruitType: 1, recruitNumber: 1 },
+              "付费招募",
+            ),
+        },
+      );
+    } else if (shouldRunDiamondBoxPaidRecruit) {
+      const skipReasons = [];
+      if (isOpenBoxTaskCompleted) skipReasons.push("开宝箱日常已完成");
+      if (isRecruitTaskCompleted) skipReasons.push("招募日常已完成");
+      if (diamondBoxCount < AUTO_DAILY_DIAMOND_BOX_COUNT) {
+        skipReasons.push(
+          `钻石宝箱不足${AUTO_DAILY_DIAMOND_BOX_COUNT}个（当前${diamondBoxCount}个）`,
+        );
+      }
+      this.log(
+        `自动钻石宝箱与付费招募跳过：${skipReasons.join("，")}`,
+        "info",
+      );
+    }
 
     // 1. 基础任务
     if (!isTaskCompleted(2)) {
@@ -892,7 +957,7 @@ export class DailyTaskRunner {
           ),
       });
 
-      if (settings.payRecruit) {
+      if (settings.payRecruit && !canRunDiamondBoxPaidRecruit) {
         taskList.push({
           name: "付费招募",
           execute: () =>
@@ -940,7 +1005,11 @@ export class DailyTaskRunner {
       }
     }
 
-    if (!isTaskCompleted(7) && settings.openBox) {
+    if (
+      !isTaskCompleted(7) &&
+      settings.openBox &&
+      !canRunDiamondBoxPaidRecruit
+    ) {
       taskList.push({
         name: "开启木质宝箱",
         execute: () =>

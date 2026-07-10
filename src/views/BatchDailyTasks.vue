@@ -788,6 +788,12 @@
               ><n-switch v-model:value="currentSettings.openBox" />
             </div>
             <div class="switch-row">
+              <span class="switch-label">钻石宝箱+付费招募</span
+              ><n-switch
+                v-model:value="currentSettings.autoDiamondBoxPaidRecruit"
+              />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">领取邮件奖励</span
               ><n-switch v-model:value="currentSettings.claimEmail" />
             </div>
@@ -896,6 +902,12 @@
             <div class="switch-row">
               <span class="switch-label">开宝箱</span
               ><n-switch v-model:value="currentTemplate.openBox" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">钻石宝箱+付费招募</span
+              ><n-switch
+                v-model:value="currentTemplate.autoDiamondBoxPaidRecruit"
+              />
             </div>
             <div class="switch-row">
               <span class="switch-label">领取邮件奖励</span
@@ -3611,8 +3623,9 @@ const currentSettings = reactive({
   bossFormation: 1,
   bossTimes: 2,
   claimBottle: true,
-  payRecruit: true,
-  openBox: true,
+  payRecruit: false,
+  openBox: false,
+  autoDiamondBoxPaidRecruit: false,
   arenaEnable: true,
   claimHangUp: true,
   claimEmail: true,
@@ -3641,8 +3654,9 @@ const currentTemplate = reactive({
   bossFormation: 1,
   bossTimes: 2,
   claimBottle: true,
-  payRecruit: true,
-  openBox: true,
+  payRecruit: false,
+  openBox: false,
+  autoDiamondBoxPaidRecruit: false,
   arenaEnable: true,
   claimHangUp: true,
   claimEmail: true,
@@ -5842,8 +5856,9 @@ const loadSettings = (tokenId) => {
       bossFormation: 1,
       bossTimes: 2,
       claimBottle: true,
-      payRecruit: true,
-      openBox: true,
+      payRecruit: false,
+      openBox: false,
+      autoDiamondBoxPaidRecruit: false,
       arenaEnable: true,
       claimHangUp: true,
       claimEmail: true,
@@ -5892,8 +5907,9 @@ const openTaskTemplateModal = () => {
     bossFormation: 1,
     bossTimes: 2,
     claimBottle: true,
-    payRecruit: true,
-    openBox: true,
+    payRecruit: false,
+    openBox: false,
+    autoDiamondBoxPaidRecruit: false,
     arenaEnable: true,
     claimHangUp: true,
     claimEmail: true,
@@ -6047,8 +6063,9 @@ const resetTemplateForm = () => {
     bossFormation: 1,
     bossTimes: 2,
     claimBottle: true,
-    payRecruit: true,
-    openBox: true,
+    payRecruit: false,
+    openBox: false,
+    autoDiamondBoxPaidRecruit: false,
     arenaEnable: true,
     claimHangUp: true,
     claimEmail: true,
