@@ -554,6 +554,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="openHeroLevelUpgradeModal"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  批量升级武将
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchBookUpgrade"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -1584,6 +1591,50 @@
             >取消</n-button
           >
           <n-button type="primary" @click="executeHelper">开始执行</n-button>
+        </div>
+      </div>
+    </n-modal>
+
+    <!-- Hero Level Upgrade Modal -->
+    <n-modal
+      v-model:show="showHeroLevelUpgradeModal"
+      preset="card"
+      title="批量升级武将"
+      style="width: 90%; max-width: 420px"
+    >
+      <div class="settings-content">
+        <n-alert type="info" show-icon style="margin-bottom: 16px">
+          将对当前选中的 {{ selectedTokens.length }} 个账号执行升级。达到目标等级的账号不会操作，升级过程中会自动处理进阶。
+        </n-alert>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label class="setting-label">选择武将</label>
+            <n-select
+              v-model:value="heroLevelUpgradeForm.heroId"
+              :options="heroLevelUpgradeHeroOptions"
+              filterable
+              placeholder="请选择武将"
+            />
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">目标等级</label>
+            <n-select
+              v-model:value="heroLevelUpgradeForm.targetLevel"
+              :options="heroLevelUpgradeLevelOptions"
+              placeholder="请选择目标等级"
+            />
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top: 20px; text-align: right">
+          <n-button
+            @click="showHeroLevelUpgradeModal = false"
+            style="margin-right: 12px"
+          >
+            取消
+          </n-button>
+          <n-button type="primary" @click="executeHeroLevelUpgrade">
+            开始执行
+          </n-button>
         </div>
       </div>
     </n-modal>
@@ -3115,6 +3166,7 @@ import {
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
+import { HERO_DICT } from "@/utils/HeroList";
 import { sendWxPusherMessage, sendPushPlusMessage, formatScheduledTaskNotification, formatMissedExecutionNotification } from "@/utils/wxpusher";
 
 // Initialize token store, message service, and task runner
@@ -3703,6 +3755,42 @@ const helperSettings = reactive({
   count: 100,
   targetPoints: 1000,
 });
+
+const showHeroLevelUpgradeModal = ref(false);
+const heroLevelUpgradeForm = reactive({
+  heroId: Number(Object.keys(HERO_DICT)[0]),
+  targetLevel: 50,
+});
+const heroLevelUpgradeHeroOptions = Object.entries(HERO_DICT).map(
+  ([heroId, hero]) => ({
+    label: `${hero.name} (${hero.type})`,
+    value: Number(heroId),
+  }),
+);
+const heroLevelUpgradeLevelOptions = Array.from({ length: 120 }, (_, index) => {
+  const level = (index + 1) * 50;
+  return { label: `${level}级`, value: level };
+});
+
+const openHeroLevelUpgradeModal = () => {
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择至少一个账号");
+    return;
+  }
+
+  showHeroLevelUpgradeModal.value = true;
+};
+
+const executeHeroLevelUpgrade = async () => {
+  const { heroId, targetLevel } = heroLevelUpgradeForm;
+  if (!heroId || !Number.isInteger(targetLevel) || targetLevel % 50 !== 0) {
+    message.warning("目标等级必须是50的整数倍");
+    return;
+  }
+
+  showHeroLevelUpgradeModal.value = false;
+  await batchHeroLevelUpgrade(heroId, targetLevel);
+};
 
 const helperModalTitle = computed(() => {
   const titles = {
@@ -6681,6 +6769,7 @@ const {
   batchFish,
   batchRecruit,
   batchHeroUpgrade,
+  batchHeroLevelUpgrade,
   batchBookUpgrade,
   batchClaimStarRewards,
   batchClaimPeachTasks,
