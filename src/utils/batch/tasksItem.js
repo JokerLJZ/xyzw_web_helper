@@ -183,18 +183,136 @@ export function createTasksItem(deps) {
   };
 
   /**
-   * 批量将指定武将升级并自动进阶到目标等级。
+   * 将单个武将升级并自动进阶到目标等级。
+   */
+  const upgradeSingleHero = async (tokenId, tokenName, heroId, targetLevel) => {
+    const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
+    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+    let hero = getHeroFromRoleInfo(roleInfo, heroId);
+
+    if (!hero) {
+      throw new Error(`账号中未找到${heroName}`);
+    }
+
+    let currentLevel = Number(hero.level) || 0;
+    let currentOrder = Number(hero.order) || 0;
+
+    if (currentLevel >= targetLevel) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} ${heroName}当前${currentLevel}级，已达到目标，跳过操作`,
+        type: "info",
+      });
+      return;
+    }
+
+    while (!shouldStop.value) {
+      const nextOrder = heroLevelOrderThresholds.find(
+        (item) => item.order > currentOrder,
+      );
+
+      if (nextOrder && currentLevel >= nextOrder.level) {
+        const result = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "hero_heroupgradeorder",
+          { heroId },
+          5000,
+        );
+
+        if (!isSuccessfulHeroCommand(result)) {
+          throw new Error(`进阶失败（当前${currentLevel}级）`);
+        }
+
+        hero = await getLatestHero(tokenId, heroId, result);
+        const updatedOrder = Number(hero?.order);
+        if (!hero || !Number.isFinite(updatedOrder) || updatedOrder <= currentOrder) {
+          throw new Error("进阶后未获取到最新武将阶数");
+        }
+
+        currentOrder = updatedOrder;
+        currentLevel = Number(hero.level) || currentLevel;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} ${heroName}已自动进阶至${currentOrder}阶（${currentLevel}级）`,
+          type: "success",
+        });
+        await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+        continue;
+      }
+
+      if (currentLevel >= targetLevel) {
+        break;
+      }
+
+      const levelBoundary = Math.min(
+        targetLevel,
+        nextOrder?.level || targetLevel,
+      );
+      const upgradeNum = Math.min(50, levelBoundary - currentLevel);
+
+      if (upgradeNum <= 0) {
+        throw new Error(`无法继续升级（当前${currentLevel}级，${currentOrder}阶）`);
+      }
+
+      const result = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "hero_heroupgradelevel",
+        {
+          heroId,
+          upgradeNum,
+        },
+        5000,
+      );
+
+      if (!isSuccessfulHeroCommand(result)) {
+        throw new Error(`升级${upgradeNum}级失败（当前${currentLevel}级）`);
+      }
+
+      hero = await getLatestHero(tokenId, heroId, result);
+      const updatedLevel = Number(hero?.level);
+      if (!hero || !Number.isFinite(updatedLevel) || updatedLevel <= currentLevel) {
+        throw new Error("升级后未获取到最新武将等级");
+      }
+
+      currentLevel = updatedLevel;
+      currentOrder = Number(hero.order) || currentOrder;
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} ${heroName}升级至${currentLevel}级`,
+        type: "success",
+      });
+      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: shouldStop.value
+        ? `${tokenName} ${heroName}升级任务已停止，当前${currentLevel}级`
+        : `${tokenName} ${heroName}已完成至${currentLevel}级`,
+      type: shouldStop.value ? "warning" : "success",
+    });
+  };
+
+  /**
+   * 批量将多个指定武将升级并自动进阶到目标等级。
    * 目标等级必须由页面限制为50的整数倍；每次升级最多发送50级，避免跨过进阶阈值。
    */
-  const batchHeroLevelUpgrade = async (heroId, targetLevel) => {
+  const batchHeroLevelUpgrade = async (heroIdsToUpgrade, targetLevel) => {
     if (selectedTokens.value.length === 0) return;
 
-    const normalizedHeroId = Number(heroId);
+    const normalizedHeroIds = [
+      ...new Set(
+        (Array.isArray(heroIdsToUpgrade)
+          ? heroIdsToUpgrade
+          : [heroIdsToUpgrade]
+        ).map(Number),
+      ),
+    ];
     const normalizedTargetLevel = Number(targetLevel);
-    const heroName = HERO_DICT[normalizedHeroId]?.name || `英雄ID:${heroId}`;
 
     if (
-      !HERO_DICT[normalizedHeroId] ||
+      normalizedHeroIds.length === 0 ||
+      normalizedHeroIds.some((heroId) => !HERO_DICT[heroId]) ||
       !Number.isInteger(normalizedTargetLevel) ||
       normalizedTargetLevel < 50 ||
       normalizedTargetLevel > 6000 ||
@@ -203,6 +321,8 @@ export function createTasksItem(deps) {
       message.warning("请选择有效武将，目标等级必须是50的整数倍（50-6000）");
       return;
     }
+
+    const heroNames = normalizedHeroIds.map((heroId) => HERO_DICT[heroId].name);
 
     isRunning.value = true;
     shouldStop.value = false;
@@ -221,123 +341,46 @@ export function createTasksItem(deps) {
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始升级${heroName}至${normalizedTargetLevel}级: ${tokenName} ===`,
+          message: `=== 开始批量升级武将至${normalizedTargetLevel}级: ${tokenName} ===`,
           type: "info",
         });
 
         await ensureConnection(tokenId);
-        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        let hero = getHeroFromRoleInfo(roleInfo, normalizedHeroId);
+        let hasError = false;
+        for (const heroId of normalizedHeroIds) {
+          if (shouldStop.value) break;
 
-        if (!hero) {
-          throw new Error(`账号中未找到${heroName}`);
-        }
-
-        let currentLevel = Number(hero.level) || 0;
-        let currentOrder = Number(hero.order) || 0;
-
-        if (currentLevel >= normalizedTargetLevel) {
-          tokenStatus.value[tokenId] = "completed";
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} ${heroName}当前${currentLevel}级，已达到目标，跳过操作`,
-            type: "info",
-          });
-          return;
-        }
-
-        while (!shouldStop.value) {
-          const nextOrder = heroLevelOrderThresholds.find(
-            (item) => item.order > currentOrder,
-          );
-
-          if (nextOrder && currentLevel >= nextOrder.level) {
-            const result = await tokenStore.sendMessageWithPromise(
+          try {
+            await upgradeSingleHero(
               tokenId,
-              "hero_heroupgradeorder",
-              { heroId: normalizedHeroId },
-              5000,
+              tokenName,
+              heroId,
+              normalizedTargetLevel,
             );
-
-            if (!isSuccessfulHeroCommand(result)) {
-              throw new Error(`进阶失败（当前${currentLevel}级）`);
-            }
-
-            hero = await getLatestHero(tokenId, normalizedHeroId, result);
-            const updatedOrder = Number(hero?.order);
-            if (!hero || !Number.isFinite(updatedOrder) || updatedOrder <= currentOrder) {
-              throw new Error("进阶后未获取到最新武将阶数");
-            }
-
-            currentOrder = updatedOrder;
-            currentLevel = Number(hero.level) || currentLevel;
+          } catch (error) {
+            hasError = true;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${tokenName} ${heroName}已自动进阶至${currentOrder}阶（${currentLevel}级）`,
-              type: "success",
+              message: `${tokenName} ${HERO_DICT[heroId].name}升级失败: ${error.message}，继续处理其他武将`,
+              type: "error",
             });
-            await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
-            continue;
           }
-
-          if (currentLevel >= normalizedTargetLevel) {
-            break;
-          }
-
-          const levelBoundary = Math.min(
-            normalizedTargetLevel,
-            nextOrder?.level || normalizedTargetLevel,
-          );
-          const upgradeNum = Math.min(50, levelBoundary - currentLevel);
-
-          if (upgradeNum <= 0) {
-            throw new Error(`无法继续升级（当前${currentLevel}级，${currentOrder}阶）`);
-          }
-
-          const result = await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "hero_heroupgradelevel",
-            {
-              heroId: normalizedHeroId,
-              upgradeNum,
-            },
-            5000,
-          );
-
-          if (!isSuccessfulHeroCommand(result)) {
-            throw new Error(`升级${upgradeNum}级失败（当前${currentLevel}级）`);
-          }
-
-          hero = await getLatestHero(tokenId, normalizedHeroId, result);
-          const updatedLevel = Number(hero?.level);
-          if (!hero || !Number.isFinite(updatedLevel) || updatedLevel <= currentLevel) {
-            throw new Error("升级后未获取到最新武将等级");
-          }
-
-          currentLevel = updatedLevel;
-          currentOrder = Number(hero.order) || currentOrder;
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} ${heroName}升级至${currentLevel}级`,
-            type: "success",
-          });
-          await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
         }
 
-        tokenStatus.value[tokenId] = "completed";
+        tokenStatus.value[tokenId] = hasError ? "failed" : "completed";
         addLog({
           time: new Date().toLocaleTimeString(),
           message: shouldStop.value
-            ? `${tokenName} ${heroName}升级任务已停止，当前${currentLevel}级`
-            : `${tokenName} ${heroName}已完成至${currentLevel}级`,
-          type: shouldStop.value ? "warning" : "success",
+            ? `${tokenName} 批量武将升级任务已停止`
+            : `${tokenName} 批量武将升级完成（目标：${normalizedTargetLevel}级）`,
+          type: hasError ? "warning" : shouldStop.value ? "warning" : "success",
         });
       } catch (error) {
         console.error(error);
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} ${heroName}升级失败: ${error.message}`,
+          message: `${tokenName} 批量武将升级失败: ${error.message}`,
           type: "error",
         });
       } finally {
@@ -349,7 +392,7 @@ export function createTasksItem(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success(`批量升级${heroName}结束`);
+    message.success(`批量升级${heroNames.join("、")}结束`);
   };
 
   /**

@@ -1604,17 +1604,30 @@
     >
       <div class="settings-content">
         <n-alert type="info" show-icon style="margin-bottom: 16px">
-          将对当前选中的 {{ selectedTokens.length }} 个账号执行升级。达到目标等级的账号不会操作，升级过程中会自动处理进阶。
+          将对当前选中的 {{ selectedTokens.length }} 个账号执行升级。所有选中武将共用目标等级，达到目标等级的武将不会操作，升级过程中会自动处理进阶。
         </n-alert>
         <div class="settings-grid">
           <div class="setting-item">
-            <label class="setting-label">选择武将</label>
+            <label class="setting-label">选择武将（可多选）</label>
             <n-select
-              v-model:value="heroLevelUpgradeForm.heroId"
+              v-model:value="heroLevelUpgradeForm.heroIds"
               :options="heroLevelUpgradeHeroOptions"
+              multiple
               filterable
+              max-tag-count="responsive"
               placeholder="请选择武将"
             />
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px">
+              <n-button
+                v-for="faction in heroLevelUpgradeFactionOptions"
+                :key="faction.value"
+                size="small"
+                :type="isHeroFactionSelected(faction.value) ? 'primary' : 'default'"
+                @click="toggleHeroFaction(faction.value)"
+              >
+                {{ faction.label }}
+              </n-button>
+            </div>
           </div>
           <div class="setting-item">
             <label class="setting-label">目标等级</label>
@@ -3758,7 +3771,7 @@ const helperSettings = reactive({
 
 const showHeroLevelUpgradeModal = ref(false);
 const heroLevelUpgradeForm = reactive({
-  heroId: Number(Object.keys(HERO_DICT)[0]),
+  heroIds: [Number(Object.keys(HERO_DICT)[0])],
   targetLevel: 50,
 });
 const heroLevelUpgradeHeroOptions = Object.entries(HERO_DICT).map(
@@ -3767,10 +3780,47 @@ const heroLevelUpgradeHeroOptions = Object.entries(HERO_DICT).map(
     value: Number(heroId),
   }),
 );
+const heroLevelUpgradeFactionOptions = [
+  { label: "魏国", value: "魏国" },
+  { label: "蜀国", value: "蜀国" },
+  { label: "吴国", value: "吴国" },
+  { label: "群雄", value: "群雄" },
+];
 const heroLevelUpgradeLevelOptions = Array.from({ length: 120 }, (_, index) => {
   const level = (index + 1) * 50;
   return { label: `${level}级`, value: level };
 });
+
+const getHeroIdsByFaction = (faction) =>
+  heroLevelUpgradeHeroOptions
+    .filter((option) => HERO_DICT[option.value]?.type === faction)
+    .map((option) => option.value);
+
+const isHeroFactionSelected = (faction) => {
+  const factionHeroIds = getHeroIdsByFaction(faction);
+  return (
+    factionHeroIds.length > 0 &&
+    factionHeroIds.every((heroId) => heroLevelUpgradeForm.heroIds.includes(heroId))
+  );
+};
+
+const toggleHeroFaction = (faction) => {
+  const factionHeroIds = getHeroIdsByFaction(faction);
+  const selectedHeroIds = new Set(heroLevelUpgradeForm.heroIds);
+  const shouldRemove = factionHeroIds.every((heroId) => selectedHeroIds.has(heroId));
+
+  factionHeroIds.forEach((heroId) => {
+    if (shouldRemove) {
+      selectedHeroIds.delete(heroId);
+    } else {
+      selectedHeroIds.add(heroId);
+    }
+  });
+
+  heroLevelUpgradeForm.heroIds = heroLevelUpgradeHeroOptions
+    .map((option) => option.value)
+    .filter((heroId) => selectedHeroIds.has(heroId));
+};
 
 const openHeroLevelUpgradeModal = () => {
   if (selectedTokens.value.length === 0) {
@@ -3782,14 +3832,18 @@ const openHeroLevelUpgradeModal = () => {
 };
 
 const executeHeroLevelUpgrade = async () => {
-  const { heroId, targetLevel } = heroLevelUpgradeForm;
-  if (!heroId || !Number.isInteger(targetLevel) || targetLevel % 50 !== 0) {
+  const { heroIds, targetLevel } = heroLevelUpgradeForm;
+  if (heroIds.length === 0) {
+    message.warning("请至少选择一个武将");
+    return;
+  }
+  if (!Number.isInteger(targetLevel) || targetLevel % 50 !== 0) {
     message.warning("目标等级必须是50的整数倍");
     return;
   }
 
   showHeroLevelUpgradeModal.value = false;
-  await batchHeroLevelUpgrade(heroId, targetLevel);
+  await batchHeroLevelUpgrade(heroIds, targetLevel);
 };
 
 const helperModalTitle = computed(() => {
