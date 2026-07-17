@@ -466,6 +466,19 @@
                   一键领取蟠桃园任务
                 </n-button>
               </n-space>
+                <n-popselect
+                  :value="footballPick"
+                  :options="footballPickOptions"
+                  trigger="click"
+                  @update:value="onFootballPickChange"
+                >
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    一键竞猜({{ footballPickLabel }})
+                  </n-button>
+                </n-popselect>
             </n-tab-pane>
             <n-tab-pane name="baoku" tab="宝库">
               <n-space>
@@ -3176,6 +3189,7 @@ import {
   createTasksLegacy,
   createTasksSalt,
   createTasksMainLevel,
+  createTasksFootball,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
@@ -6859,6 +6873,24 @@ const { batchSaltSignup } = tasksSalt;
 
 const tasksMainLevel = createTasksMainLevel(createTaskDeps());
 const { batchPushMainLevelInfo } = tasksMainLevel;
+
+const tasksFootball = createTasksFootball(createTaskDeps());
+const { batchFootballBet } = tasksFootball;
+
+// 盐杯竞猜 pick 选择
+const footballPick = ref(3);
+const footballPickOptions = [
+  { label: "主胜", value: 1 },
+  { label: "平局", value: 2 },
+  { label: "客胜", value: 3 },
+];
+const footballPickLabel = computed(() => {
+  return footballPickOptions.find((o) => o.value === footballPick.value)?.label || "";
+});
+const onFootballPickChange = async (val) => {
+  footballPick.value = val;
+  await batchFootballBet(val);
+};
 
 const startBatch = async () => {
   if (selectedTokens.value.length === 0) return;

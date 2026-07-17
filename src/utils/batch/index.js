@@ -28,3 +28,4 @@ export { createTasksStore } from './tasksStore.js';
 export { createTasksLegacy } from './tasksLegacy.js';
 export { createTasksSalt } from './tasksSalt.js';
 export { createTasksMainLevel } from './tasksMainLevel.js';
+export { createTasksFootball } from './tasksFootball.js';
