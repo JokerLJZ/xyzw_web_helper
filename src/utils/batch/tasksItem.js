@@ -1,5 +1,10 @@
 import { HERO_DICT } from "@/utils/HeroList";
 import { PEACH_TASKS } from "@/utils/PeachTaskIds";
+import {
+  HELPER_COMMAND_TIMEOUT_MS,
+  getErrorMessage,
+  runInventoryVerifiedGameCommand,
+} from "@/utils/helperTaskRunner";
 
 /**
  * 开箱、钓鱼、招募类任务
@@ -1033,8 +1038,6 @@ export function createTasksItem(deps) {
     const totalCount = isScheduledTask
       ? batchSettings.boxCount
       : helperSettings.count;
-    const batches = Math.floor(totalCount / 10);
-    const remainder = totalCount % 10;
 
     selectedTokens.value.forEach((id) => {
       tokenStatus.value[id] = "waiting";
@@ -1061,34 +1064,25 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
-        for (let i = 0; i < batches && !shouldStop.value; i++) {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "item_openbox",
-            { itemId: boxType, number: 10 },
-            5000,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 开箱进度: ${(i + 1) * 10}/${totalCount}`,
-            type: "info",
-          });
-          await new Promise((r) => setTimeout(r, delayConfig.action));
-        }
+        await runInventoryVerifiedGameCommand({
+          tokenStore,
+          tokenId,
+          cmd: "item_openbox",
+          itemId: boxType,
+          total: totalCount,
+          timeout: HELPER_COMMAND_TIMEOUT_MS,
+          delayMs: delayConfig.action,
+          createParams: (amount) => ({ itemId: boxType, number: amount }),
+          queryInventory: () => tokenStore.sendGetRoleInfo(tokenId),
+          onProgress: (progress) => {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 开箱进度: ${progress.completed}/${totalCount}`,
+              type: "info",
+            });
+          },
+        });
 
-        if (remainder > 0 && !shouldStop.value) {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "item_openbox",
-            { itemId: boxType, number: remainder },
-            5000,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 开箱进度: ${totalCount}/${totalCount}`,
-            type: "info",
-          });
-        }
         await tokenStore.sendMessageWithPromise(
           tokenId,
           "item_batchclaimboxpointreward",
@@ -1106,7 +1100,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `开箱失败: ${error.message}`,
+          message: `开箱失败: ${getErrorMessage(error)}`,
           type: "error",
         });
       } finally {
@@ -1366,8 +1360,6 @@ export function createTasksItem(deps) {
     const totalCount = isScheduledTask
       ? batchSettings.recruitCount
       : helperSettings.count;
-    const batches = Math.floor(totalCount / 10);
-    const remainder = totalCount % 10;
 
     selectedTokens.value.forEach((id) => {
       tokenStatus.value[id] = "waiting";
@@ -1394,34 +1386,24 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
-        for (let i = 0; i < batches && !shouldStop.value; i++) {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "hero_recruit",
-            { recruitType: 1, recruitNumber: 10 },
-            5000,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `招募进度: ${(i + 1) * 10}/${totalCount}`,
-            type: "info",
-          });
-          await new Promise((r) => setTimeout(r, delayConfig.action));
-        }
-
-        if (remainder > 0 && !shouldStop.value) {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "hero_recruit",
-            { recruitType: 1, recruitNumber: remainder },
-            5000,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `招募进度: ${totalCount}/${totalCount}`,
-            type: "info",
-          });
-        }
+        await runInventoryVerifiedGameCommand({
+          tokenStore,
+          tokenId,
+          cmd: "hero_recruit",
+          itemId: 1001,
+          total: totalCount,
+          timeout: HELPER_COMMAND_TIMEOUT_MS,
+          delayMs: delayConfig.action,
+          createParams: (amount) => ({ recruitType: 1, recruitNumber: amount }),
+          queryInventory: () => tokenStore.sendGetRoleInfo(tokenId),
+          onProgress: (progress) => {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 招募进度: ${progress.completed}/${totalCount}`,
+              type: "info",
+            });
+          },
+        });
 
         await tokenStore.sendMessage(tokenId, "role_getroleinfo");
         tokenStatus.value[tokenId] = "completed";
@@ -1435,7 +1417,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `招募失败: ${error.message}`,
+          message: `招募失败: ${getErrorMessage(error)}`,
           type: "error",
         });
       } finally {
@@ -1648,43 +1630,30 @@ export function createTasksItem(deps) {
           const count = boxToOpen[box.id] || 0;
           if (count <= 0) continue;
 
-          const batches = Math.floor(count / 10);
-          const remainder = count % 10;
-
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 开始开 ${box.name}: ${count} 个`,
             type: "info",
           });
 
-          for (let i = 0; i < batches && !shouldStop.value; i++) {
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "item_openbox",
-              { itemId: box.id, number: 10 },
-              5000,
-            );
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} ${box.name} 开箱进度: ${(i + 1) * 10}/${count}`,
-              type: "info",
-            });
-            await new Promise((r) => setTimeout(r, delayConfig.action));
-          }
-
-          if (remainder > 0 && !shouldStop.value) {
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "item_openbox",
-              { itemId: box.id, number: remainder },
-              5000,
-            );
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} ${box.name} 开箱进度: ${count}/${count}`,
-              type: "info",
-            });
-          }
+          await runInventoryVerifiedGameCommand({
+            tokenStore,
+            tokenId,
+            cmd: "item_openbox",
+            itemId: box.id,
+            total: count,
+            timeout: HELPER_COMMAND_TIMEOUT_MS,
+            delayMs: delayConfig.action,
+            createParams: (amount) => ({ itemId: box.id, number: amount }),
+            queryInventory: () => tokenStore.sendGetRoleInfo(tokenId),
+            onProgress: (progress) => {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} ${box.name} 开箱进度: ${progress.completed}/${count}`,
+                type: "info",
+              });
+            },
+          });
         }
 
         await tokenStore.sendMessage(tokenId, "role_getroleinfo");
@@ -1699,7 +1668,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `按积分开箱失败: ${error.message}`,
+          message: `按积分开箱失败: ${getErrorMessage(error)}`,
           type: "error",
         });
       } finally {
