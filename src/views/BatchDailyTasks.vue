@@ -5444,7 +5444,19 @@ const verifyTaskDependencies = async (task) => {
 
 // Execute a scheduled task with dependency verification
 const executeScheduledTask = async (task) => {
+  if (scheduledTaskExecutionActive || isRunning.value) {
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 跳过定时任务 ${task.name}：已有任务正在执行 ===`,
+      type: "warning",
+    });
+    return;
+  }
+
+  scheduledTaskExecutionActive = true;
+  isRunning.value = true;
   const scheduledTaskStartTime = new Date();
+  let previousSelectedTokens = null;
 
   // 立即写入 lastStartedAt，让 checkMissedExecutions 知道本周期已开始执行
   // 这样长任务（>15min 容忍窗口）不会被误判为漏执行而重复触发
@@ -5502,6 +5514,9 @@ const executeScheduledTask = async (task) => {
       return;
     }
 
+    // 保存界面当前选择，定时任务按账号执行结束后恢复。
+    previousSelectedTokens = [...selectedTokens.value];
+
     // Always use the latest selectedTokens from the task that exist in current tokens.value
     selectedTokens.value = [...availableTokens];
 
@@ -5544,9 +5559,6 @@ const executeScheduledTask = async (task) => {
     const legacyExcludedTokens = normalizeTokenIdsByBatchOrder(
       Array.isArray(task.legacyExcludedTokens) ? task.legacyExcludedTokens : [],
     ).filter((tokenId) => availableTokens.includes(tokenId));
-    const legacyAvailableTokens = availableTokens.filter(
-      (tokenId) => !legacyExcludedTokens.includes(tokenId),
-    );
     const hasLegacyTasksToRun = selectedTaskNames.some((taskName) =>
       isLegacyTaskName(taskName),
     );
@@ -5572,55 +5584,31 @@ const executeScheduledTask = async (task) => {
       }
     }
 
-    // Execute selected tasks in parallel
-    const taskPromises = selectedTaskNames.map(async (taskName) => {
-      if (shouldStop.value) return;
+    const taskLabel = (taskName) =>
+      availableTasks.find((t) => t.value === taskName)?.label || taskName;
 
+    const shouldSkipTaskForActivity = (taskName) => {
       if (
         ["batchbaoku45", "batchbaoku13"].includes(taskName) &&
         !isbaokuActivityOpen.value
       ) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在宝库开放时间)`,
-          type: "warning",
-        });
-        return;
+        return "不在宝库开放时间";
       }
-
       if (
         ["batchmengjing", "batchBuyDreamItems"].includes(taskName) &&
         !ismengjingActivityOpen.value
       ) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在梦境开放时间)`,
-          type: "warning",
-        });
-        return;
+        return "不在梦境开放时间";
       }
-
       if (taskName === "batchSmartSendCar" && !isCarActivityOpen.value) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在发车开放时间)`,
-          type: "warning",
-        });
-        return;
+        return "不在发车开放时间";
       }
-
       if (
         ["batchTopUpArena", "batcharenafight"].includes(taskName) &&
         !isarenaActivityOpen.value
       ) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在竞技场开放时间)`,
-          type: "warning",
-        });
-        return;
+        return "不在竞技场开放时间";
       }
-
       if (
         [
           "batchWeirdTower",
@@ -5631,66 +5619,132 @@ const executeScheduledTask = async (task) => {
         ].includes(taskName) &&
         !isWeirdTowerActivityOpen.value
       ) {
+        return "不在怪异塔开放时间";
+      }
+      return "";
+    };
+
+    const executeTaskForToken = async (taskName, tokenId) => {
+      const activitySkipReason = shouldSkipTaskForActivity(taskName);
+      if (activitySkipReason) {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在怪异塔开放时间)`,
+          message: `跳过任务: ${taskLabel(taskName)} (${activitySkipReason})`,
           type: "warning",
         });
         return;
       }
 
+      const taskFunction = eval(taskName);
+      if (typeof taskFunction !== "function") {
+        throw new Error(`任务函数不存在: ${taskName}`);
+      }
+
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `执行任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName}`,
+        message: `执行任务: ${taskLabel(taskName)}`,
         type: "info",
       });
 
-      // Call the task function dynamically
-      const taskFunction = eval(taskName);
-      if (typeof taskFunction === "function") {
-        if (isLegacyTaskName(taskName)) {
-          if (legacyAvailableTokens.length === 0) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (功法可执行账号为空)`,
-              type: "warning",
-            });
-            return;
-          }
-
-          await taskFunction({
-            tokenIds: legacyAvailableTokens,
-            isScheduledTask: true,
+      if (isLegacyTaskName(taskName)) {
+        if (legacyExcludedTokens.includes(tokenId)) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `跳过任务: ${taskLabel(taskName)} (该账号已排除功法任务)`,
+            type: "info",
           });
           return;
         }
 
-        // For batch operations, pass isScheduledTask = true
-        // 具体的batch任务函数内部会使用ensureConnection管理并行连接
-        if (
-          [
-            "batchOpenBox",
-            "batchOpenBoxByPoints",
-            "batchFish",
-            "batchRecruit",
-            "batchLegacyGiftSendEnhanced",
-          ].includes(taskName)
-        ) {
-          await taskFunction(true);
-        } else {
-          await taskFunction();
-        }
+        await taskFunction({
+          tokenIds: [tokenId],
+          isScheduledTask: true,
+        });
+        return;
+      }
+
+      // 这些任务在定时模式下使用批量设置，但 selectedTokens 已被限定为当前账号。
+      if (
+        [
+          "batchOpenBox",
+          "batchOpenBoxByPoints",
+          "batchFish",
+          "batchRecruit",
+        ].includes(taskName)
+      ) {
+        await taskFunction(true);
       } else {
+        await taskFunction();
+      }
+    };
+
+    // 按账号执行：当前账号完成所有选中任务后才切换到下一个账号。
+    for (const tokenId of availableTokens) {
+      if (shouldStop.value) break;
+
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      const hasRunnableTask = selectedTaskNames.some(
+        (taskName) =>
+          !isLegacyTaskName(taskName) ||
+          !legacyExcludedTokens.includes(tokenId),
+      );
+
+      if (!hasRunnableTask) continue;
+
+      selectedTokens.value = [tokenId];
+      currentRunningTokenId.value = tokenId;
+      tokenStatus.value[tokenId] = "running";
+      beginScheduledTokenSession(tokenId);
+
+      let accountHasFailure = false;
+      try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `任务函数不存在: ${taskName}`,
+          message: `=== 开始执行账号: ${tokenName}（共 ${selectedTaskNames.length} 个任务）===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+
+        for (const taskName of selectedTaskNames) {
+          if (shouldStop.value) break;
+
+          try {
+            await executeTaskForToken(taskName, tokenId);
+            if (tokenStatus.value[tokenId] === "failed") {
+              accountHasFailure = true;
+            }
+          } catch (error) {
+            accountHasFailure = true;
+            tokenStatus.value[tokenId] = "failed";
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 任务 ${taskLabel(taskName)} 失败: ${error.message}`,
+              type: "error",
+            });
+          }
+        }
+
+        tokenStatus.value[tokenId] = accountHasFailure ? "failed" : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${tokenName} 全部选中任务执行${accountHasFailure ? "结束（存在失败）" : "完成"} ===`,
+          type: accountHasFailure ? "warning" : "success",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 账号任务执行失败: ${error.message}`,
           type: "error",
         });
+      } finally {
+        endScheduledTokenSession(tokenId, tokenName);
       }
-    });
+    }
 
-    // Wait for all tasks to complete
-    await Promise.all(taskPromises);
+    selectedTokens.value = [...previousSelectedTokens];
 
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -5731,6 +5785,18 @@ const executeScheduledTask = async (task) => {
     const failedTitle = `❌ 定时任务失败: ${task.name}`;
     const failedContent = `## ❌ 定时任务执行失败\n\n**任务名称**: ${task.name}\n\n**失败原因**: ${error.message}\n\n**时间**: ${new Date().toLocaleTimeString()}`;
     await sendNotifications(failedTitle, failedContent);
+  } finally {
+    if (scheduledTokenSession.active) {
+      const tokenId = scheduledTokenSession.tokenId;
+      const token = tokens.value.find((item) => item.id === tokenId);
+      endScheduledTokenSession(tokenId, token?.name || tokenId);
+    }
+    if (previousSelectedTokens) {
+      selectedTokens.value = [...previousSelectedTokens];
+    }
+    scheduledTaskExecutionActive = false;
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
   }
 };
 
@@ -6691,6 +6757,62 @@ const waitForConnection = async (
 // 全局连接队列控制 - 限制并发连接数
 const connectionQueue = { active: 0 };
 
+// 定时任务按账号执行时的连接会话。任务模块原本会在每个任务的 finally 中
+// 关闭连接，这里让同一账号的多个任务共享一条连接，账号任务全部完成后再统一释放。
+const scheduledTokenSession = {
+  active: false,
+  tokenId: null,
+  initialized: false,
+  initResult: null,
+  ownsConnection: false,
+  slotAcquired: false,
+};
+
+let scheduledTaskExecutionActive = false;
+
+const isScheduledTokenSession = (tokenId) =>
+  scheduledTokenSession.active && scheduledTokenSession.tokenId === tokenId;
+
+const beginScheduledTokenSession = (tokenId) => {
+  scheduledTokenSession.active = true;
+  scheduledTokenSession.tokenId = tokenId;
+  scheduledTokenSession.initialized = false;
+  scheduledTokenSession.initResult = null;
+  scheduledTokenSession.ownsConnection = false;
+  scheduledTokenSession.slotAcquired = false;
+};
+
+const endScheduledTokenSession = (tokenId, tokenName) => {
+  if (!isScheduledTokenSession(tokenId)) return;
+
+  const ownsConnection = scheduledTokenSession.ownsConnection;
+  const slotAcquired = scheduledTokenSession.slotAcquired;
+
+  // 先关闭会话标记，确保下面的真实关闭不会被 taskTokenStore 拦截。
+  scheduledTokenSession.active = false;
+  scheduledTokenSession.tokenId = null;
+  scheduledTokenSession.initialized = false;
+  scheduledTokenSession.initResult = null;
+  scheduledTokenSession.ownsConnection = false;
+  scheduledTokenSession.slotAcquired = false;
+
+  if (ownsConnection) {
+    tokenStore.closeWebSocketConnection(tokenId);
+    if (slotAcquired) releaseConnectionSlot();
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 全部任务完成，连接已关闭 (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+      type: "info",
+    });
+  } else {
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 全部任务完成，保留原有连接`,
+      type: "info",
+    });
+  }
+};
+
 const waitForConnectionSlot = async () => {
   while (connectionQueue.active >= batchSettings.maxActive) {
     await new Promise((r) => setTimeout(r, 1000));
@@ -6710,12 +6832,25 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     throw new Error(`Token not found: ${tokenId}`);
   }
 
+  // 同一账号会话内只初始化一次，后续任务直接复用连接和战斗版本数据。
+  if (
+    isScheduledTokenSession(tokenId) &&
+    scheduledTokenSession.initialized
+  ) {
+    return scheduledTokenSession.initResult || true;
+  }
+
   let status = tokenStore.getWebSocketStatus(tokenId);
   let connected = status === "connected";
 
   if (!connected) {
     // 等待连接槽位，限制并发连接数
     await waitForConnectionSlot();
+
+    if (isScheduledTokenSession(tokenId)) {
+      scheduledTokenSession.ownsConnection = true;
+      scheduledTokenSession.slotAcquired = true;
+    }
 
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -6759,6 +6894,10 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     if (!connected) {
       // 连接失败，释放槽位
       releaseConnectionSlot();
+      if (isScheduledTokenSession(tokenId)) {
+        scheduledTokenSession.ownsConnection = false;
+        scheduledTokenSession.slotAcquired = false;
+      }
       throw new Error("连接失败 (重试后仍超时)");
     }
   }
@@ -6795,23 +6934,102 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     });
   }
 
+  if (isScheduledTokenSession(tokenId)) {
+    scheduledTokenSession.initialized = true;
+    scheduledTokenSession.initResult = mainLevelResult || true;
+  }
+
   return mainLevelResult || true;
 };
+
+// 任务模块使用的会话感知依赖：普通批量任务行为不变，定时任务会话期间
+// 忽略模块内部的关闭/释放动作，避免每个子任务重复登录。
+const taskIsRunning = {
+  get value() {
+    return isRunning.value;
+  },
+  set value(value) {
+    if (scheduledTokenSession.active && value === false) return;
+    isRunning.value = value;
+  },
+};
+
+const taskShouldStop = {
+  get value() {
+    return shouldStop.value;
+  },
+  set value(value) {
+    // 任务模块每次开始都会把停止标记重置为 false；如果用户已经点击停止，
+    // 定时任务会话期间不能允许下一个子任务把停止请求清掉。
+    if (
+      scheduledTokenSession.active &&
+      value === false &&
+      shouldStop.value === true
+    ) {
+      return;
+    }
+    shouldStop.value = value;
+  },
+};
+
+const taskCurrentRunningTokenId = {
+  get value() {
+    return currentRunningTokenId.value;
+  },
+  set value(value) {
+    if (scheduledTokenSession.active && value === null) return;
+    currentRunningTokenId.value = value;
+  },
+};
+
+const taskReleaseConnectionSlot = () => {
+  if (scheduledTokenSession.active) return;
+  releaseConnectionSlot();
+};
+
+const taskAddLog = (log) => {
+  if (
+    scheduledTokenSession.active &&
+    typeof log?.message === "string" &&
+    log.message.includes("连接已关闭")
+  ) {
+    addLog({
+      ...log,
+      message: log.message.replace("连接已关闭", "当前任务完成，保持连接"),
+    });
+    return;
+  }
+  addLog(log);
+};
+
+const taskTokenStore = new Proxy(tokenStore, {
+  get(target, property) {
+    if (property === "closeWebSocketConnection") {
+      return (tokenId) => {
+        if (isScheduledTokenSession(tokenId)) return;
+        return target.closeWebSocketConnection(tokenId);
+      };
+    }
+
+    const value = target[property];
+    return typeof value === "function" ? value.bind(target) : value;
+  },
+});
 
 const createTaskDeps = () => ({
   selectedTokens,
   tokens,
   tokenStatus,
-  isRunning,
-  shouldStop,
+  isRunning: taskIsRunning,
+  shouldStop: taskShouldStop,
   ensureConnection,
-  releaseConnectionSlot,
+  releaseConnectionSlot: taskReleaseConnectionSlot,
   connectionQueue,
   batchSettings,
-  tokenStore,
-  addLog,
+  tokenStore: taskTokenStore,
+  addLog: taskAddLog,
   message,
-  currentRunningTokenId,
+  currentRunningTokenId: taskCurrentRunningTokenId,
   // 延迟配置
   delayConfig: {
     command: batchSettings.commandDelay,
@@ -6944,7 +7162,9 @@ const startBatch = async () => {
 
   selectedTokens.value = normalizeTokenIdsByBatchOrder(selectedTokens.value);
   isRunning.value = true;
-  shouldStop.value = false;
+  if (!scheduledTaskExecutionActive) {
+    shouldStop.value = false;
+  }
   const batchStartTime = new Date();
   // 不再重置logs数组，保留之前的日志
   // logs.value = [];
@@ -7027,14 +7247,17 @@ const startBatch = async () => {
           });
         }
       } finally {
-        // 完成后关闭连接并释放槽位
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
-          type: "info",
-        });
+        // 定时任务按账号复用连接，统一由 executeScheduledTask 在账号全部
+        // 任务完成后关闭；普通批量执行仍保持原来的释放行为。
+        if (!isScheduledTokenSession(tokenId)) {
+          tokenStore.closeWebSocketConnection(tokenId);
+          releaseConnectionSlot();
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+            type: "info",
+          });
+        }
       }
     }
   });
@@ -7045,9 +7268,11 @@ const startBatch = async () => {
   // 等待所有任务完成后再继续
   await new Promise((r) => setTimeout(r, 1000));
 
-  isRunning.value = false;
-  currentRunningTokenId.value = null;
-  message.success("批量任务执行结束");
+  if (!scheduledTaskExecutionActive) {
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量任务执行结束");
+  }
 };
 
 // 发送推送通知到所有已启用渠道
