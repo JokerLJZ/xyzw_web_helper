@@ -8,7 +8,7 @@ import {
 
 /**
  * 开箱、钓鱼、招募类任务
- * 包含: batchOpenBox, batchClaimBoxPointReward, batchFish, batchRecruit
+ * 包含: batchOpenBox, batchSmartBoxWeekly, batchClaimBoxPointReward, batchFish, batchRecruit
  */
 
 /**
@@ -33,6 +33,7 @@ export function createTasksItem(deps) {
     currentRunningTokenId,
     helperSettings,
     delayConfig,
+    activityWeek,
   } = deps;
 
   const boxNames = {
@@ -43,6 +44,127 @@ export function createTasksItem(deps) {
   };
 
   const fishNames = { 1: "普通鱼竿", 2: "黄金鱼竿" };
+
+  const smartBoxDefinitions = [
+    { id: 2001, name: "木质宝箱", points: 1, batchSize: 100, reserve: 200 },
+    { id: 2002, name: "青铜宝箱", points: 10, batchSize: 10 },
+    { id: 2003, name: "黄金宝箱", points: 20, batchSize: 10 },
+    { id: 2004, name: "铂金宝箱", points: 50, batchSize: 10 },
+  ];
+
+  const getSmartBoxInventory = (roleInfo) => {
+    const items =
+      roleInfo?.role?.items ||
+      roleInfo?.data?.role?.items ||
+      roleInfo?.items ||
+      roleInfo?.data?.items ||
+      {};
+
+    return Object.fromEntries(
+      smartBoxDefinitions.map((box) => {
+        const item = items[box.id] ?? items[String(box.id)] ?? 0;
+        const quantity =
+          item && typeof item === "object"
+            ? (item.quantity ?? item.count ?? 0)
+            : item;
+        return [box.id, Number(quantity) || 0];
+      }),
+    );
+  };
+
+  const getSmartBoxPoints = (inventory, selectedTypes) =>
+    smartBoxDefinitions
+      .filter((box) => selectedTypes.includes(box.id))
+      .reduce((total, box) => total + (inventory[box.id] || 0) * box.points, 0);
+
+  const getSmartBoxCandidates = (inventory, selectedTypes) =>
+    smartBoxDefinitions
+      .filter((box) => selectedTypes.includes(box.id))
+      .map((box) => ({
+        ...box,
+        availableBatches: Math.floor(
+          Math.max(0, (inventory[box.id] || 0) - (box.reserve || 0)) /
+            box.batchSize,
+        ),
+        batchPoints: box.points * box.batchSize,
+      }))
+      .filter((box) => box.availableBatches > 0)
+      .sort((left, right) => right.points - left.points);
+
+  const buildSmartBoxStates = (candidates, maxUnits) => {
+    let states = Array(maxUnits + 1).fill(null);
+    states[0] = [];
+
+    for (const candidate of candidates) {
+      const nextStates = states.slice();
+      const batchUnits = candidate.batchPoints / 100;
+      const maxBatches = Math.min(
+        candidate.availableBatches,
+        Math.floor(maxUnits / batchUnits),
+      );
+
+      for (let currentUnits = 0; currentUnits <= maxUnits; currentUnits += 1) {
+        if (!states[currentUnits]) continue;
+
+        for (let count = 1; count <= maxBatches; count += 1) {
+          const nextUnits = currentUnits + count * batchUnits;
+          if (nextUnits > maxUnits) break;
+          if (!nextStates[nextUnits]) {
+            nextStates[nextUnits] = [
+              ...states[currentUnits],
+              { ...candidate, batches: count },
+            ];
+          }
+        }
+      }
+
+      states = nextStates;
+    }
+
+    return states;
+  };
+
+  // Each configured opening batch is worth an integral number of 100 points.
+  // Find an exact 8000-point plan; wood is considered last so it fills the gap.
+  const buildSmartBoxPlan = (inventory, selectedTypes, targetPoints = 8000) => {
+    const candidates = getSmartBoxCandidates(inventory, selectedTypes);
+
+    if (candidates.length === 0) return null;
+
+    const targetUnits = targetPoints / 100;
+    const states = buildSmartBoxStates(candidates, targetUnits);
+    if (!states[targetUnits]) return null;
+
+    return {
+      boxes: states[targetUnits],
+      points: targetUnits * 100,
+    };
+  };
+
+  // When an 8000-point plan is unavailable, open at most 7500 points before
+  // claiming box points and mail attachments for the next calculation.
+  const buildSmartBoxRefillPlan = (
+    inventory,
+    selectedTypes,
+    maxPoints = 7500,
+  ) => {
+    const candidates = getSmartBoxCandidates(inventory, selectedTypes);
+    if (candidates.length === 0) return null;
+
+    const maxUnits = Math.floor(maxPoints / 100);
+    const states = buildSmartBoxStates(candidates, maxUnits);
+    const planUnits = states.reduce(
+      (best, state, units) => (state && units > best ? units : best),
+      0,
+    );
+
+    if (planUnits <= 0) return null;
+
+    return {
+      boxes: states[planUnits],
+      points: planUnits * 100,
+    };
+  };
 
   const heroIds = Object.keys(HERO_DICT).map(Number);
 
@@ -1438,6 +1560,244 @@ export function createTasksItem(deps) {
     message.success("批量招募结束");
   };
 
+  const batchSmartBoxWeekly = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const selectedTypes = Array.from(
+      new Set(
+        (Array.isArray(batchSettings.smartBoxTypes)
+          ? batchSettings.smartBoxTypes
+          : [2002, 2003, 2004]
+        )
+          .map(Number)
+          .filter((id) => smartBoxDefinitions.some((box) => box.id === id)),
+      ),
+    );
+    const groupCount = Math.min(
+      4,
+      Math.max(1, Math.trunc(Number(batchSettings.smartBoxGroupCount) || 1)),
+    );
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const fetchRoleInfo = (tokenId) =>
+      tokenStore.sendMessageWithPromise(
+        tokenId,
+        "role_getroleinfo",
+        {},
+        HELPER_COMMAND_TIMEOUT_MS,
+      );
+
+    const openSmartBoxes = async (tokenId, token, boxes, phase) => {
+      for (const box of boxes) {
+        if (shouldStop.value) break;
+
+        const count = box.batches
+          ? box.batches * box.batchSize
+          : Math.floor((box.count || 0) / box.batchSize) * box.batchSize;
+        if (count <= 0) continue;
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} ${phase}：${box.name} ${count}个（${count * box.points}分）`,
+          type: "info",
+        });
+
+        await runInventoryVerifiedGameCommand({
+          tokenStore,
+          tokenId,
+          cmd: "item_openbox",
+          itemId: box.id,
+          total: count,
+          batchSize: box.batchSize,
+          timeout: HELPER_COMMAND_TIMEOUT_MS,
+          delayMs: delayConfig.action,
+          createParams: (amount) => ({ itemId: box.id, number: amount }),
+          queryInventory: () => fetchRoleInfo(tokenId),
+          onProgress: (progress) => {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} ${box.name}进度：${progress.completed}/${count}`,
+              type: "info",
+            });
+          },
+        });
+      }
+    };
+
+    const claimPointsAndMail = async (tokenId, token) => {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${token.name} 开箱积分不足8000，开始领取宝箱积分和邮件附件`,
+        type: "info",
+      });
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "item_batchclaimboxpointreward",
+        {},
+        HELPER_COMMAND_TIMEOUT_MS,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "mail_claimallattachment",
+        { category: 0 },
+        HELPER_COMMAND_TIMEOUT_MS,
+      );
+    };
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      const token = tokens.value.find((item) => item.id === tokenId);
+      tokenStatus.value[tokenId] = "running";
+
+      try {
+        if (activityWeek?.value && activityWeek.value !== "宝箱周") {
+          tokenStatus.value[tokenId] = "skipped";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 当前为${activityWeek.value}，跳过智能宝箱周任务`,
+            type: "warning",
+          });
+          return;
+        }
+
+        if (selectedTypes.length === 0) {
+          throw new Error("至少选择一种宝箱类型");
+        }
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始智能宝箱周任务：${token.name}，目标${groupCount}组 ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        let completedGroups = 0;
+        let cycle = 0;
+
+        while (completedGroups < groupCount && !shouldStop.value) {
+          cycle += 1;
+          const roleInfo = await fetchRoleInfo(tokenId);
+          const inventory = getSmartBoxInventory(roleInfo);
+          const selectedPoints = getSmartBoxPoints(inventory, selectedTypes);
+
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 第${completedGroups + 1}组第${cycle}轮：选中宝箱积分${selectedPoints}`,
+            type: "info",
+          });
+
+          if (selectedPoints <= 4000) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 选中宝箱积分不超过4000，停止后续组任务`,
+              type: "warning",
+            });
+            break;
+          }
+
+          const plan = buildSmartBoxPlan(inventory, selectedTypes);
+          if (plan) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 已计算第${completedGroups + 1}组开箱方案，共${plan.points}分`,
+              type: "info",
+            });
+            await openSmartBoxes(tokenId, token, plan.boxes, "智能开箱");
+            completedGroups += 1;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 第${completedGroups}组完成`,
+              type: "success",
+            });
+            continue;
+          }
+
+          const refillPlan = buildSmartBoxRefillPlan(
+            inventory,
+            selectedTypes,
+            7500,
+          );
+
+          if (!refillPlan) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 没有满足批次要求的可开宝箱，停止任务`,
+              type: "warning",
+            });
+            break;
+          }
+
+          const beforeInventory = JSON.stringify(
+            selectedTypes.map((id) => inventory[id] || 0),
+          );
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 无法直接匹配8000分，本轮补充开箱${refillPlan.points}分（上限7500分）`,
+            type: "info",
+          });
+          await openSmartBoxes(
+            tokenId,
+            token,
+            refillPlan.boxes,
+            "补充开箱",
+          );
+          await claimPointsAndMail(tokenId, token);
+
+          const refreshedInventory = getSmartBoxInventory(
+            await fetchRoleInfo(tokenId),
+          );
+          const afterInventory = JSON.stringify(
+            selectedTypes.map((id) => refreshedInventory[id] || 0),
+          );
+          if (beforeInventory === afterInventory) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 领取积分和邮件后库存没有增加，停止任务避免重复执行`,
+              type: "warning",
+            });
+            break;
+          }
+        }
+
+        tokenStatus.value[tokenId] =
+          completedGroups > 0 ? "completed" : "skipped";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${token.name} 智能宝箱周任务结束：完成${completedGroups}/${groupCount}组 ===`,
+          type: completedGroups === groupCount ? "success" : "warning",
+        });
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 智能宝箱周任务失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("智能宝箱周任务结束");
+  };
+
   const batchOpenBoxByPoints = async (isScheduledTask = false) => {
     if (selectedTokens.value.length === 0) return;
 
@@ -1693,6 +2053,7 @@ export function createTasksItem(deps) {
     batchOpenBox,
     batchOpenBoxByPoints,
     batchClaimBoxPointReward,
+    batchSmartBoxWeekly,
     batchFish,
     batchRecruit,
     batchHeroUpgrade,

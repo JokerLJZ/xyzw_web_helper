@@ -684,6 +684,13 @@
                 >
                   主线关卡信息获取
                 </n-button>
+                <n-button
+                  size="small"
+                  @click="batchSmartBoxWeekly"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  智能宝箱周任务
+                </n-button>
               </n-space>
             </n-tab-pane>
           </n-tabs>
@@ -2127,6 +2134,42 @@
                   :min="10"
                   :max="10000"
                   :step="10"
+                  size="small"
+                  style="width: 100px"
+                />
+              </div>
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: row;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
+                <label class="setting-label">智能宝箱周任务类型</label>
+                <n-select
+                  v-model:value="batchSettings.smartBoxTypes"
+                  :options="boxTypeOptions"
+                  multiple
+                  max-tag-count="responsive"
+                  size="small"
+                  style="width: 180px"
+                />
+              </div>
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: row;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
+                <label class="setting-label">智能宝箱周任务组数</label>
+                <n-input-number
+                  v-model:value="batchSettings.smartBoxGroupCount"
+                  :min="1"
+                  :max="4"
+                  :step="1"
                   size="small"
                   style="width: 100px"
                 />
@@ -3887,6 +3930,8 @@ const batchSettings = reactive({
   recruitCount: 100,
   defaultBoxType: 2001,
   defaultFishType: 1,
+  smartBoxTypes: [2002, 2003, 2004],
+  smartBoxGroupCount: 1,
   targetBoxPoints: 1000,
   receiverId: "",
   password: "",
@@ -4170,7 +4215,11 @@ const taskGroupDefinitions = [
   {
     name: "small-account",
     label: "小号任务",
-    tasks: ["batchTopUpGoldFish", "batchPushMainLevelInfo"],
+    tasks: [
+      "batchTopUpGoldFish",
+      "batchPushMainLevelInfo",
+      "batchSmartBoxWeekly",
+    ],
   },
 ];
 
@@ -6788,6 +6837,7 @@ const createTaskDeps = () => ({
   // 设置相关
   currentSettings,
   helperSettings,
+  activityWeek: getCurrentActivityWeek,
   // 功法赠送相关
   recipientIdInput,
   recipientInfo,
@@ -6834,6 +6884,7 @@ const {
   batchOpenBox,
   batchOpenBoxByPoints,
   batchClaimBoxPointReward,
+  batchSmartBoxWeekly,
   batchFish,
   batchRecruit,
   batchHeroUpgrade,
