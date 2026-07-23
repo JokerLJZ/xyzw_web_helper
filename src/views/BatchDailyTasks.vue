@@ -402,8 +402,7 @@
                   @click="batchClaimCars"
                   :disabled="
                     isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
+                    selectedTokens.length === 0
                   "
                 >
                   一键收车
@@ -5601,10 +5600,7 @@ const executeScheduledTask = async (task) => {
         return;
       }
 
-      if (
-        ["batchSmartSendCar", "batchClaimCars"].includes(taskName) &&
-        !isCarActivityOpen.value
-      ) {
+      if (taskName === "batchSmartSendCar" && !isCarActivityOpen.value) {
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在发车开放时间)`,
