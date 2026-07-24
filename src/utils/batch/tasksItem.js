@@ -46,7 +46,7 @@ export function createTasksItem(deps) {
   const fishNames = { 1: "普通鱼竿", 2: "黄金鱼竿" };
 
   const smartBoxDefinitions = [
-    { id: 2001, name: "木质宝箱", points: 1, batchSize: 100, reserve: 200 },
+    { id: 2001, name: "木质宝箱", points: 1, batchSize: 10, reserve: 200 },
     { id: 2002, name: "青铜宝箱", points: 10, batchSize: 10 },
     { id: 2003, name: "黄金宝箱", points: 20, batchSize: 10 },
     { id: 2004, name: "铂金宝箱", points: 50, batchSize: 10 },
