@@ -1577,6 +1577,9 @@ export function createTasksItem(deps) {
       4,
       Math.max(1, Math.trunc(Number(batchSettings.smartBoxGroupCount) || 1)),
     );
+    // 奖励领取后可能只补回少量宝箱，需要多轮补开才能凑出8000分。
+    // 同时设置上限，避免奖励接口异常时任务无限循环。
+    const maxCyclesPerGroup = 20;
 
     isRunning.value = true;
     shouldStop.value = false;
@@ -1680,9 +1683,15 @@ export function createTasksItem(deps) {
 
         let completedGroups = 0;
         let cycle = 0;
+        let cyclesForCurrentGroup = 0;
 
-        while (completedGroups < groupCount && !shouldStop.value) {
+        while (
+          completedGroups < groupCount &&
+          cyclesForCurrentGroup < maxCyclesPerGroup &&
+          !shouldStop.value
+        ) {
           cycle += 1;
+          cyclesForCurrentGroup += 1;
           const roleInfo = await fetchRoleInfo(tokenId);
           const inventory = getSmartBoxInventory(roleInfo);
           const selectedPoints = getSmartBoxPoints(inventory, selectedTypes);
@@ -1693,15 +1702,6 @@ export function createTasksItem(deps) {
             type: "info",
           });
 
-          if (selectedPoints <= 4000) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 选中宝箱积分不超过4000，停止后续组任务`,
-              type: "warning",
-            });
-            break;
-          }
-
           const plan = buildSmartBoxPlan(inventory, selectedTypes);
           if (plan) {
             addLog({
@@ -1711,6 +1711,7 @@ export function createTasksItem(deps) {
             });
             await openSmartBoxes(tokenId, token, plan.boxes, "智能开箱");
             completedGroups += 1;
+            cyclesForCurrentGroup = 0;
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${token.name} 第${completedGroups}组完成`,
@@ -1764,6 +1765,17 @@ export function createTasksItem(deps) {
             });
             break;
           }
+        }
+
+        if (
+          completedGroups < groupCount &&
+          cyclesForCurrentGroup >= maxCyclesPerGroup
+        ) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 补充开箱达到${maxCyclesPerGroup}轮仍未凑够8000分，停止任务`,
+            type: "warning",
+          });
         }
 
         tokenStatus.value[tokenId] =
