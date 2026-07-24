@@ -80,7 +80,11 @@ const createSmartBoxScenario = ({
   };
 
   return {
-    run: createTasksItem(deps).batchSmartBoxWeekly,
+    run: () =>
+      createTasksItem(deps).batchSmartBoxWeekly({
+        smartBoxTypes: selectedTypes,
+        smartBoxGroupCount: groupCount,
+      }),
     commands,
     logs,
     getRoleInfo,

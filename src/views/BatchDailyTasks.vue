@@ -690,6 +690,13 @@
                 >
                   智能宝箱周任务
                 </n-button>
+                <n-button
+                  size="small"
+                  @click="batchSmartRecruitWeekly"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  智能招募周任务
+                </n-button>
               </n-space>
             </n-tab-pane>
           </n-tabs>
@@ -2058,6 +2065,68 @@
               </n-tabs>
             </n-checkbox-group>
           </div>
+          <div
+            v-if="hasSmartBoxWeeklySelected || hasSmartRecruitWeeklySelected"
+            class="setting-item"
+          >
+            <label class="setting-label">智能周任务配置</label>
+            <div
+              v-if="hasSmartBoxWeeklySelected"
+              style="margin-top: 8px"
+            >
+              <div style="margin-bottom: 6px; color: #4b5563">
+                智能宝箱周任务
+              </div>
+              <n-space align="center">
+                <span style="font-size: 12px; color: #86909c">宝箱类型</span>
+                <n-select
+                  v-model:value="
+                    taskForm.taskConfig.batchSmartBoxWeekly.smartBoxTypes
+                  "
+                  :options="boxTypeOptions"
+                  multiple
+                  max-tag-count="responsive"
+                  size="small"
+                  style="width: 220px"
+                />
+                <span style="font-size: 12px; color: #86909c">任务组数</span>
+                <n-input-number
+                  v-model:value="
+                    taskForm.taskConfig.batchSmartBoxWeekly.smartBoxGroupCount
+                  "
+                  :min="1"
+                  :max="4"
+                  :step="1"
+                  size="small"
+                  style="width: 90px"
+                />
+              </n-space>
+            </div>
+            <div
+              v-if="hasSmartRecruitWeeklySelected"
+              style="margin-top: 12px"
+            >
+              <div style="margin-bottom: 6px; color: #4b5563">
+                智能招募周任务
+              </div>
+              <div style="font-size: 12px; color: #86909c">
+                固定规则：每轮起始招募道具达到360个后，先完成360次、领取邮件，再完成40次，共400次。
+              </div>
+              <n-space align="center" style="margin-top: 8px">
+                <span style="font-size: 12px; color: #86909c">任务轮次</span>
+                <n-input-number
+                  v-model:value="
+                    taskForm.taskConfig.batchSmartRecruitWeekly.roundCount
+                  "
+                  :min="1"
+                  :max="4"
+                  :step="1"
+                  size="small"
+                  style="width: 90px"
+                />
+              </n-space>
+            </div>
+          </div>
           <div class="setting-item" v-if="hasLegacyTaskSelected">
             <div
               style="
@@ -2133,42 +2202,6 @@
                   :min="10"
                   :max="10000"
                   :step="10"
-                  size="small"
-                  style="width: 100px"
-                />
-              </div>
-              <div
-                class="setting-item"
-                style="
-                  flex-direction: row;
-                  justify-content: space-between;
-                  align-items: center;
-                "
-              >
-                <label class="setting-label">智能宝箱周任务类型</label>
-                <n-select
-                  v-model:value="batchSettings.smartBoxTypes"
-                  :options="boxTypeOptions"
-                  multiple
-                  max-tag-count="responsive"
-                  size="small"
-                  style="width: 180px"
-                />
-              </div>
-              <div
-                class="setting-item"
-                style="
-                  flex-direction: row;
-                  justify-content: space-between;
-                  align-items: center;
-                "
-              >
-                <label class="setting-label">智能宝箱周任务组数</label>
-                <n-input-number
-                  v-model:value="batchSettings.smartBoxGroupCount"
-                  :min="1"
-                  :max="4"
-                  :step="1"
                   size="small"
                   style="width: 100px"
                 />
@@ -3929,8 +3962,6 @@ const batchSettings = reactive({
   recruitCount: 100,
   defaultBoxType: 2001,
   defaultFishType: 1,
-  smartBoxTypes: [2002, 2003, 2004],
-  smartBoxGroupCount: 1,
   targetBoxPoints: 1000,
   receiverId: "",
   password: "",
@@ -4028,6 +4059,38 @@ const scheduledTasks = ref([]); // List of all scheduled tasks
 const showTaskModal = ref(false); // Control the visibility of the add/edit task modal
 const showTasksModal = ref(false); // Control the visibility of the tasks list modal
 const editingTask = ref(null); // Currently editing task
+
+const createScheduledTaskConfig = (config = {}) => ({
+  batchSmartBoxWeekly: {
+    smartBoxTypes: Array.isArray(config.batchSmartBoxWeekly?.smartBoxTypes)
+      ? [...config.batchSmartBoxWeekly.smartBoxTypes]
+      : [2002, 2003, 2004],
+    smartBoxGroupCount:
+      Math.min(
+        4,
+        Math.max(
+          1,
+          Math.trunc(
+            Number(config.batchSmartBoxWeekly?.smartBoxGroupCount) || 1,
+          ),
+        ),
+      ),
+  },
+  batchSmartRecruitWeekly: {
+    startCount: 360,
+    totalCount: 400,
+    roundCount: Math.min(
+      4,
+      Math.max(
+        1,
+        Math.trunc(
+          Number(config.batchSmartRecruitWeekly?.roundCount) || 1,
+        ),
+      ),
+    ),
+  },
+});
+
 const taskForm = reactive({
   name: "", // Task name
   runType: "daily", // 'daily' or 'cron'
@@ -4035,6 +4098,7 @@ const taskForm = reactive({
   cronExpression: "", // Cron expression for complex scheduling
   selectedTokens: [], // Selected token IDs
   selectedTasks: [], // Selected task function names
+  taskConfig: createScheduledTaskConfig(),
   legacyExcludedTokens: [], // Token IDs skipped by legacy tasks
   enabled: true, // Whether the task is enabled
 });
@@ -4051,6 +4115,14 @@ const isLegacyTaskName = (taskName) => legacyTaskNames.includes(taskName);
 
 const hasLegacyTaskSelected = computed(() =>
   taskForm.selectedTasks.some((taskName) => isLegacyTaskName(taskName)),
+);
+
+const hasSmartBoxWeeklySelected = computed(() =>
+  taskForm.selectedTasks.includes("batchSmartBoxWeekly"),
+);
+
+const hasSmartRecruitWeeklySelected = computed(() =>
+  taskForm.selectedTasks.includes("batchSmartRecruitWeekly"),
 );
 
 const syncTokenIdListOrder = (getValue, setValue) => {
@@ -4218,6 +4290,7 @@ const taskGroupDefinitions = [
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
       "batchSmartBoxWeekly",
+      "batchSmartRecruitWeekly",
     ],
   },
 ];
@@ -4519,6 +4592,7 @@ const openTaskModal = () => {
     cronExpression: "",
     selectedTokens: [],
     selectedTasks: [],
+    taskConfig: createScheduledTaskConfig(),
     legacyExcludedTokens: [],
     enabled: true,
   });
@@ -4548,6 +4622,7 @@ const editTask = (task) => {
   taskData.selectedTokens = normalizeTokenIdsByBatchOrder(
     taskData.selectedTokens || [],
   );
+  taskData.taskConfig = createScheduledTaskConfig(taskData.taskConfig || {});
   taskData.legacyExcludedTokens = normalizeTokenIdsByBatchOrder(
     taskData.legacyExcludedTokens || [],
   ).filter((tokenId) => taskData.selectedTokens.includes(tokenId));
@@ -4643,6 +4718,7 @@ const saveTask = () => {
     cronExpression: taskForm.runType === "cron" ? taskForm.cronExpression : "",
     selectedTokens: normalizeTokenIdsByBatchOrder(taskForm.selectedTokens),
     selectedTasks: [...taskForm.selectedTasks],
+    taskConfig: createScheduledTaskConfig(taskForm.taskConfig),
     legacyExcludedTokens: normalizeTokenIdsByBatchOrder(
       taskForm.legacyExcludedTokens,
     ).filter((tokenId) => taskForm.selectedTokens.includes(tokenId)),
@@ -5679,6 +5755,12 @@ const executeScheduledTask = async (task) => {
         ].includes(taskName)
       ) {
         await taskFunction(true);
+      } else if (
+        ["batchSmartBoxWeekly", "batchSmartRecruitWeekly"].includes(
+          taskName,
+        )
+      ) {
+        await taskFunction(task.taskConfig?.[taskName] || {});
       } else {
         await taskFunction();
       }
@@ -7132,6 +7214,7 @@ const {
   batchOpenBoxByPoints,
   batchClaimBoxPointReward,
   batchSmartBoxWeekly,
+  batchSmartRecruitWeekly,
   batchFish,
   batchRecruit,
   batchHeroUpgrade,
