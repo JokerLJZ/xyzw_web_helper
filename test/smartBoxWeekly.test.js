@@ -91,12 +91,16 @@ const createSmartBoxScenario = ({
 const countCommands = (commands, command) =>
   commands.filter((item) => item.cmd === command).length;
 
-test("直接拥有8000分时，只执行一组精确开箱", async () => {
+test("起始达到4000分后，按累计开箱分数完成8000分", async () => {
   const scenario = createSmartBoxScenario({ inventory: { 2004: 160 } });
 
   await scenario.run();
 
-  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 0);
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 2);
+  assert.equal(
+    scenario.logs.some((entry) => entry.message.includes("累计7500/8000分")),
+    true,
+  );
   assert.equal(
     scenario.logs.some((entry) => entry.message.includes("完成1/1组")),
     true,
@@ -147,21 +151,36 @@ test("领取后库存没有增加时，停止任务避免重复领取", async ()
   assert.equal(scenario.logs.some((entry) => entry.message.includes("完成0/1组")), true);
 });
 
-test("连续无法凑够8000分时，达到每组20轮上限后停止", async () => {
+test("起始积分不足4000分时，不开始开箱和领取奖励", async () => {
   const scenario = createSmartBoxScenario({
-    inventory: { 2003: 10 },
-    // 每轮库存只增加1个，始终无法组成8000分，也不会触发库存不变保护。
-    claimRewards: Array.from({ length: 20 }, () => 11),
+    inventory: { 2003: 199 },
   });
 
   await scenario.run();
 
-  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 20);
+  assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 0);
   assert.equal(
-    scenario.logs.some((entry) => entry.message.includes("达到20轮仍未凑够8000分")),
+    scenario.logs.some((entry) => entry.message.includes("起始宝箱积分3980不足4000")),
     true,
   );
   assert.equal(scenario.logs.some((entry) => entry.message.includes("完成0/1组")), true);
+});
+
+test("木质宝箱按每批10个开箱", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2001: 8200 },
+    selectedTypes: [2001],
+  });
+
+  await scenario.run();
+
+  const openingCommands = scenario.commands.filter(
+    (item) => item.cmd === "item_openbox",
+  );
+  assert.equal(openingCommands.length, 800);
+  assert.equal(openingCommands.every((item) => item.params.number === 10), true);
+  assert.equal(scenario.logs.some((entry) => entry.message.includes("完成1/1组")), true);
 });
 
 test("配置两组时，完成两组8000分开箱", async () => {

@@ -77,6 +77,8 @@ export function createTasksItem(deps) {
       .filter((box) => selectedTypes.includes(box.id))
       .reduce((total, box) => total + (inventory[box.id] || 0) * box.points, 0);
 
+  const smartBoxPointUnit = 10;
+
   const getSmartBoxCandidates = (inventory, selectedTypes) =>
     smartBoxDefinitions
       .filter((box) => selectedTypes.includes(box.id))
@@ -97,7 +99,7 @@ export function createTasksItem(deps) {
 
     for (const candidate of candidates) {
       const nextStates = states.slice();
-      const batchUnits = candidate.batchPoints / 100;
+      const batchUnits = candidate.batchPoints / smartBoxPointUnit;
       const maxBatches = Math.min(
         candidate.availableBatches,
         Math.floor(maxUnits / batchUnits),
@@ -124,25 +126,8 @@ export function createTasksItem(deps) {
     return states;
   };
 
-  // Each configured opening batch is worth an integral number of 100 points.
-  // Find an exact 8000-point plan; wood is considered last so it fills the gap.
-  const buildSmartBoxPlan = (inventory, selectedTypes, targetPoints = 8000) => {
-    const candidates = getSmartBoxCandidates(inventory, selectedTypes);
-
-    if (candidates.length === 0) return null;
-
-    const targetUnits = targetPoints / 100;
-    const states = buildSmartBoxStates(candidates, targetUnits);
-    if (!states[targetUnits]) return null;
-
-    return {
-      boxes: states[targetUnits],
-      points: targetUnits * 100,
-    };
-  };
-
-  // When an 8000-point plan is unavailable, open at most 7500 points before
-  // claiming box points and mail attachments for the next calculation.
+  // Build the largest available opening plan up to the requested limit. The
+  // task accumulates these partial plans until one group reaches 8000 points.
   const buildSmartBoxRefillPlan = (
     inventory,
     selectedTypes,
@@ -151,7 +136,7 @@ export function createTasksItem(deps) {
     const candidates = getSmartBoxCandidates(inventory, selectedTypes);
     if (candidates.length === 0) return null;
 
-    const maxUnits = Math.floor(maxPoints / 100);
+    const maxUnits = Math.floor(maxPoints / smartBoxPointUnit);
     const states = buildSmartBoxStates(candidates, maxUnits);
     const planUnits = states.reduce(
       (best, state, units) => (state && units > best ? units : best),
@@ -162,7 +147,7 @@ export function createTasksItem(deps) {
 
     return {
       boxes: states[planUnits],
-      points: planUnits * 100,
+      points: planUnits * smartBoxPointUnit,
     };
   };
 
@@ -1596,6 +1581,8 @@ export function createTasksItem(deps) {
       );
 
     const openSmartBoxes = async (tokenId, token, boxes, phase) => {
+      let openedPoints = 0;
+
       for (const box of boxes) {
         if (shouldStop.value) break;
 
@@ -1629,13 +1616,16 @@ export function createTasksItem(deps) {
             });
           },
         });
+        openedPoints += count * box.points;
       }
+
+      return openedPoints;
     };
 
     const claimPointsAndMail = async (tokenId, token) => {
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `${token.name} 开箱积分不足8000，开始领取宝箱积分和邮件附件`,
+        message: `${token.name} 本轮开箱完成，开始领取宝箱积分和邮件附件`,
         type: "info",
       });
       await tokenStore.sendMessageWithPromise(
@@ -1684,6 +1674,8 @@ export function createTasksItem(deps) {
         let completedGroups = 0;
         let cycle = 0;
         let cyclesForCurrentGroup = 0;
+        let currentGroupStarted = false;
+        let accumulatedPoints = 0;
 
         while (
           completedGroups < groupCount &&
@@ -1702,31 +1694,33 @@ export function createTasksItem(deps) {
             type: "info",
           });
 
-          const plan = buildSmartBoxPlan(inventory, selectedTypes);
-          if (plan) {
+          if (!currentGroupStarted) {
+            if (selectedPoints < 4000) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 第${completedGroups + 1}组起始宝箱积分${selectedPoints}不足4000，跳过本组任务`,
+                type: "warning",
+              });
+              break;
+            }
+
+            currentGroupStarted = true;
+            accumulatedPoints = 0;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 已计算第${completedGroups + 1}组开箱方案，共${plan.points}分`,
+              message: `${token.name} 第${completedGroups + 1}组起始积分${selectedPoints}，开始累计开箱至8000分`,
               type: "info",
             });
-            await openSmartBoxes(tokenId, token, plan.boxes, "智能开箱");
-            completedGroups += 1;
-            cyclesForCurrentGroup = 0;
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 第${completedGroups}组完成`,
-              type: "success",
-            });
-            continue;
           }
 
-          const refillPlan = buildSmartBoxRefillPlan(
+          const remainingPoints = 8000 - accumulatedPoints;
+          const plan = buildSmartBoxRefillPlan(
             inventory,
             selectedTypes,
-            7500,
+            Math.min(remainingPoints, 7500),
           );
 
-          if (!refillPlan) {
+          if (!plan) {
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${token.name} 没有满足批次要求的可开宝箱，停止任务`,
@@ -1740,15 +1734,18 @@ export function createTasksItem(deps) {
           );
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 无法直接匹配8000分，本轮补充开箱${refillPlan.points}分（上限7500分）`,
+            message: `${token.name} 第${completedGroups + 1}组本轮开箱${plan.points}分，累计${accumulatedPoints + plan.points}/8000分`,
             type: "info",
           });
-          await openSmartBoxes(
+          const openedPoints = await openSmartBoxes(
             tokenId,
             token,
-            refillPlan.boxes,
-            "补充开箱",
+            plan.boxes,
+            "累计开箱",
           );
+          if (openedPoints <= 0) break;
+
+          accumulatedPoints += openedPoints;
           await claimPointsAndMail(tokenId, token);
 
           const refreshedInventory = getSmartBoxInventory(
@@ -1757,6 +1754,19 @@ export function createTasksItem(deps) {
           const afterInventory = JSON.stringify(
             selectedTypes.map((id) => refreshedInventory[id] || 0),
           );
+
+          if (accumulatedPoints >= 8000) {
+            completedGroups += 1;
+            currentGroupStarted = false;
+            cyclesForCurrentGroup = 0;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 第${completedGroups}组完成，累计开箱${accumulatedPoints}分`,
+              type: "success",
+            });
+            continue;
+          }
+
           if (beforeInventory === afterInventory) {
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -1773,7 +1783,7 @@ export function createTasksItem(deps) {
         ) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 补充开箱达到${maxCyclesPerGroup}轮仍未凑够8000分，停止任务`,
+            message: `${token.name} 累计开箱达到${maxCyclesPerGroup}轮仍未凑够8000分，停止任务`,
             type: "warning",
           });
         }
