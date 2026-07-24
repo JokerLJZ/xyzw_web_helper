@@ -5586,6 +5586,7 @@ const executeScheduledTask = async (task) => {
 
     const taskLabel = (taskName) =>
       availableTasks.find((t) => t.value === taskName)?.label || taskName;
+    const aggregatedMainLevelResults = [];
 
     const shouldSkipTaskForActivity = (taskName) => {
       if (
@@ -5645,6 +5646,11 @@ const executeScheduledTask = async (task) => {
         message: `执行任务: ${taskLabel(taskName)}`,
         type: "info",
       });
+
+      if (taskName === "batchPushMainLevelInfo") {
+        // 按账号执行阶段只采集结果，等所有账号完成后由调度器统一推送一份报告。
+        return taskFunction({ deferPush: true });
+      }
 
       if (isLegacyTaskName(taskName)) {
         if (legacyExcludedTokens.includes(tokenId)) {
@@ -5711,7 +5717,13 @@ const executeScheduledTask = async (task) => {
           if (shouldStop.value) break;
 
           try {
-            await executeTaskForToken(taskName, tokenId);
+            const taskResult = await executeTaskForToken(taskName, tokenId);
+            if (
+              taskName === "batchPushMainLevelInfo" &&
+              Array.isArray(taskResult)
+            ) {
+              aggregatedMainLevelResults.push(...taskResult);
+            }
             if (tokenStatus.value[tokenId] === "failed") {
               accountHasFailure = true;
             }
@@ -5741,6 +5753,27 @@ const executeScheduledTask = async (task) => {
         });
       } finally {
         endScheduledTokenSession(tokenId, tokenName);
+      }
+    }
+
+    if (aggregatedMainLevelResults.length > 0) {
+      aggregatedMainLevelResults.sort(
+        (a, b) =>
+          availableTokens.indexOf(a.tokenId) - availableTokens.indexOf(b.tokenId),
+      );
+
+      try {
+        await pushMainLevelInfo(
+          aggregatedMainLevelResults,
+          scheduledTaskStartTime,
+        );
+      } catch (error) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `主线关卡信息统一推送失败: ${error.message || "未知错误"}`,
+          type: "error",
+        });
+        message.error(`主线关卡信息统一推送失败: ${error.message || "未知错误"}`);
       }
     }
 
@@ -7137,7 +7170,7 @@ const tasksSalt = createTasksSalt(createTaskDeps());
 const { batchSaltSignup } = tasksSalt;
 
 const tasksMainLevel = createTasksMainLevel(createTaskDeps());
-const { batchPushMainLevelInfo } = tasksMainLevel;
+const { batchPushMainLevelInfo, pushMainLevelInfo } = tasksMainLevel;
 
 const tasksFootball = createTasksFootball(createTaskDeps());
 const { batchFootballBet } = tasksFootball;

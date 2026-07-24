@@ -220,8 +220,10 @@ export function createTasksMainLevel(deps) {
     });
   };
 
-  const batchPushMainLevelInfo = async () => {
+  const batchPushMainLevelInfo = async (options = {}) => {
     if (selectedTokens.value.length === 0) return;
+
+    const deferPush = options?.deferPush === true;
 
     isRunning.value = true;
     shouldStop.value = false;
@@ -303,23 +305,30 @@ export function createTasksMainLevel(deps) {
       return aIndex - bIndex;
     });
 
-    try {
-      await pushMainLevelInfo(results, startTime);
-    } catch (error) {
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `主线关卡信息推送失败: ${error.message || "未知错误"}`,
-        type: "error",
-      });
-      message.error(`主线关卡信息推送失败: ${error.message || "未知错误"}`);
+    if (!deferPush) {
+      try {
+        await pushMainLevelInfo(results, startTime);
+      } catch (error) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `主线关卡信息推送失败: ${error.message || "未知错误"}`,
+          type: "error",
+        });
+        message.error(`主线关卡信息推送失败: ${error.message || "未知错误"}`);
+      }
     }
 
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("批量获取主线关卡信息结束");
+    if (!deferPush) {
+      message.success("批量获取主线关卡信息结束");
+    }
+
+    return results;
   };
 
   return {
     batchPushMainLevelInfo,
+    pushMainLevelInfo,
   };
 }
