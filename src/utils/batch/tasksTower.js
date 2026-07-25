@@ -17,52 +17,11 @@ const parseActivityId = (value) => {
   return null;
 };
 
-const normalizeActivityIdList = (rawValue) => {
-  const values = Array.isArray(rawValue)
-    ? rawValue
-    : rawValue && typeof rawValue === "object"
-      ? Object.values(rawValue)
-      : rawValue == null
-        ? []
-        : [rawValue];
+export const deriveClaimActivityIds = (challengeActId) => {
+  const id = parseActivityId(challengeActId);
+  if (id === null) return [];
 
-  return values
-    .flatMap((item) => {
-      if (item && typeof item === "object") {
-        return [item.actId, item.activityId, item.id];
-      }
-      return [item];
-    })
-    .map(parseActivityId)
-    .filter((id) => id !== null);
-};
-
-export const resolveClaimActivityIds = ({
-  response,
-  towerData,
-  challengeActId,
-}) => {
-  const directIds = [
-    towerData?.actIdList,
-    response?.actIdList,
-    response?.towerData?.actIdList,
-    response?.data?.actIdList,
-    response?.data?.towerData?.actIdList,
-  ].flatMap(normalizeActivityIdList);
-
-  const sourceIds =
-    directIds.length > 0
-      ? directIds
-      : [parseActivityId(challengeActId)].filter((id) => id !== null);
-
-  const claimActIds = [
-    ...new Set(sourceIds.map((id) => (id % 10 === 1 ? id + 1 : id))),
-  ];
-
-  return {
-    claimActIds,
-    usedFallback: directIds.length === 0 && claimActIds.length > 0,
-  };
+  return [id % 10 === 1 ? id + 1 : id];
 };
 
 /**
@@ -772,12 +731,6 @@ export function createTasksTower(deps) {
         let towerData = (res?.actId ? res : (res?.towerData?.actId ? res.towerData : res)) || {};
         const challengeActId = towerData.actId || fallbackActId;
 
-        let claimActivityInfo = resolveClaimActivityIds({
-          response: res,
-          towerData,
-          challengeActId,
-        });
-
         // 检查活动是否有效
         if (!challengeActId) {
            addLog({
@@ -911,11 +864,6 @@ export function createTasksTower(deps) {
                      res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: challengeActId }, 5000);
                      towerData = (res?.actId ? res : (res?.towerData?.actId ? res.towerData : res)) || {};
                      levelRewardMap = towerData.levelRewardMap || {};
-                     claimActivityInfo = resolveClaimActivityIds({
-                       response: res,
-                       towerData,
-                       challengeActId,
-                     });
 
                      if (isTowerCleared(type, levelRewardMap)) {
                         loop = false;
@@ -958,21 +906,22 @@ export function createTasksTower(deps) {
           type: "info",
         });
         let claimCount = 0;
-        if (claimActivityInfo.claimActIds.length === 0) {
+        const claimActIds = deriveClaimActivityIds(challengeActId);
+        if (claimActIds.length === 0) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 未返回可领取奖励的活动ID，跳过自动领奖`,
+            message: `${token.name} 无法根据闯关活动ID生成领奖活动ID，跳过自动领奖`,
             type: "warning",
           });
-        } else if (claimActivityInfo.usedFallback) {
+        } else {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 未直接返回领奖活动ID，使用闯关活动ID推导领奖ID：${claimActivityInfo.claimActIds.join(",")}`,
+            message: `${token.name} 使用闯关活动ID推导领奖ID：${claimActIds.join(",")}`,
             type: "info",
           });
         }
 
-        for (const claimActId of claimActivityInfo.claimActIds) {
+        for (const claimActId of claimActIds) {
           let activityClaimCount = 0;
           try {
             while (!shouldStop.value) {
