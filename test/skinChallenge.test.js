@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { deriveClaimActivityIds } from "../src/utils/batch/tasksTower.js";
+import {
+  deriveClaimActivityIds,
+  SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES,
+} from "../src/utils/batch/tasksTower.js";
+
+test("换皮连续失败5次后才跳过", () => {
+  assert.equal(SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES, 5);
+});
 
 test("换皮领奖从以1结尾的闯关活动ID推导领奖ID", () => {
   assert.deepEqual(deriveClaimActivityIds(2607241), [2607242]);

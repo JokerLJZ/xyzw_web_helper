@@ -4,6 +4,8 @@
  */
 import { getTowerActId } from "../towerActId.js";
 
+export const SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES = 5;
+
 const parseActivityId = (value) => {
   if (typeof value === "number" && Number.isInteger(value) && value > 0) {
     return value;
@@ -885,10 +887,10 @@ export function createTasksTower(deps) {
                      needStart = true;
                      failCount++;
 
-                     if (failCount >= 3) {
+                     if (failCount >= SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES) {
                          addLog({
                             time: new Date().toLocaleTimeString(),
-                            message: `${token.name} BOSS ${type} 连续失败3次，跳过`,
+                            message: `${token.name} BOSS ${type} 连续失败${SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES}次，跳过`,
                             type: "error",
                          });
                          loop = false;
