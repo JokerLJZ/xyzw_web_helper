@@ -685,7 +685,7 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="batchSmartBoxWeekly"
+                  @click="openSmartBoxWeeklyModal"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   智能宝箱周任务
@@ -1617,6 +1617,58 @@
             >取消</n-button
           >
           <n-button type="primary" @click="executeHelper">开始执行</n-button>
+        </div>
+      </div>
+    </n-modal>
+
+    <!-- Smart Box Weekly Task Modal -->
+    <n-modal
+      v-model:show="showSmartBoxWeeklyModal"
+      preset="card"
+      title="智能宝箱周任务"
+      style="width: 90%; max-width: 420px"
+    >
+      <div class="settings-content">
+        <n-alert type="info" show-icon style="margin-bottom: 16px">
+          请选择本次任务允许开启的宝箱类型，至少选择一种。
+        </n-alert>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label class="setting-label">宝箱类型</label>
+            <n-checkbox-group v-model:value="smartBoxWeeklySettings.smartBoxTypes">
+              <n-space vertical>
+                <n-checkbox
+                  v-for="option in boxTypeOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </n-checkbox>
+              </n-space>
+            </n-checkbox-group>
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">任务组数</label>
+            <n-input-number
+              v-model:value="smartBoxWeeklySettings.smartBoxGroupCount"
+              :min="1"
+              :max="4"
+              :step="1"
+              size="small"
+              style="width: 100%"
+            />
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top: 20px; text-align: right">
+          <n-button
+            @click="showSmartBoxWeeklyModal = false"
+            style="margin-right: 12px"
+          >
+            取消
+          </n-button>
+          <n-button type="primary" @click="executeSmartBoxWeekly">
+            开始执行
+          </n-button>
         </div>
       </div>
     </n-modal>
@@ -3858,6 +3910,12 @@ const helperSettings = reactive({
   targetPoints: 1000,
 });
 
+const showSmartBoxWeeklyModal = ref(false);
+const smartBoxWeeklySettings = reactive({
+  smartBoxTypes: [2002, 2003, 2004],
+  smartBoxGroupCount: 1,
+});
+
 const showHeroLevelUpgradeModal = ref(false);
 const heroLevelUpgradeForm = reactive({
   heroIds: [Number(Object.keys(HERO_DICT)[0])],
@@ -5922,6 +5980,10 @@ const openHelperModal = (type) => {
   showHelperModal.value = true;
 };
 
+const openSmartBoxWeeklyModal = () => {
+  showSmartBoxWeeklyModal.value = true;
+};
+
 // 批量功法残卷赠送相关方法
 const clearRecipientError = () => {
   recipientIdError.value = "";
@@ -6166,6 +6228,19 @@ const executeHelper = () => {
   } else if (helperType.value === "pointsBox") {
     batchOpenBoxByPoints();
   }
+};
+
+const executeSmartBoxWeekly = () => {
+  if (smartBoxWeeklySettings.smartBoxTypes.length === 0) {
+    message.warning("至少选择一种宝箱类型");
+    return;
+  }
+
+  showSmartBoxWeeklyModal.value = false;
+  batchSmartBoxWeekly({
+    smartBoxTypes: [...smartBoxWeeklySettings.smartBoxTypes],
+    smartBoxGroupCount: smartBoxWeeklySettings.smartBoxGroupCount,
+  });
 };
 
 // Dream Buy Modal Logic
