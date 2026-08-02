@@ -4,6 +4,11 @@
  */
 
 import { FISH_TARGET, GOLD_FISH_TARGET, ARENA_TARGET } from "./constants.js";
+import {
+  formatRedFeatherCatchNotification,
+  getRedFeatherCountFromLotteryResult,
+  sendWxPusherMessage,
+} from "../wxpusher.js";
 
 /**
  * 创建竞技场、补齐类任务执行器
@@ -556,10 +561,14 @@ export function createTasksArena(deps) {
       tokenStatus.value[id] = "waiting";
     });
 
+    // 每个账号只保留一行汇总数据，所有账号完成后统一发送一条表格通知。
+    const redFeatherResults = new Map();
+
     const taskPromises = selectedTokens.value.map(async (tokenId) => {
       if (shouldStop.value) return;
       tokenStatus.value[tokenId] = "running";
       const token = tokens.value.find((t) => t.id === tokenId);
+      let completedFishingCount = 0;
 
       try {
         addLog({
@@ -649,12 +658,33 @@ export function createTasksArena(deps) {
         while (remaining > 0 && !shouldStop.value) {
           const batch = Math.min(10, remaining);
           try {
-            await tokenStore.sendMessageWithPromise(
+            const lotteryResult = await tokenStore.sendMessageWithPromise(
               tokenId,
               "artifact_lottery",
               { lotteryNumber: batch, newFree: true, type: 2 },
               12000,
             );
+            completedFishingCount += batch;
+
+            const redFeatherCount =
+              getRedFeatherCountFromLotteryResult(lotteryResult);
+            if (redFeatherCount > 0) {
+              const current = redFeatherResults.get(tokenId) || {
+                name: token.name,
+                count: 0,
+                lotteryCount: 0,
+                caughtAt: new Date(),
+              };
+              current.count += redFeatherCount;
+              current.lotteryCount = completedFishingCount;
+              current.caughtAt = new Date();
+              redFeatherResults.set(tokenId, current);
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 金鱼杆钓到赤羽 x${redFeatherCount}`,
+                type: "success",
+              });
+            }
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${token.name} 完成 ${batch} 次金鱼杆钓鱼`,
@@ -719,6 +749,48 @@ export function createTasksArena(deps) {
     });
 
     await Promise.all(taskPromises);
+
+    const caughtRedFeathers = Array.from(redFeatherResults.values());
+    if (caughtRedFeathers.length > 0) {
+      const { title, content } = formatRedFeatherCatchNotification(
+        caughtRedFeathers,
+      );
+
+      if (
+        batchSettings.wxpusherEnabled &&
+        batchSettings.wxpusherAppToken &&
+        batchSettings.wxpusherUids
+      ) {
+        try {
+          await sendWxPusherMessage(
+            {
+              appToken: batchSettings.wxpusherAppToken,
+              uids: batchSettings.wxpusherUids,
+            },
+            title,
+            content,
+          );
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: "赤羽钓获表格已通过 WxPusher 推送",
+            type: "success",
+          });
+        } catch (error) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `赤羽钓获 WxPusher 推送失败: ${error.message || "未知错误"}`,
+            type: "error",
+          });
+        }
+      } else {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: "检测到赤羽，但 WxPusher 未启用或配置不完整，已跳过推送",
+          type: "warning",
+        });
+      }
+    }
+
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("批量金鱼杆月度补齐结束");

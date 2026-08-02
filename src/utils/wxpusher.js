@@ -105,6 +105,86 @@ function escapeMarkdownTableCell(value) {
   return String(value ?? "").replace(/\|/g, "\\|");
 }
 
+// 赤羽在游戏奖励数据中的道具 ID。指定 magic 分支的
+// api采集/养号/吕布赤羽.txt 记录中，13041 是赤羽道具，1304 则是鱼灵类型 ID。
+export const RED_FEATHER_ITEM_ID = 13041;
+
+/**
+ * 从 artifact_lottery 返回值中提取本次新获得的赤羽数量。
+ *
+ * 角色同步数据中的 role.items[13041].quantity 可能是库存总量，不能直接用来
+ * 统计本次奖励，因此这里只扫描 reward/rewards/rewardList 等奖励字段。
+ */
+export function getRedFeatherCountFromLotteryResult(result) {
+  let count = 0;
+  const visited = new Set();
+  const rewardKeyPattern = /reward/i;
+
+  const getRewardQuantity = (reward) => {
+    for (const key of ["value", "quantity", "count", "num"]) {
+      if (Object.prototype.hasOwnProperty.call(reward, key)) {
+        const value = Number(reward[key]);
+        return Number.isFinite(value) ? Math.max(0, value) : 0;
+      }
+    }
+    return 1;
+  };
+
+  const visit = (value, inRewardContext = false) => {
+    if (!value || typeof value !== "object" || visited.has(value)) return;
+    visited.add(value);
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, inRewardContext));
+      return;
+    }
+
+    const itemId = Number(value.itemId ?? value.itemID);
+    if (inRewardContext && itemId === RED_FEATHER_ITEM_ID) {
+      count += getRewardQuantity(value);
+    }
+
+    Object.entries(value).forEach(([key, child]) => {
+      visit(child, inRewardContext || rewardKeyPattern.test(key));
+    });
+  };
+
+  visit(result);
+  return count;
+}
+
+/**
+ * 格式化金鱼杆补齐中的赤羽钓获通知（Markdown 表格）。
+ * @param {Array<{name: string, count: number, lotteryCount?: number, caughtAt?: Date|string}>} results
+ * @returns {{title: string, content: string}}
+ */
+export function formatRedFeatherCatchNotification(results) {
+  const validResults = (Array.isArray(results) ? results : []).filter(
+    (item) => Number(item?.count) > 0,
+  );
+  const total = validResults.reduce((sum, item) => sum + Number(item.count), 0);
+  const title = `🎣 金鱼杆钓到赤羽 (${total})`;
+
+  const lines = [
+    `## 🎣 金鱼杆补齐发现赤羽`,
+    ``,
+    `共 ${validResults.length} 个账号钓到赤羽，合计 **${total}** 个。`,
+    ``,
+    `| 账号 | 赤羽数量 | 本次钓鱼次数 | 钓到时间 |`,
+    `|------|---------:|-------------:|----------|`,
+  ];
+
+  validResults.forEach((item) => {
+    lines.push(
+      `| ${escapeMarkdownTableCell(item.name)} | ${Number(item.count)} | ${
+        Number(item.lotteryCount) || "-"
+      } | ${formatNotificationTime(item.caughtAt)} |`,
+    );
+  });
+
+  return { title, content: lines.join("\n") };
+}
+
 /**
  * 格式化定时任务完成通知 (Markdown)
  * @param {string} taskName - 定时任务名称
