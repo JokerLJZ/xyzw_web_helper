@@ -64,7 +64,13 @@ export default defineConfig(async () => {
   const routerPlugin = routerModule?.default?.({
     routesFolder: "src/views",
     logs: true,
-    exclude: ["**/components/**", "**/test**.vue", "**/**Modal.vue"],
+    exclude: [
+      "**/components/**",
+      "**/test**.vue",
+      "**/**Modal.vue",
+      "**/PushingLevels.vue",
+      "**/GamePlayer.vue",
+    ],
     importMode: "async",
     dts: "src/typed-router.d.ts",
   });

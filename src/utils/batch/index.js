@@ -29,3 +29,4 @@ export { createTasksLegacy } from './tasksLegacy.js';
 export { createTasksSalt } from './tasksSalt.js';
 export { createTasksMainLevel } from './tasksMainLevel.js';
 export { createTasksFootball } from './tasksFootball.js';
+export { createTasksApex } from './tasksApex.js';

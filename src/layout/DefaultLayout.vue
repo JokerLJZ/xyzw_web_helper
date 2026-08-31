@@ -51,6 +51,16 @@
             <span>批量日常</span>
           </router-link>
           <router-link
+            to="/admin/PushingLevels"
+            class="nav-item"
+            active-class="active"
+          >
+            <n-icon>
+              <ArrowUpCircle />
+            </n-icon>
+            <span>主线推关</span>
+          </router-link>
+          <router-link
             to="/admin/data-backup"
             class="nav-item"
             active-class="active"
@@ -157,6 +167,16 @@
           <span>批量日常</span>
         </router-link>
         <router-link
+          to="/admin/PushingLevels"
+          class="drawer-item"
+          @click="isMobileMenuOpen = false"
+        >
+          <n-icon>
+            <ArrowUpCircle />
+          </n-icon>
+          <span>主线推关</span>
+        </router-link>
+        <router-link
           to="/admin/data-backup"
           class="drawer-item"
           @click="isMobileMenuOpen = false"
@@ -218,6 +238,7 @@ import {
   Menu,
   Layers,
   CloudUploadSharp,
+  ArrowUpCircle,
 } from "@vicons/ionicons5";
 
 import { ref } from 'vue'

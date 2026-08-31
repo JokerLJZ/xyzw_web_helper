@@ -126,6 +126,14 @@
             </n-button-group>
           </n-space>
           <div class="header-actions">
+            <n-button type="info" @click="openGame">
+              <template #icon>
+                <n-icon>
+                  <GameController />
+                </n-icon>
+              </template>
+              打开游戏
+            </n-button>
             <n-button type="success" @click="goToDashboard">
               <template #icon>
                 <n-icon>
@@ -640,6 +648,7 @@ import {
   Star,
   SyncCircle,
   TrashBin,
+  GameController,
 } from "@vicons/ionicons5";
 import { NIcon, NAlert, useDialog, useMessage } from "naive-ui";
 import { h, onMounted, onUnmounted, reactive, ref, watch } from "vue";
@@ -652,6 +661,7 @@ import {
 } from "@/utils/tokenBinExport";
 import { $emit } from "@/stores/events/index.ts";
 import useIndexedDB from "@/hooks/useIndexedDB";
+import { persistGameBin } from "@/utils/gameBin";
 const { getArrayBuffer, storeArrayBuffer, deleteArrayBuffer, clearAll } =
   useIndexedDB();
 // 接收路由参数
@@ -1571,6 +1581,23 @@ const formatTime = (timestamp) => {
 
 const goToDashboard = () => {
   router.push("/admin/batch-daily-tasks");
+};
+
+const openGame = async () => {
+  const token = tokenStore.selectedToken;
+  if (!token) {
+    message.warning("请先选择一个Token");
+    return;
+  }
+
+  const binData = await getArrayBuffer(token.id);
+  if (!binData) {
+    message.error("未找到该Token的BIN数据");
+    return;
+  }
+
+  persistGameBin(token, binData);
+  router.push("/game");
 };
 
 const goToBackup = () => {
