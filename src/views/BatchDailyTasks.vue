@@ -428,19 +428,6 @@
                 >
                   一键灯神扫荡
                 </n-button>
-                <n-popselect
-                  :value="campChallengeMode"
-                  :options="campChallengeModeOptions"
-                  trigger="click"
-                  @update:value="onCampChallengeModeChange"
-                >
-                  <n-button
-                    size="small"
-                    :disabled="isRunning || selectedTokens.length === 0"
-                  >
-                    营地挑战({{ campChallengeModeLabel }})
-                  </n-button>
-                </n-popselect>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="dungeon" tab="副本">
@@ -4319,9 +4306,6 @@ const taskGroupDefinitions = [
       "store_purchase",
       "collection_claimfreereward",
       "batchGenieSweep",
-      "batchCampChallenge",
-      "batchCampChallengePet",
-      "batchCampClaimTasks",
     ],
   },
   {
@@ -7362,37 +7346,8 @@ const { batchFootballBet } = tasksFootball;
 const tasksApex = createTasksApex(createTaskDeps());
 const { batchApexGuess } = tasksApex;
 
-const tasksCampChallenge = createTasksCampChallenge(createTaskDeps());
-const { batchCampChallenge, batchCampChallengePet, batchCampClaimTasks } =
-  tasksCampChallenge;
-
 // 逐鹿盐山竞猜配置
 const apexScheduleId = ref(46);
-
-// 营地挑战模式选择
-const campChallengeMode = ref("pet");
-const campChallengeModeOptions = [
-  { label: "挑战宠物", value: "pet" },
-  { label: "随机挑战人员", value: "random" },
-  { label: "领取任务奖励", value: "claim" },
-];
-const campChallengeModeLabel = computed(() => {
-  return (
-    campChallengeModeOptions.find(
-      (option) => option.value === campChallengeMode.value,
-    )?.label || ""
-  );
-});
-const onCampChallengeModeChange = async (value) => {
-  campChallengeMode.value = value;
-  if (value === "pet") {
-    await batchCampChallengePet();
-  } else if (value === "claim") {
-    await batchCampClaimTasks();
-  } else {
-    await batchCampChallenge();
-  }
-};
 
 // 盐杯竞猜 pick 选择
 const footballPick = ref(3);

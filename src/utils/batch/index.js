@@ -30,4 +30,3 @@ export { createTasksSalt } from './tasksSalt.js';
 export { createTasksMainLevel } from './tasksMainLevel.js';
 export { createTasksFootball } from './tasksFootball.js';
 export { createTasksApex } from './tasksApex.js';
-export { createTasksCampChallenge } from './tasksCampChallenge.js';
