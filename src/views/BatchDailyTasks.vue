@@ -3340,7 +3340,6 @@ import {
   createTasksMainLevel,
   createTasksFootball,
   createTasksApex,
-  createTasksCampChallenge,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
