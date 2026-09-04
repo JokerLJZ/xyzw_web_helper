@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>鲨鱼之王 - 多账号</title>
+    <meta name="viewport" content="width=device-width,user-scalable=no,initial-scale=1,minimum-scale=1,maximum-scale=1" />
+    <link rel="stylesheet" type="text/css" href="style-mobile.1777a.css" />
+    <link rel="icon" href="favicon.8de18.ico" />
+  </head>
+  <body>
+    <canvas id="GameCanvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
+    <div id="splash"><div class="progress-bar stripes"><span style="width: 0%"></span></div></div>
+    <script src="multi-game-storage-bridge.js" charset="utf-8"></script>
+    <script>
+      (function loadMultiGameRuntime() {
+        "use strict";
+        if (!window.__MULTI_GAME_BRIDGE_READY__) return;
+        const runtime = [
+          "patch.decrypted_readable.js",
+          "src/settings.da7ef.js",
+          "game-defines.a175e.js",
+          "main.2a00e.js",
+          "cocos2d-js-min.a5841.js",
+          "xh.js",
+          "sh1.js",
+          "diagnose_require.js",
+        ];
+        const loadScript = (src) => new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = src;
+          script.charset = "utf-8";
+          script.onload = resolve;
+          script.onerror = () => reject(new Error(`Unable to load ${src}`));
+          document.head.appendChild(script);
+        });
+        const notify = (type, code) => window.parent.postMessage({
+          channel: "multi-game",
+          version: 1,
+          type,
+          scope: window.__MULTI_GAME_BRIDGE_READY__.scope,
+          ...(code ? { code } : {}),
+        }, window.location.origin);
+        (async () => {
+          for (const src of runtime) await loadScript(src);
+          window.HtmlIsLoaded = true;
+          document.getElementById("splash").style.display = "none";
+          await window.boot();
+          notify("ready");
+        })().catch(() => {
+          document.getElementById("splash").textContent = "游戏资源加载失败";
+          notify("fatal", "runtime-load-failed");
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -35,11 +35,11 @@ const decryptX = (buffer) => {
   return output.subarray(4);
 };
 
-const encryptLx = (plain) => {
+const encryptLx = (plain, random = Math.random) => {
   const compressed = lz4.compress(plain);
   const output = new Uint8Array(compressed.length);
   output.set(compressed);
-  const key = 2 + Math.floor(Math.random() * 248);
+  const key = 2 + Math.floor(random() * 248);
   for (let index = Math.min(output.length, 100); --index >= 0; ) {
     output[index] ^= key;
   }
@@ -49,13 +49,13 @@ const encryptLx = (plain) => {
   return output;
 };
 
-export const convertBinToLx = (buffer) => {
+export const convertBinToLx = (buffer, random = Math.random) => {
   const input = new Uint8Array(buffer);
   if (input.length > 4 && input[0] === 112 && input[1] === 108) {
     return input;
   }
   if (input.length > 4 && input[0] === 112 && input[1] === 120) {
-    return encryptLx(decryptX(input));
+    return encryptLx(decryptX(input), random);
   }
   return input;
 };
