@@ -6,6 +6,23 @@
       </button>
       <strong>批量游戏</strong>
       <span class="toolbar-count">{{ frames.length }} 个窗口</span>
+      <label class="sync-leader-label">
+        主窗口
+        <select v-model="syncLeaderScope" :disabled="syncEnabled">
+          <option v-for="frame in frames" :key="frame.scopeId" :value="frame.scopeId">
+            {{ frame.name }}
+          </option>
+        </select>
+      </label>
+      <button
+        type="button"
+        class="sync-toggle"
+        :class="{ active: syncEnabled }"
+        :disabled="frames.length < 2"
+        @click="toggleSync"
+      >
+        {{ syncEnabled ? "停止同步" : "同步操作" }}
+      </button>
       <span v-if="skippedSummary" class="toolbar-skipped" :title="skippedDetails">
         {{ skippedSummary }}
       </span>
@@ -67,12 +84,18 @@ import {
   readActiveMultiGameLaunch,
   resolveMultiGameFrameMessage,
 } from "@/utils/gameLauncher";
+import {
+  postMultiGameInputMessage,
+  resolveMultiGameInputMessage,
+} from "@/utils/multiGameSync";
 
 const router = useRouter();
 const FRAME_LOAD_TIMEOUT_MS = 45_000;
 const gameStrip = ref(null);
 const launch = ref(readLaunchSafely());
 const frameDomOrder = (launch.value?.sessions || []).map((session) => session.scopeId);
+const syncLeaderScope = ref(frameDomOrder[0] || "");
+const syncEnabled = ref(false);
 const frames = computed(() => {
   const sessions = new Map((launch.value?.sessions || []).map((session) => [session.scopeId, session]));
   return frameDomOrder
@@ -181,12 +204,45 @@ function closeFrame(frame) {
     clearFrameTimeout(frame.scopeId);
     frameElements.delete(frame.scopeId);
     delete frameStates[frame.scopeId];
+    if (syncLeaderScope.value === frame.scopeId) {
+      syncLeaderScope.value = frames.value[0]?.scopeId || "";
+    }
+    if (frames.value.length < 2) syncEnabled.value = false;
   } catch {
     window.alert("关闭游戏窗口失败，请重试");
   }
 }
 
+function toggleSync() {
+  if (syncEnabled.value) {
+    syncEnabled.value = false;
+    return;
+  }
+  if (frames.value.length < 2 || !syncLeaderScope.value) return;
+  syncEnabled.value = true;
+}
+
 function handleMessage(event) {
+  const input = resolveMultiGameInputMessage({
+    event,
+    expectedOrigin: window.location.origin,
+    frames: frames.value,
+    frameElements,
+    enabled: syncEnabled.value,
+    leaderScopeId: syncLeaderScope.value,
+  });
+  if (input) {
+    for (const frame of frames.value) {
+      if (frame.scopeId === input.sourceScopeId) continue;
+      postMultiGameInputMessage(
+        frameElements.get(frame.scopeId),
+        input.message,
+        window.location.origin,
+      );
+    }
+    return;
+  }
+
   const result = resolveMultiGameFrameMessage({
     event,
     expectedOrigin: window.location.origin,
@@ -235,6 +291,7 @@ onUnmounted(() => {
 .toolbar-button, .game-panel-header button, .empty-card button, .frame-error button { border: 1px solid #475569; border-radius: 6px; color: #f8fafc; background: #1e293b; cursor: pointer; }
 .toolbar-button, .empty-card button, .frame-error button { padding: 7px 11px; }
 .toolbar-count { color: #93c5fd; }
+.sync-leader-label { display: inline-flex; align-items: center; gap: 5px; color: #cbd5e1; font-size: 12px; }.sync-leader-label select { max-width: 130px; padding: 3px 5px; color: #f8fafc; border: 1px solid #475569; border-radius: 5px; background: #1e293b; }.sync-toggle { padding: 5px 8px; border: 1px solid #64748b; border-radius: 6px; color: #e2e8f0; background: #1e293b; cursor: pointer; }.sync-toggle.active { color: #052e16; border-color: #4ade80; background: #86efac; }.sync-toggle:disabled { cursor: not-allowed; opacity: .45; }
 .toolbar-skipped { color: #fbbf24; }
 .toolbar-warning { margin-left: auto; color: #94a3b8; font-size: 12px; }
 .game-strip { box-sizing: border-box; display: flex; align-items: flex-start; flex-flow: row nowrap; gap: 12px; height: calc(100dvh - 52px); padding: 12px; overflow-x: auto; overflow-y: hidden; }
