@@ -88,10 +88,43 @@
             pointerId: payload.pointerId,
             pointerType: payload.pointerType,
           };
-          const relayed = typeof PointerEvent === "function"
-            ? new PointerEvent(payload.action, init)
-            : new MouseEvent(payload.action, init);
-          canvas.dispatchEvent(relayed);
+          const mouseAction = {
+            pointerdown: "mousedown",
+            pointermove: "mousemove",
+            pointerup: "mouseup",
+          }[payload.action];
+          const touchAction = {
+            pointerdown: "touchstart",
+            pointermove: "touchmove",
+            pointerup: "touchend",
+          }[payload.action];
+
+          if (
+            payload.pointerType === "touch" &&
+            typeof Touch === "function" &&
+            typeof TouchEvent === "function"
+          ) {
+            const touch = new Touch({
+              identifier: payload.pointerId,
+              target: canvas,
+              clientX: init.clientX,
+              clientY: init.clientY,
+              screenX: init.clientX,
+              screenY: init.clientY,
+              pageX: init.clientX + window.scrollX,
+              pageY: init.clientY + window.scrollY,
+            });
+            const touches = touchAction === "touchend" ? [] : [touch];
+            canvas.dispatchEvent(new TouchEvent(touchAction, {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              touches,
+              changedTouches: [touch],
+            }));
+          } else {
+            canvas.dispatchEvent(new MouseEvent(mouseAction, init));
+          }
         });
 
         (async () => {
