@@ -1,7 +1,30 @@
 /**
  * 爬塔类任务
- * 包含: climbTower, climbWeirdTower, batchClaimFreeEnergy
+ * 包含: climbTower, batchWeirdTower, climbWeirdTower, batchClaimFreeEnergy
  */
+import { getTowerActId } from "../towerActId.js";
+
+export const SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES = 5;
+
+const parseActivityId = (value) => {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    const id = Number(value);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  }
+
+  return null;
+};
+
+export const deriveClaimActivityIds = (challengeActId) => {
+  const id = parseActivityId(challengeActId);
+  if (id === null) return [];
+
+  return [id % 10 === 1 ? id + 1 : id];
+};
 
 /**
  * 创建爬塔类任务执行器
@@ -277,20 +300,30 @@ export function createTasksTower(deps) {
   /**
    * 爬怪异塔
    */
-  const climbWeirdTower = async () => {
-    if (selectedTokens.value.length === 0) return;
+  const climbWeirdTower = async (options = {}) => {
+    const {
+      tokenIds = selectedTokens.value,
+      manageState = true,
+      manageConnection = true,
+      showMessage = true,
+      throwOnError = false,
+    } = options;
+    if (tokenIds.length === 0) return;
 
-    isRunning.value = true;
-    shouldStop.value = false;
+    if (manageState) {
+      isRunning.value = true;
+      shouldStop.value = false;
+      tokenIds.forEach((id) => {
+        tokenStatus.value[id] = "waiting";
+      });
+    }
 
-    selectedTokens.value.forEach((id) => {
-      tokenStatus.value[id] = "waiting";
-    });
-
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+    const taskPromises = tokenIds.map(async (tokenId) => {
       if (shouldStop.value) return;
 
-      tokenStatus.value[tokenId] = "running";
+      if (manageState) {
+        tokenStatus.value[tokenId] = "running";
+      }
 
       const token = tokens.value.find((t) => t.id === tokenId);
       // 加载该Token的独立配置，如果未找到则回退到currentSettings
@@ -303,7 +336,9 @@ export function createTasksTower(deps) {
           type: "info",
         });
 
-        await ensureConnection(tokenId);
+        if (manageConnection) {
+          await ensureConnection(tokenId);
+        }
 
         const teamInfo = await tokenStore.sendMessageWithPromise(
           tokenId,
@@ -359,7 +394,7 @@ export function createTasksTower(deps) {
         });
 
         let count = 0;
-        const MAX_CLIMB = 100;
+        const MAX_CLIMB = 20;
         let consecutiveFailures = 0;
 
         while (currentEnergy > 0 && count < MAX_CLIMB && !shouldStop.value) {
@@ -389,7 +424,7 @@ export function createTasksTower(deps) {
               type: "info",
             });
 
-            await new Promise((r) => setTimeout(r, 500));
+            await new Promise((r) => setTimeout(r, 1500));
 
             const evotowerinfo2 = await tokenStore.sendMessageWithPromise(
               tokenId,
@@ -503,7 +538,9 @@ export function createTasksTower(deps) {
             5000,
           );
         }
-        tokenStatus.value[tokenId] = "completed";
+        if (manageState) {
+          tokenStatus.value[tokenId] = "completed";
+        }
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `=== ${token.name} 爬怪异塔结束，共 ${count} 次 ===`,
@@ -511,45 +548,67 @@ export function createTasksTower(deps) {
         });
       } catch (error) {
         console.error(error);
-        tokenStatus.value[tokenId] = "failed";
+        if (manageState) {
+          tokenStatus.value[tokenId] = "failed";
+        }
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${token.name} 爬怪异塔失败: ${error.message}`,
           type: "error",
         });
+        if (throwOnError) {
+          throw error;
+        }
       } finally {
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
-          type: "info",
-        });
+        if (manageConnection) {
+          tokenStore.closeWebSocketConnection(tokenId);
+          releaseConnectionSlot();
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+            type: "info",
+          });
+        }
       }
     });
 
     await Promise.all(taskPromises);
 
-    isRunning.value = false;
-    currentRunningTokenId.value = null;
-    message.success("批量爬怪异塔结束");
+    if (manageState) {
+      isRunning.value = false;
+      currentRunningTokenId.value = null;
+    }
+    if (showMessage) {
+      message.success("批量爬怪异塔结束");
+    }
   };
 
   /**
    * 领取怪异塔免费道具
    */
-  const batchClaimFreeEnergy = async () => {
-    if (selectedTokens.value.length === 0) return;
-    isRunning.value = true;
-    shouldStop.value = false;
+  const batchClaimFreeEnergy = async (options = {}) => {
+    const {
+      tokenIds = selectedTokens.value,
+      manageState = true,
+      manageConnection = true,
+      showMessage = true,
+      throwOnError = false,
+    } = options;
+    if (tokenIds.length === 0) return;
 
-    selectedTokens.value.forEach((id) => {
-      tokenStatus.value[id] = "waiting";
-    });
+    if (manageState) {
+      isRunning.value = true;
+      shouldStop.value = false;
+      tokenIds.forEach((id) => {
+        tokenStatus.value[id] = "waiting";
+      });
+    }
 
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+    const taskPromises = tokenIds.map(async (tokenId) => {
       if (shouldStop.value) return;
-      tokenStatus.value[tokenId] = "running";
+      if (manageState) {
+        tokenStatus.value[tokenId] = "running";
+      }
 
       const token = tokens.value.find((t) => t.id === tokenId);
       try {
@@ -559,7 +618,9 @@ export function createTasksTower(deps) {
           type: "info",
         });
 
-        await ensureConnection(tokenId);
+        if (manageConnection) {
+          await ensureConnection(tokenId);
+        }
 
         const freeEnergyResult = await tokenStore.sendMessageWithPromise(
           tokenId,
@@ -592,31 +653,44 @@ export function createTasksTower(deps) {
           });
         }
 
-        tokenStatus.value[tokenId] = "completed";
+        if (manageState) {
+          tokenStatus.value[tokenId] = "completed";
+        }
       } catch (error) {
         console.error(error);
-        tokenStatus.value[tokenId] = "failed";
+        if (manageState) {
+          tokenStatus.value[tokenId] = "failed";
+        }
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `=== ${token.name} 领取免费道具失败: ${error.message || "未知错误"}`,
           type: "error",
         });
+        if (throwOnError) {
+          throw error;
+        }
       } finally {
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
-          type: "info",
-        });
+        if (manageConnection) {
+          tokenStore.closeWebSocketConnection(tokenId);
+          releaseConnectionSlot();
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+            type: "info",
+          });
+        }
       }
     });
 
     await Promise.all(taskPromises);
 
-    isRunning.value = false;
-    currentRunningTokenId.value = null;
-    message.success("批量领取怪异塔免费道具结束");
+    if (manageState) {
+      isRunning.value = false;
+      currentRunningTokenId.value = null;
+    }
+    if (showMessage) {
+      message.success("批量领取怪异塔免费道具结束");
+    }
   };
 
   /**
@@ -648,17 +722,19 @@ export function createTasksTower(deps) {
         await ensureConnection(tokenId);
 
         // 获取活动信息
+        const fallbackActId = getTowerActId();
         let res = await tokenStore.sendMessageWithPromise(
           tokenId,
           "towers_getinfo",
-          {},
+          { actId: fallbackActId },
           5000
         );
         
-        let towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
+        let towerData = (res?.actId ? res : (res?.towerData?.actId ? res.towerData : res)) || {};
+        const challengeActId = towerData.actId || fallbackActId;
 
         // 检查活动是否有效
-        if (!towerData.actId) {
+        if (!challengeActId) {
            addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 换皮闯关活动信息获取失败`,
@@ -668,7 +744,7 @@ export function createTasksTower(deps) {
           return;
         }
 
-        const actId = String(towerData.actId);
+        const actId = String(challengeActId);
         if (actId.length >= 6) {
            const year = "20" + actId.substring(0, 2);
            const month = actId.substring(2, 4);
@@ -765,12 +841,12 @@ export function createTasksTower(deps) {
 
             while (loop && !shouldStop.value) {
                 if (needStart) {
-                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { towerType: type }, 5000);
+                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { actId: challengeActId, towerType: type }, 5000);
                     // 稍微等待一下
                     await new Promise(r => setTimeout(r, 500));
                 }
 
-                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { towerType: type }, 5000);
+                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { actId: challengeActId, towerType: type }, 5000);
                 const battleData = fightRes?.battleData;
                 const curHP = battleData?.result?.accept?.ext?.curHP;
                 
@@ -787,8 +863,8 @@ export function createTasksTower(deps) {
                      failCount = 0;
 
                      // 刷新数据
-                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", {}, 5000);
-                     towerData = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
+                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: challengeActId }, 5000);
+                     towerData = (res?.actId ? res : (res?.towerData?.actId ? res.towerData : res)) || {};
                      levelRewardMap = towerData.levelRewardMap || {};
 
                      if (isTowerCleared(type, levelRewardMap)) {
@@ -811,10 +887,10 @@ export function createTasksTower(deps) {
                      needStart = true;
                      failCount++;
 
-                     if (failCount >= 3) {
+                     if (failCount >= SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES) {
                          addLog({
                             time: new Date().toLocaleTimeString(),
-                            message: `${token.name} BOSS ${type} 连续失败3次，跳过`,
+                            message: `${token.name} BOSS ${type} 连续失败${SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES}次，跳过`,
                             type: "error",
                          });
                          loop = false;
@@ -823,6 +899,63 @@ export function createTasksTower(deps) {
                      }
                 }
             }
+        }
+
+        // 闯关结束后循环领取奖励
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 闯关结束，开始领取奖励`,
+          type: "info",
+        });
+        let claimCount = 0;
+        const claimActIds = deriveClaimActivityIds(challengeActId);
+        if (claimActIds.length === 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 无法根据闯关活动ID生成领奖活动ID，跳过自动领奖`,
+            type: "warning",
+          });
+        } else {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 使用闯关活动ID推导领奖ID：${claimActIds.join(",")}`,
+            type: "info",
+          });
+        }
+
+        for (const claimActId of claimActIds) {
+          let activityClaimCount = 0;
+          try {
+            while (!shouldStop.value) {
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "activity_startactegame",
+                { actId: claimActId },
+                5000,
+              );
+              claimCount++;
+              activityClaimCount++;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 活动 ${claimActId} 领取奖励第 ${activityClaimCount} 次`,
+                type: "success",
+              });
+              await new Promise((r) => setTimeout(r, 300));
+            }
+          } catch (e) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 活动 ${claimActId} 领取结束（共 ${activityClaimCount} 次）`,
+              type: activityClaimCount > 0 ? "success" : "info",
+            });
+          }
+        }
+        if (claimCount > 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 领取奖励 ${claimCount} 次`,
+            type: "success",
+          });
         }
 
         tokenStatus.value[tokenId] = "completed";
@@ -865,18 +998,29 @@ export function createTasksTower(deps) {
   /**
    * 批量使用道具
    */
-  const batchUseItems = async () => {
-    if (selectedTokens.value.length === 0) return;
-    isRunning.value = true;
-    shouldStop.value = false;
+  const batchUseItems = async (options = {}) => {
+    const {
+      tokenIds = selectedTokens.value,
+      manageState = true,
+      manageConnection = true,
+      showMessage = true,
+      throwOnError = false,
+    } = options;
+    if (tokenIds.length === 0) return;
 
-    selectedTokens.value.forEach((id) => {
-      tokenStatus.value[id] = "waiting";
-    });
+    if (manageState) {
+      isRunning.value = true;
+      shouldStop.value = false;
+      tokenIds.forEach((id) => {
+        tokenStatus.value[id] = "waiting";
+      });
+    }
 
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+    const taskPromises = tokenIds.map(async (tokenId) => {
       if (shouldStop.value) return;
-      tokenStatus.value[tokenId] = "running";
+      if (manageState) {
+        tokenStatus.value[tokenId] = "running";
+      }
       const token = tokens.value.find((t) => t.id === tokenId);
 
       try {
@@ -886,7 +1030,9 @@ export function createTasksTower(deps) {
           type: "info",
         });
 
-        await ensureConnection(tokenId);
+        if (manageConnection) {
+          await ensureConnection(tokenId);
+        }
 
         // 1. 获取活动信息
         const infoRes = await tokenStore.sendMessageWithPromise(
@@ -917,7 +1063,9 @@ export function createTasksTower(deps) {
             message: `${token.name} 没有剩余道具可使用`,
             type: "warning",
           });
-          tokenStatus.value[tokenId] = "completed";
+          if (manageState) {
+            tokenStatus.value[tokenId] = "completed";
+          }
           return;
         }
 
@@ -970,7 +1118,9 @@ export function createTasksTower(deps) {
           type: "info",
         });
 
-        tokenStatus.value[tokenId] = "completed";
+        if (manageState) {
+          tokenStatus.value[tokenId] = "completed";
+        }
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `=== ${token.name} 使用道具结束，共使用 ${processedCount} 次 ===`,
@@ -979,44 +1129,66 @@ export function createTasksTower(deps) {
 
       } catch (error) {
         console.error(error);
-        tokenStatus.value[tokenId] = "failed";
+        if (manageState) {
+          tokenStatus.value[tokenId] = "failed";
+        }
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${token.name} 使用道具失败: ${error.message}`,
           type: "error",
         });
+        if (throwOnError) {
+          throw error;
+        }
       } finally {
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 断开连接`,
-          type: "info",
-        });
+        if (manageConnection) {
+          tokenStore.closeWebSocketConnection(tokenId);
+          releaseConnectionSlot();
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 断开连接`,
+            type: "info",
+          });
+        }
       }
     });
 
     await Promise.all(taskPromises);
-    isRunning.value = false;
-    currentRunningTokenId.value = null;
-    message.success("批量使用道具结束");
+    if (manageState) {
+      isRunning.value = false;
+      currentRunningTokenId.value = null;
+    }
+    if (showMessage) {
+      message.success("批量使用道具结束");
+    }
   };
 
   /**
    * 批量合成
    */
-  const batchMergeItems = async () => {
-    if (selectedTokens.value.length === 0) return;
-    isRunning.value = true;
-    shouldStop.value = false;
+  const batchMergeItems = async (options = {}) => {
+    const {
+      tokenIds = selectedTokens.value,
+      manageState = true,
+      manageConnection = true,
+      showMessage = true,
+      throwOnError = false,
+    } = options;
+    if (tokenIds.length === 0) return;
 
-    selectedTokens.value.forEach((id) => {
-      tokenStatus.value[id] = "waiting";
-    });
+    if (manageState) {
+      isRunning.value = true;
+      shouldStop.value = false;
+      tokenIds.forEach((id) => {
+        tokenStatus.value[id] = "waiting";
+      });
+    }
 
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+    const taskPromises = tokenIds.map(async (tokenId) => {
       if (shouldStop.value) return;
-      tokenStatus.value[tokenId] = "running";
+      if (manageState) {
+        tokenStatus.value[tokenId] = "running";
+      }
       const token = tokens.value.find((t) => t.id === tokenId);
 
       try {
@@ -1026,7 +1198,9 @@ export function createTasksTower(deps) {
           type: "info",
         });
 
-        await ensureConnection(tokenId);
+        if (manageConnection) {
+          await ensureConnection(tokenId);
+        }
 
         let loopCount = 0;
         const MAX_LOOPS = 20;
@@ -1185,7 +1359,9 @@ export function createTasksTower(deps) {
           await new Promise((res) => setTimeout(res, 500));
         }
 
-        tokenStatus.value[tokenId] = "completed";
+        if (manageState) {
+          tokenStatus.value[tokenId] = "completed";
+        }
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `=== ${token.name} 一键合成完成 ===`,
@@ -1194,10 +1370,119 @@ export function createTasksTower(deps) {
 
       } catch (error) {
         console.error(error);
-        tokenStatus.value[tokenId] = "failed";
+        if (manageState) {
+          tokenStatus.value[tokenId] = "failed";
+        }
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${token.name} 一键合成失败: ${error.message}`,
+          type: "error",
+        });
+        if (throwOnError) {
+          throw error;
+        }
+      } finally {
+        if (manageConnection) {
+          tokenStore.closeWebSocketConnection(tokenId);
+          releaseConnectionSlot();
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 断开连接`,
+            type: "info",
+          });
+        }
+      }
+    });
+
+    await Promise.all(taskPromises);
+    if (manageState) {
+      isRunning.value = false;
+      currentRunningTokenId.value = null;
+    }
+    if (showMessage) {
+      message.success("批量一键合成结束");
+    }
+  };
+
+  /**
+   * 一键怪异塔
+   * 执行顺序: 自动爬塔 -> 领取免费道具 -> 使用道具 -> 合成
+   */
+  const batchWeirdTower = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: "=== 开始一键怪异塔 ===",
+      type: "info",
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      tokenStatus.value[tokenId] = "running";
+      let hasError = false;
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始一键怪异塔: ${tokenName} ===`,
+          type: "info",
+        });
+
+        // 每个账号只建立一次连接，四个子任务在该连接上串行执行。
+        await ensureConnection(tokenId);
+
+        const steps = [
+          ["爬怪异塔", climbWeirdTower],
+          ["领取免费道具", batchClaimFreeEnergy],
+          ["使用道具", batchUseItems],
+          ["合成", batchMergeItems],
+        ];
+
+        for (const [stepName, step] of steps) {
+          if (shouldStop.value) break;
+
+          try {
+            await step({
+              tokenIds: [tokenId],
+              manageState: false,
+              manageConnection: false,
+              showMessage: false,
+              throwOnError: true,
+            });
+          } catch (error) {
+            hasError = true;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${stepName}失败: ${error.message}，继续后续步骤`,
+              type: "error",
+            });
+          }
+        }
+
+        tokenStatus.value[tokenId] = hasError ? "failed" : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: shouldStop.value
+            ? `=== ${tokenName} 一键怪异塔已停止 ===`
+            : `=== ${tokenName} 一键怪异塔完成 ===`,
+          type: hasError || shouldStop.value ? "warning" : "success",
+        });
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 一键怪异塔失败: ${error.message}`,
           type: "error",
         });
       } finally {
@@ -1205,7 +1490,7 @@ export function createTasksTower(deps) {
         releaseConnectionSlot();
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 断开连接`,
+          message: `${tokenName} 一键怪异塔连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
           type: "info",
         });
       }
@@ -1214,12 +1499,19 @@ export function createTasksTower(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("批量一键合成结束");
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: "=== 一键怪异塔执行完成 ===",
+      type: "success",
+    });
+    message.success("一键怪异塔结束");
   };
 
   return {
     climbTower,
     climbWeirdTower,
+    batchWeirdTower,
     batchClaimFreeEnergy,
     skinChallenge,
     batchUseItems,

@@ -84,7 +84,7 @@
       v-model:show="showSettings"
       preset="card"
       title="任务设置"
-      style="width: 90%; max-width: 400px"
+      style="width: 92%; max-width: 720px"
     >
       <template #header>
         <div class="modal-header">
@@ -173,6 +173,11 @@
             </div>
 
             <div class="switch-row">
+              <span class="switch-label">钻石宝箱+付费招募</span>
+              <n-switch v-model:value="settings.autoDiamondBoxPaidRecruit" />
+            </div>
+
+            <div class="switch-row">
               <span class="switch-label">领取邮件奖励</span>
               <n-switch v-model:value="settings.claimEmail" />
             </div>
@@ -182,8 +187,38 @@
             </div>
 
             <div class="switch-row">
+              <span class="switch-label">周一购买四圣碎片</span>
+              <n-switch v-model:value="settings.holyBeastFragmentPurchase" />
+            </div>
+
+            <div class="switch-row">
               <span class="switch-label">付费招募</span>
               <n-switch v-model:value="settings.payRecruit" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">一键答题</span>
+              <n-switch v-model:value="settings.studyEnable" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">咸王梦境</span>
+              <n-switch v-model:value="settings.dreamEnable" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">一键灯神扫荡</span>
+              <n-switch v-model:value="settings.genieSweepEnable" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">月度钓鱼补齐</span>
+              <n-switch v-model:value="settings.monthlyFishTopUpEnable" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">月度竞技场补齐</span>
+              <n-switch v-model:value="settings.monthlyArenaTopUpEnable" />
             </div>
           </div>
         </div>
@@ -312,15 +347,44 @@ const settings = reactive({
   bossFormation: 1,
   bossTimes: 2,
   claimBottle: true,
-  payRecruit: true,
-  openBox: true,
+  payRecruit: false,
+  openBox: false,
+  autoDiamondBoxPaidRecruit: false,
   arenaEnable: true,
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  holyBeastFragmentPurchase: false,
+  studyEnable: true,
+  dreamEnable: true,
+  genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
   commandDelay: 500,
   taskDelay: 500,
 });
+
+const defaultDailySettings = {
+  arenaFormation: 1,
+  bossFormation: 1,
+  bossTimes: 2,
+  claimBottle: true,
+  payRecruit: false,
+  openBox: false,
+  autoDiamondBoxPaidRecruit: false,
+  arenaEnable: true,
+  claimHangUp: true,
+  claimEmail: true,
+  blackMarketPurchase: true,
+  holyBeastFragmentPurchase: false,
+  studyEnable: true,
+  dreamEnable: true,
+  genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
+  commandDelay: 500,
+  taskDelay: 500,
+};
 
 // 每日任务列表
 const tasks = ref([
@@ -562,6 +626,10 @@ const saveSettings = (roleId, s) => {
   }
 };
 
+const applySettings = (saved) => {
+  Object.assign(settings, defaultDailySettings, saved || {});
+};
+
 // 监听设置变化
 watch(
   settings,
@@ -581,7 +649,7 @@ watch(
 
       // 加载新token的设置
       const saved = loadSettings(newToken.id);
-      if (saved) Object.assign(settings, saved);
+      applySettings(saved);
 
       // 如果WebSocket已连接，尝试获取最新角色信息
       if (isConnected.value) {
@@ -624,7 +692,7 @@ onMounted(async () => {
   const role = getCurrentRole();
   if (role) {
     const saved = loadSettings(role.roleId);
-    if (saved) Object.assign(settings, saved);
+    applySettings(saved);
   }
 
   // 初始化时的任务状态同步会通过 watch selectedTokenRoleInfo 自动处理
@@ -812,8 +880,8 @@ onBeforeUnmount(() => {
 }
 
 .settings-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--spacing-lg);
 }
 
@@ -829,8 +897,9 @@ onBeforeUnmount(() => {
 }
 
 .setting-switches {
-  display: flex;
-  flex-direction: column;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--spacing-md);
 }
 
@@ -844,6 +913,11 @@ onBeforeUnmount(() => {
   &:last-child {
     border-bottom: none;
   }
+}
+
+.setting-item :deep(.n-input-number),
+.setting-item :deep(.n-select) {
+  width: 100%;
 }
 
 .switch-label {
@@ -942,6 +1016,11 @@ onBeforeUnmount(() => {
     width: 100%;
     justify-content: space-between;
     margin-top: var(--spacing-sm);
+  }
+
+  .settings-grid,
+  .setting-switches {
+    grid-template-columns: 1fr;
   }
 }
 </style>

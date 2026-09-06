@@ -36,34 +36,36 @@ export const availableTasks = [
   { label: "重置罐子", value: "resetBottles" },
   { label: "一键领取罐子", value: "batchlingguanzi" },
   { label: "一键爬塔", value: "climbTower" },
-  { label: "一键爬怪异塔", value: "climbWeirdTower" },
-  { label: "一键答题", value: "batchStudy" },
+  { label: "一键怪异塔", value: "batchWeirdTower" },
   { label: "智能发车", value: "batchSmartSendCar" },
   { label: "一键收车", value: "batchClaimCars" },
   { label: "批量开箱", value: "batchOpenBox" },
   { label: "按积分开箱", value: "batchOpenBoxByPoints" },
   { label: "领取宝箱积分", value: "batchClaimBoxPointReward" },
+  { label: "智能宝箱周任务", value: "batchSmartBoxWeekly" },
+  { label: "智能招募周任务", value: "batchSmartRecruitWeekly" },
   { label: "批量钓鱼", value: "batchFish" },
   { label: "批量招募", value: "batchRecruit" },
   { label: "一键宝库前3层", value: "batchbaoku13" },
   { label: "一键宝库4,5层", value: "batchbaoku45" },
   { label: "一键梦境", value: "batchmengjing" },
   { label: "一键俱乐部签到", value: "batchclubsign" },
+  { label: "一键盐场报名", value: "batchSaltSignup" },
   { label: "一键竞技场战斗3次", value: "batcharenafight" },
   { label: "一键钓鱼补齐", value: "batchTopUpFish" },
+  { label: "一键金鱼杆补齐", value: "batchTopUpGoldFish" },
   { label: "一键竞技场补齐", value: "batchTopUpArena" },
-  { label: "一键领取怪异塔免费道具", value: "batchClaimFreeEnergy" },
   { label: "一键换皮闯关", value: "skinChallenge" },
   { label: "一键购买四圣碎片", value: "legion_storebuygoods" },
   { label: "一键黑市采购", value: "store_purchase" },
   { label: "免费领取珍宝阁", value: "collection_claimfreereward" },
   { label: "批量领取功法残卷", value: "batchLegacyClaim" },
+  { label: "批量开始探索功法", value: "batchLegacyBeginHangUp" },
+  { label: "批量领取特权功法", value: "batchLegacyClaimChargeReward" },
   { label: "批量赠送功法残卷", value: "batchLegacyGiftSendEnhanced" },
-  { label: "一键使用怪异塔道具", value: "batchUseItems" },
-  { label: "一键怪异塔合成", value: "batchMergeItems" },
   { label: "一键领取蟠桃园任务", value: "batchClaimPeachTasks" },
   { label: "一键扫荡灯神", value: "batchGenieSweep" },
-  { label: "一键购买梦境商品", value: "batchBuyDreamItems" },
+  { label: "主线关卡信息获取", value: "batchPushMainLevelInfo" },
 ];
 
 // 车辆研究消耗表
@@ -76,6 +78,7 @@ export const CarresearchItem = [
 
 // 月度任务目标
 export const FISH_TARGET = 320;
+export const GOLD_FISH_TARGET = 160;
 export const ARENA_TARGET = 240;
 
 // 任务表列配置
@@ -118,12 +121,18 @@ export const defaultSettings = {
   bossFormation: 1,
   bossTimes: 2,
   claimBottle: true,
-  payRecruit: true,
-  openBox: true,
+  payRecruit: false,
+  openBox: false,
+  autoDiamondBoxPaidRecruit: false,
   arenaEnable: true,
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  studyEnable: true,
+  dreamEnable: true,
+  genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
 };
 
 // 默认批量设置
@@ -144,6 +153,19 @@ export const defaultBatchSettings = {
   connectionTimeout: 10000,
   reconnectDelay: 1000,
   maxLogEntries: 1000,
+  // 页面刷新配置
+  enableRefresh: false,
+  refreshType: "interval", // 'interval' | 'cron'
+  refreshInterval: 360,
+  refreshCronExpression: "",
+  refreshMaxStaleHours: 0,
+  enableMissedTaskReExecution: false,
+  // 推送通知配置
+  wxpusherEnabled: false,
+  wxpusherAppToken: "",
+  wxpusherUids: "",
+  pushplusEnabled: false,
+  pushplusToken: "",
   // 智能发车阈值设置
   smartDepartureGoldThreshold: 0,
   smartDepartureRecruitThreshold: 0,
@@ -159,12 +181,18 @@ export const defaultTemplate = {
   bossFormation: 1,
   bossTimes: 2,
   claimBottle: true,
-  payRecruit: true,
-  openBox: true,
+  payRecruit: false,
+  openBox: false,
+  autoDiamondBoxPaidRecruit: false,
   arenaEnable: true,
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  studyEnable: true,
+  dreamEnable: true,
+  genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
 };
 
 // 默认任务表单

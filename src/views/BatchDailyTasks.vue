@@ -48,6 +48,18 @@
                 <n-button size="small" @click="showTasksModal = true">
                   查看定时任务
                 </n-button>
+                <n-button
+                  size="small"
+                  type="warning"
+                  secondary
+                  :disabled="isRunning || invalidScheduledTokenCount === 0"
+                  @click="cleanupInvalidBatchTokens"
+                >
+                  清理无效账号
+                  <span v-if="invalidScheduledTokenCount > 0">
+                    ({{ invalidScheduledTokenCount }})
+                  </span>
+                </n-button>
                 <n-button size="small" @click="exportConfig">
                   导出配置
                 </n-button>
@@ -186,9 +198,10 @@
             </n-space>
           </div>
 
-          <!-- 排序按钮组 -->
+          <!-- 手动顺序控制 -->
           <div class="sort-buttons" style="margin-bottom: 12px">
             <n-space align="center">
+              <span style="font-size: 12px; color: #86909c">按字段重排：</span>
               <n-button-group size="small">
                 <n-button
                   @click="toggleSort('name')"
@@ -236,7 +249,10 @@
                 :y-gap="8"
                 :cols="batchSettings.tokenListColumns"
               >
-                <n-grid-item v-for="token in sortedTokens" :key="token.id">
+                <n-grid-item
+                  v-for="(token, index) in sortedTokens"
+                  :key="token.id"
+                >
                   <div class="token-row">
                     <n-checkbox
                       :value="token.id"
@@ -274,6 +290,26 @@
                         </div>
                       </div>
                     </n-checkbox>
+                    <n-button
+                      size="tiny"
+                      circle
+                      quaternary
+                      :disabled="index === 0"
+                      title="上移"
+                      @click.stop="moveTokenOrder(token.id, -1)"
+                    >
+                      ↑
+                    </n-button>
+                    <n-button
+                      size="tiny"
+                      circle
+                      quaternary
+                      :disabled="index === sortedTokens.length - 1"
+                      title="下移"
+                      @click.stop="moveTokenOrder(token.id, 1)"
+                    >
+                      ↓
+                    </n-button>
                     <n-button
                       size="tiny"
                       circle
@@ -334,10 +370,10 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="batchStudy"
+                  @click="batchSaltSignup"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  一键答题
+                  一键盐场报名
                 </n-button>
                 <n-button
                   size="small"
@@ -366,8 +402,7 @@
                   @click="batchClaimCars"
                   :disabled="
                     isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isCarActivityOpen
+                    selectedTokens.length === 0
                   "
                 >
                   一键收车
@@ -429,16 +464,27 @@
                 >
                   一键领取蟠桃园任务
                 </n-button>
+              </n-space>
+              <n-space>
+                <n-popselect
+                  :value="footballPick"
+                  :options="footballPickOptions"
+                  trigger="click"
+                  @update:value="onFootballPickChange"
+                >
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    一键竞猜({{ footballPickLabel }})
+                  </n-button>
+                </n-popselect>
                 <n-button
                   size="small"
-                  @click="batchBuyDreamItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !ismengjingActivityOpen
-                  "
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  @click="batchApexGuess(apexScheduleId)"
                 >
-                  一键购买梦境商品
+                  逐鹿盐山竞猜
                 </n-button>
               </n-space>
             </n-tab-pane>
@@ -472,47 +518,14 @@
               <n-space>
                 <n-button
                   size="small"
-                  @click="climbWeirdTower"
+                  @click="batchWeirdTower"
                   :disabled="
                     isRunning ||
                     selectedTokens.length === 0 ||
                     !isWeirdTowerActivityOpen
                   "
                 >
-                  一键爬怪异塔
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchUseItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键使用怪异塔道具
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchMergeItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键怪异塔合成
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimFreeEnergy"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键领取怪异塔免费道具
+                  一键怪异塔
                 </n-button>
               </n-space>
             </n-tab-pane>
@@ -562,6 +575,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="openHeroLevelUpgradeModal"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  批量升级武将
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchBookUpgrade"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -598,6 +618,20 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   批量功法残卷领取
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchLegacyBeginHangUp"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  批量开始探索功法
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchLegacyClaimChargeReward"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  批量领取特权功法
                 </n-button>
                 <n-button
                   size="small"
@@ -639,6 +673,38 @@
                   :title="isWarGuessActivityOpen ? '' : warGuessActivityTip"
                 >
                   月赛助威
+                </n-button>
+              </n-space>
+            </n-tab-pane>
+            <n-tab-pane name="small-account" tab="小号任务">
+              <n-space>
+                <n-button
+                  size="small"
+                  @click="batchTopUpGoldFish"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键金鱼杆补齐
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchPushMainLevelInfo"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  主线关卡信息获取
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="openSmartBoxWeeklyModal"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  智能宝箱周任务
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchSmartRecruitWeekly"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  智能招募周任务
                 </n-button>
               </n-space>
             </n-tab-pane>
@@ -684,15 +750,21 @@
             :indicator-placement="'inside'"
             processing
           />
-          <div class="log-container" ref="logContainer">
-            <div
-              v-for="(log, index) in filteredLogs"
-              :key="index"
-              class="log-item"
-              :class="log.type"
-            >
-              <span class="time">{{ log.time }}</span>
-              <span class="message">{{ log.message }}</span>
+          <div
+            class="log-container"
+            ref="logContainer"
+            @wheel.stop
+          >
+            <div class="log-content">
+              <div
+                v-for="(log, index) in filteredLogs"
+                :key="index"
+                class="log-item"
+                :class="log.type"
+              >
+                <span class="time">{{ log.time }}</span>
+                <span class="message">{{ log.message }}</span>
+              </div>
             </div>
           </div>
         </n-card>
@@ -704,10 +776,10 @@
       v-model:show="showSettingsModal"
       preset="card"
       :title="`任务设置 - ${currentSettingsTokenName}`"
-      style="width: 90%; max-width: 400px"
+      style="width: 92%; max-width: 720px"
     >
       <div class="settings-content">
-        <div class="settings-grid">
+        <div class="settings-grid daily-settings-grid">
           <div class="setting-item">
             <label class="setting-label">竞技场阵容</label>
             <n-select
@@ -740,7 +812,7 @@
               size="small"
             />
           </div>
-          <div class="setting-switches">
+          <div class="setting-switches daily-setting-switches">
             <div class="switch-row">
               <span class="switch-label">领罐子</span
               ><n-switch v-model:value="currentSettings.claimBottle" />
@@ -758,6 +830,12 @@
               ><n-switch v-model:value="currentSettings.openBox" />
             </div>
             <div class="switch-row">
+              <span class="switch-label">钻石宝箱+付费招募</span
+              ><n-switch
+                v-model:value="currentSettings.autoDiamondBoxPaidRecruit"
+              />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">领取邮件奖励</span
               ><n-switch v-model:value="currentSettings.claimEmail" />
             </div>
@@ -766,8 +844,32 @@
               ><n-switch v-model:value="currentSettings.blackMarketPurchase" />
             </div>
             <div class="switch-row">
+              <span class="switch-label">周一购买四圣碎片</span
+              ><n-switch v-model:value="currentSettings.holyBeastFragmentPurchase" />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">付费招募</span
               ><n-switch v-model:value="currentSettings.payRecruit" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">一键答题</span
+              ><n-switch v-model:value="currentSettings.studyEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">咸王梦境</span
+              ><n-switch v-model:value="currentSettings.dreamEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">一键灯神扫荡</span
+              ><n-switch v-model:value="currentSettings.genieSweepEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">月度钓鱼补齐</span
+              ><n-switch v-model:value="currentSettings.monthlyFishTopUpEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">月度竞技场补齐</span
+              ><n-switch v-model:value="currentSettings.monthlyArenaTopUpEnable" />
             </div>
           </div>
         </div>
@@ -782,11 +884,11 @@
       v-model:show="showTaskTemplateModal"
       preset="card"
       :title="currentTemplateId ? '编辑任务模板' : '任务模板设置'"
-      style="width: 90%; max-width: 400px"
+      style="width: 92%; max-width: 720px"
     >
       <div class="settings-content">
-        <div class="settings-grid">
-          <div class="setting-item">
+        <div class="settings-grid daily-settings-grid">
+          <div class="setting-item daily-settings-full">
             <label class="setting-label">模板名称</label>
             <n-input
               v-model:value="currentTemplateName"
@@ -826,7 +928,7 @@
               size="small"
             />
           </div>
-          <div class="setting-switches">
+          <div class="setting-switches daily-setting-switches">
             <div class="switch-row">
               <span class="switch-label">领罐子</span
               ><n-switch v-model:value="currentTemplate.claimBottle" />
@@ -844,6 +946,12 @@
               ><n-switch v-model:value="currentTemplate.openBox" />
             </div>
             <div class="switch-row">
+              <span class="switch-label">钻石宝箱+付费招募</span
+              ><n-switch
+                v-model:value="currentTemplate.autoDiamondBoxPaidRecruit"
+              />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">领取邮件奖励</span
               ><n-switch v-model:value="currentTemplate.claimEmail" />
             </div>
@@ -852,8 +960,32 @@
               ><n-switch v-model:value="currentTemplate.blackMarketPurchase" />
             </div>
             <div class="switch-row">
+              <span class="switch-label">周一购买四圣碎片</span
+              ><n-switch v-model:value="currentTemplate.holyBeastFragmentPurchase" />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">付费招募</span
               ><n-switch v-model:value="currentTemplate.payRecruit" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">一键答题</span
+              ><n-switch v-model:value="currentTemplate.studyEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">咸王梦境</span
+              ><n-switch v-model:value="currentTemplate.dreamEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">一键灯神扫荡</span
+              ><n-switch v-model:value="currentTemplate.genieSweepEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">月度钓鱼补齐</span
+              ><n-switch v-model:value="currentTemplate.monthlyFishTopUpEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">月度竞技场补齐</span
+              ><n-switch v-model:value="currentTemplate.monthlyArenaTopUpEnable" />
             </div>
           </div>
         </div>
@@ -1498,6 +1630,115 @@
       </div>
     </n-modal>
 
+    <!-- Smart Box Weekly Task Modal -->
+    <n-modal
+      v-model:show="showSmartBoxWeeklyModal"
+      preset="card"
+      title="智能宝箱周任务"
+      style="width: 90%; max-width: 420px"
+    >
+      <div class="settings-content">
+        <n-alert type="info" show-icon style="margin-bottom: 16px">
+          请选择本次任务允许开启的宝箱类型，至少选择一种。
+        </n-alert>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label class="setting-label">宝箱类型</label>
+            <n-checkbox-group v-model:value="smartBoxWeeklySettings.smartBoxTypes">
+              <n-space vertical>
+                <n-checkbox
+                  v-for="option in boxTypeOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </n-checkbox>
+              </n-space>
+            </n-checkbox-group>
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">任务组数</label>
+            <n-input-number
+              v-model:value="smartBoxWeeklySettings.smartBoxGroupCount"
+              :min="1"
+              :max="4"
+              :step="1"
+              size="small"
+              style="width: 100%"
+            />
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top: 20px; text-align: right">
+          <n-button
+            @click="showSmartBoxWeeklyModal = false"
+            style="margin-right: 12px"
+          >
+            取消
+          </n-button>
+          <n-button type="primary" @click="executeSmartBoxWeekly">
+            开始执行
+          </n-button>
+        </div>
+      </div>
+    </n-modal>
+
+    <!-- Hero Level Upgrade Modal -->
+    <n-modal
+      v-model:show="showHeroLevelUpgradeModal"
+      preset="card"
+      title="批量升级武将"
+      style="width: 90%; max-width: 420px"
+    >
+      <div class="settings-content">
+        <n-alert type="info" show-icon style="margin-bottom: 16px">
+          将对当前选中的 {{ selectedTokens.length }} 个账号执行升级。所有选中武将共用目标等级，达到目标等级的武将不会操作，升级过程中会自动处理进阶。
+        </n-alert>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label class="setting-label">选择武将（可多选）</label>
+            <n-select
+              v-model:value="heroLevelUpgradeForm.heroIds"
+              :options="heroLevelUpgradeHeroOptions"
+              multiple
+              filterable
+              max-tag-count="responsive"
+              placeholder="请选择武将"
+            />
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px">
+              <n-button
+                v-for="faction in heroLevelUpgradeFactionOptions"
+                :key="faction.value"
+                size="small"
+                :type="isHeroFactionSelected(faction.value) ? 'primary' : 'default'"
+                @click="toggleHeroFaction(faction.value)"
+              >
+                {{ faction.label }}
+              </n-button>
+            </div>
+          </div>
+          <div class="setting-item">
+            <label class="setting-label">目标等级</label>
+            <n-select
+              v-model:value="heroLevelUpgradeForm.targetLevel"
+              :options="heroLevelUpgradeLevelOptions"
+              placeholder="请选择目标等级"
+            />
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top: 20px; text-align: right">
+          <n-button
+            @click="showHeroLevelUpgradeModal = false"
+            style="margin-right: 12px"
+          >
+            取消
+          </n-button>
+          <n-button type="primary" @click="executeHeroLevelUpgrade">
+            开始执行
+          </n-button>
+        </div>
+      </div>
+    </n-modal>
+
     <!-- Dream Buy Modal -->
     <n-modal
       v-model:show="showDreamBuyModal"
@@ -1625,6 +1866,13 @@
           <div style="margin-bottom: 8px">
             <span style="color: #6b7280">选中任务：</span>
             <span>{{ task.selectedTasks.length }} 个</span>
+          </div>
+          <div
+            v-if="task.legacyExcludedTokens?.length"
+            style="margin-bottom: 8px"
+          >
+            <span style="color: #6b7280">功法跳过：</span>
+            <span>{{ task.legacyExcludedTokens.length }} 个</span>
           </div>
           <div style="display: flex; gap: 8px">
             <n-button size="tiny" @click="editTask(task)"> 编辑 </n-button>
@@ -1877,6 +2125,104 @@
                 </n-tab-pane>
               </n-tabs>
             </n-checkbox-group>
+          </div>
+          <div
+            v-if="hasSmartBoxWeeklySelected || hasSmartRecruitWeeklySelected"
+            class="setting-item"
+          >
+            <label class="setting-label">智能周任务配置</label>
+            <div
+              v-if="hasSmartBoxWeeklySelected"
+              style="margin-top: 8px"
+            >
+              <div style="margin-bottom: 6px; color: #4b5563">
+                智能宝箱周任务
+              </div>
+              <n-space align="center">
+                <span style="font-size: 12px; color: #86909c">宝箱类型</span>
+                <n-select
+                  v-model:value="
+                    taskForm.taskConfig.batchSmartBoxWeekly.smartBoxTypes
+                  "
+                  :options="boxTypeOptions"
+                  multiple
+                  max-tag-count="responsive"
+                  size="small"
+                  style="width: 220px"
+                />
+                <span style="font-size: 12px; color: #86909c">任务组数</span>
+                <n-input-number
+                  v-model:value="
+                    taskForm.taskConfig.batchSmartBoxWeekly.smartBoxGroupCount
+                  "
+                  :min="1"
+                  :max="4"
+                  :step="1"
+                  size="small"
+                  style="width: 90px"
+                />
+              </n-space>
+            </div>
+            <div
+              v-if="hasSmartRecruitWeeklySelected"
+              style="margin-top: 12px"
+            >
+              <div style="margin-bottom: 6px; color: #4b5563">
+                智能招募周任务
+              </div>
+              <div style="font-size: 12px; color: #86909c">
+                固定规则：每轮起始招募道具达到360个后，先完成360次、领取邮件，再完成40次，共400次。
+              </div>
+              <n-space align="center" style="margin-top: 8px">
+                <span style="font-size: 12px; color: #86909c">任务轮次</span>
+                <n-input-number
+                  v-model:value="
+                    taskForm.taskConfig.batchSmartRecruitWeekly.roundCount
+                  "
+                  :min="1"
+                  :max="4"
+                  :step="1"
+                  size="small"
+                  style="width: 90px"
+                />
+              </n-space>
+            </div>
+          </div>
+          <div class="setting-item" v-if="hasLegacyTaskSelected">
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 8px;
+              "
+            >
+              <label class="setting-label">功法跳过账号</label>
+              <n-space size="small">
+                <n-button size="small" @click="selectAllLegacyExcludedTokens">
+                  全选
+                </n-button>
+                <n-button size="small" @click="clearLegacyExcludedTokens">
+                  全不选
+                </n-button>
+              </n-space>
+            </div>
+            <n-checkbox-group v-model:value="taskForm.legacyExcludedTokens">
+              <n-grid :cols="2" :x-gap="12" :y-gap="8">
+                <n-grid-item
+                  v-for="token in legacyExcludableTokens"
+                  :key="token.id"
+                >
+                  <n-checkbox :value="token.id">{{ token.name }}</n-checkbox>
+                </n-grid-item>
+              </n-grid>
+            </n-checkbox-group>
+            <div
+              v-if="legacyExcludableTokens.length === 0"
+              style="font-size: 12px; color: #86909c; margin-top: 8px"
+            >
+              请先选择账号
+            </div>
           </div>
         </div>
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
@@ -2411,6 +2757,22 @@
                   align-items: center;
                 "
               >
+                <div class="setting-label-block">
+                  <label class="setting-label">漏执行自动补做</label>
+                  <span class="setting-description">
+                    关闭后不会检查漏执行任务，也不会发送漏执行通知或自动补做。
+                  </span>
+                </div>
+                <n-switch v-model:value="batchSettings.enableMissedTaskReExecution" />
+              </div>
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: row;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
                 <label class="setting-label">定时刷新页面</label>
                 <n-switch v-model:value="batchSettings.enableRefresh" />
               </div>
@@ -2423,6 +2785,21 @@
                 "
                 v-if="batchSettings.enableRefresh"
               >
+                <label class="setting-label">刷新方式</label>
+                <n-radio-group v-model:value="batchSettings.refreshType" size="small">
+                  <n-radio value="interval">固定间隔</n-radio>
+                  <n-radio value="cron">Cron 表达式</n-radio>
+                </n-radio-group>
+              </div>
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: row;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+                v-if="batchSettings.enableRefresh && batchSettings.refreshType === 'interval'"
+              >
                 <label class="setting-label">刷新间隔(分钟)</label>
                 <n-input-number
                   v-model:value="batchSettings.refreshInterval"
@@ -2432,6 +2809,36 @@
                   size="small"
                   style="width: 100px"
                 />
+              </div>
+              <div
+                class="setting-item"
+                v-if="batchSettings.enableRefresh && batchSettings.refreshType === 'cron'"
+              >
+                <label class="setting-label">Cron 表达式</label>
+                <n-input
+                  v-model:value="batchSettings.refreshCronExpression"
+                  placeholder="例如 0 */6 * * * 表示每6小时整点刷新"
+                  size="small"
+                />
+                <div class="cron-parser" v-if="batchSettings.refreshCronExpression">
+                  <div v-if="refreshCronValidation.valid" class="cron-validation success">
+                    <n-text type="success">✓ {{ refreshCronValidation.message }}</n-text>
+                  </div>
+                  <div v-else class="cron-validation error">
+                    <n-text type="error">✗ {{ refreshCronValidation.message }}</n-text>
+                  </div>
+                  <div
+                    v-if="refreshCronValidation.valid && refreshCronNextRuns.length > 0"
+                    class="cron-next-runs"
+                  >
+                    <h4>未来5次刷新时间：</h4>
+                    <ul>
+                      <li v-for="(run, index) in refreshCronNextRuns" :key="index">
+                        {{ run }}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             </div>
             <n-divider title-placement="left" style="margin: 12px 0 8px 0">WxPusher 推送通知</n-divider>
@@ -2853,6 +3260,11 @@ import {
 import { useTokenStore, gameTokens, tokenGroups } from "@/stores/tokenStore";
 import { $emit } from "@/stores/events/index.ts";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
+import {
+  buildSnapshotWithIndexedDB,
+  applySnapshotWithIndexedDB,
+  sanitizeScheduledTaskForSnapshot,
+} from "@/utils/backup/snapshotBuilder";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
 import { useMessage } from "naive-ui";
 import { Settings } from "@vicons/ionicons5";
@@ -2880,8 +3292,10 @@ import {
   parseCronField,
   calculateNextRuns,
   calculateNextExecutionTime,
+  calculateLastExpectedExecutionTime,
   formatTimeDifference,
   matchesCronExpression,
+  evaluateRefresh,
   // Connection manager
   createConnectionManager,
   getActivityStatus,
@@ -2909,10 +3323,15 @@ import {
   createTasksArena,
   createTasksStore,
   createTasksLegacy,
+  createTasksSalt,
+  createTasksMainLevel,
+  createTasksFootball,
+  createTasksApex,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
-import { sendWxPusherMessage, sendPushPlusMessage, formatBatchTaskNotification, formatScheduledTaskNotification } from "@/utils/wxpusher";
+import { HERO_DICT } from "@/utils/HeroList";
+import { sendWxPusherMessage, sendPushPlusMessage, formatScheduledTaskNotification, formatMissedExecutionNotification } from "@/utils/wxpusher";
 
 // Initialize token store, message service, and task runner
 const tokenStore = useTokenStore();
@@ -2929,31 +3348,85 @@ const sortConfig = ref(
       },
 );
 
-// 计算属性 - 从gameData中获取塔相关信息
-const evoTowerInfo = computed(() => {
-  const data = tokenStore.gameData?.evoTowerInfo || null;
-  return data;
-});
+const TOKEN_ORDER_STORAGE_KEY = "batchTokenOrder";
 
-const weirdTowerData = computed(() => {
-  return evoTowerInfo.value?.evoTower || null;
-});
+const loadBatchTokenOrder = () => {
+  try {
+    const raw = localStorage.getItem(TOKEN_ORDER_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error("Failed to load token order:", error);
+    return [];
+  }
+};
 
-const currentTowerId = computed(() => {
-  return weirdTowerData.value?.towerId || 0;
-});
+const batchTokenOrder = ref(loadBatchTokenOrder());
 
-const towerEnergy = computed(() => {
-  return weirdTowerData.value?.energy || 0;
-});
+const saveBatchTokenOrder = () => {
+  try {
+    localStorage.setItem(
+      TOKEN_ORDER_STORAGE_KEY,
+      JSON.stringify(batchTokenOrder.value),
+    );
+  } catch (error) {
+    console.error("Failed to save token order:", error);
+  }
+};
 
-// 排序后的游戏角色Token列表
-const sortedTokens = computed(() => {
+const buildNormalizedTokenOrder = (order = batchTokenOrder.value) => {
+  const validIds = new Set(tokenStore.gameTokens.map((token) => token.id));
+  const normalized = [];
+  const seen = new Set();
+
+  order.forEach((tokenId) => {
+    if (validIds.has(tokenId) && !seen.has(tokenId)) {
+      normalized.push(tokenId);
+      seen.add(tokenId);
+    }
+  });
+
+  tokenStore.gameTokens.forEach((token) => {
+    if (!seen.has(token.id)) {
+      normalized.push(token.id);
+      seen.add(token.id);
+    }
+  });
+
+  return normalized;
+};
+
+const normalizeStoredTokenOrder = () => {
+  const normalized = buildNormalizedTokenOrder();
+  if (JSON.stringify(normalized) !== JSON.stringify(batchTokenOrder.value)) {
+    batchTokenOrder.value = normalized;
+    saveBatchTokenOrder();
+  }
+  return normalized;
+};
+
+const getManualOrderedTokens = () => {
+  const order = buildNormalizedTokenOrder();
+  const tokenMap = new Map(tokenStore.gameTokens.map((token) => [token.id, token]));
+  return order.map((tokenId) => tokenMap.get(tokenId)).filter(Boolean);
+};
+
+const normalizeTokenIdsByBatchOrder = (tokenIds = []) => {
+  const selectedIdSet = new Set(tokenIds);
+  return buildNormalizedTokenOrder().filter((tokenId) =>
+    selectedIdSet.has(tokenId),
+  );
+};
+
+const setSelectedTokensInBatchOrder = (tokenIds = []) => {
+  selectedTokens.value = normalizeTokenIdsByBatchOrder(tokenIds);
+};
+
+const sortTokensByField = (field, direction) => {
   return [...tokenStore.gameTokens].sort((tokenA, tokenB) => {
     let valueA, valueB;
 
-    // 根据排序字段获取比较值
-    switch (sortConfig.value.field) {
+    switch (field) {
       case "name":
         valueA = tokenA.name?.toLowerCase() || "";
         valueB = tokenB.name?.toLowerCase() || "";
@@ -2975,15 +3448,37 @@ const sortedTokens = computed(() => {
         valueB = tokenB.name?.toLowerCase() || "";
     }
 
-    // 根据排序方向比较值
     if (valueA < valueB) {
-      return sortConfig.value.direction === "asc" ? -1 : 1;
+      return direction === "asc" ? -1 : 1;
     }
     if (valueA > valueB) {
-      return sortConfig.value.direction === "asc" ? 1 : -1;
+      return direction === "asc" ? 1 : -1;
     }
     return 0;
   });
+};
+
+// 计算属性 - 从gameData中获取塔相关信息
+const evoTowerInfo = computed(() => {
+  const data = tokenStore.gameData?.evoTowerInfo || null;
+  return data;
+});
+
+const weirdTowerData = computed(() => {
+  return evoTowerInfo.value?.evoTower || null;
+});
+
+const currentTowerId = computed(() => {
+  return weirdTowerData.value?.towerId || 0;
+});
+
+const towerEnergy = computed(() => {
+  return weirdTowerData.value?.energy || 0;
+});
+
+// 排序后的游戏角色Token列表
+const sortedTokens = computed(() => {
+  return getManualOrderedTokens();
 });
 
 // 切换排序
@@ -3000,12 +3495,46 @@ const toggleSort = (field) => {
 
   // 保存排序设置到localStorage
   localStorage.setItem("tokenSortConfig", JSON.stringify(sortConfig.value));
+
+  batchTokenOrder.value = sortTokensByField(
+    sortConfig.value.field,
+    sortConfig.value.direction,
+  ).map((token) => token.id);
+  saveBatchTokenOrder();
+  selectedTokens.value = normalizeTokenIdsByBatchOrder(selectedTokens.value);
+  taskForm.selectedTokens = normalizeTokenIdsByBatchOrder(
+    taskForm.selectedTokens,
+  );
 };
 
 // 获取排序图标
 const getSortIcon = (field) => {
   if (sortConfig.value.field !== field) return null;
   return sortConfig.value.direction === "asc" ? "↑" : "↓";
+};
+
+const moveTokenOrder = (tokenId, direction) => {
+  const order = normalizeStoredTokenOrder();
+  const currentIndex = order.indexOf(tokenId);
+  if (currentIndex === -1) return;
+
+  const nextIndex = currentIndex + direction;
+  if (nextIndex < 0 || nextIndex >= order.length) return;
+
+  const nextOrder = [...order];
+  [nextOrder[currentIndex], nextOrder[nextIndex]] = [
+    nextOrder[nextIndex],
+    nextOrder[currentIndex],
+  ];
+  batchTokenOrder.value = nextOrder;
+  saveBatchTokenOrder();
+  selectedTokens.value = normalizeTokenIdsByBatchOrder(selectedTokens.value);
+  selectedTokensForApply.value = normalizeTokenIdsByBatchOrder(
+    selectedTokensForApply.value,
+  );
+  taskForm.selectedTokens = normalizeTokenIdsByBatchOrder(
+    taskForm.selectedTokens,
+  );
 };
 
 const tokens = computed(() => tokenStore.gameTokens);
@@ -3310,12 +3839,19 @@ const currentSettings = reactive({
   bossFormation: 1,
   bossTimes: 2,
   claimBottle: true,
-  payRecruit: true,
-  openBox: true,
+  payRecruit: false,
+  openBox: false,
+  autoDiamondBoxPaidRecruit: false,
   arenaEnable: true,
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  holyBeastFragmentPurchase: false,
+  studyEnable: true,
+  dreamEnable: true,
+  genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
 });
 
 // Task Template State
@@ -3334,12 +3870,19 @@ const currentTemplate = reactive({
   bossFormation: 1,
   bossTimes: 2,
   claimBottle: true,
-  payRecruit: true,
-  openBox: true,
+  payRecruit: false,
+  openBox: false,
+  autoDiamondBoxPaidRecruit: false,
   arenaEnable: true,
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  holyBeastFragmentPurchase: false,
+  studyEnable: true,
+  dreamEnable: true,
+  genieSweepEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
 });
 
 // Account Template References
@@ -3377,6 +3920,89 @@ const helperSettings = reactive({
   targetPoints: 1000,
 });
 
+const showSmartBoxWeeklyModal = ref(false);
+const smartBoxWeeklySettings = reactive({
+  smartBoxTypes: [2002, 2003, 2004],
+  smartBoxGroupCount: 1,
+});
+
+const showHeroLevelUpgradeModal = ref(false);
+const heroLevelUpgradeForm = reactive({
+  heroIds: [Number(Object.keys(HERO_DICT)[0])],
+  targetLevel: 50,
+});
+const heroLevelUpgradeHeroOptions = Object.entries(HERO_DICT).map(
+  ([heroId, hero]) => ({
+    label: `${hero.name} (${hero.type})`,
+    value: Number(heroId),
+  }),
+);
+const heroLevelUpgradeFactionOptions = [
+  { label: "魏国", value: "魏国" },
+  { label: "蜀国", value: "蜀国" },
+  { label: "吴国", value: "吴国" },
+  { label: "群雄", value: "群雄" },
+];
+const heroLevelUpgradeLevelOptions = Array.from({ length: 120 }, (_, index) => {
+  const level = (index + 1) * 50;
+  return { label: `${level}级`, value: level };
+});
+
+const getHeroIdsByFaction = (faction) =>
+  heroLevelUpgradeHeroOptions
+    .filter((option) => HERO_DICT[option.value]?.type === faction)
+    .map((option) => option.value);
+
+const isHeroFactionSelected = (faction) => {
+  const factionHeroIds = getHeroIdsByFaction(faction);
+  return (
+    factionHeroIds.length > 0 &&
+    factionHeroIds.every((heroId) => heroLevelUpgradeForm.heroIds.includes(heroId))
+  );
+};
+
+const toggleHeroFaction = (faction) => {
+  const factionHeroIds = getHeroIdsByFaction(faction);
+  const selectedHeroIds = new Set(heroLevelUpgradeForm.heroIds);
+  const shouldRemove = factionHeroIds.every((heroId) => selectedHeroIds.has(heroId));
+
+  factionHeroIds.forEach((heroId) => {
+    if (shouldRemove) {
+      selectedHeroIds.delete(heroId);
+    } else {
+      selectedHeroIds.add(heroId);
+    }
+  });
+
+  heroLevelUpgradeForm.heroIds = heroLevelUpgradeHeroOptions
+    .map((option) => option.value)
+    .filter((heroId) => selectedHeroIds.has(heroId));
+};
+
+const openHeroLevelUpgradeModal = () => {
+  if (selectedTokens.value.length === 0) {
+    message.warning("请先选择至少一个账号");
+    return;
+  }
+
+  showHeroLevelUpgradeModal.value = true;
+};
+
+const executeHeroLevelUpgrade = async () => {
+  const { heroIds, targetLevel } = heroLevelUpgradeForm;
+  if (heroIds.length === 0) {
+    message.warning("请至少选择一个武将");
+    return;
+  }
+  if (!Number.isInteger(targetLevel) || targetLevel % 50 !== 0) {
+    message.warning("目标等级必须是50的整数倍");
+    return;
+  }
+
+  showHeroLevelUpgradeModal.value = false;
+  await batchHeroLevelUpgrade(heroIds, targetLevel);
+};
+
 const helperModalTitle = computed(() => {
   const titles = {
     box: "批量开宝箱",
@@ -3412,7 +4038,7 @@ const batchSettings = reactive({
   // 延迟配置（毫秒）
   commandDelay: 500, // 命令间延迟
   taskDelay: 500, // 任务间延迟
-  actionDelay: 300, // 一般操作延迟（开箱、钓鱼、招募等）
+  actionDelay: 750, // 一般操作延迟（开箱、钓鱼、招募等）
   battleDelay: 500, // 战斗延迟（宝库、竞技场等）
   refreshDelay: 1000, // 刷新延迟（发车刷新等）
   longDelay: 3000, // 长延迟（功法赠送等）
@@ -3424,7 +4050,11 @@ const batchSettings = reactive({
   maxLogEntries: 1000,
   // 页面刷新配置
   enableRefresh: false,
-  refreshInterval: 360, // 分钟
+  refreshType: "interval", // 'interval' | 'cron'
+  refreshInterval: 360, // 分钟（interval 模式）
+  refreshCronExpression: "", // cron 模式表达式
+  refreshMaxStaleHours: 0, // 兜底：距上次刷新超过 N 小时强制刷一次；0 关闭
+  enableMissedTaskReExecution: false, // 定时任务漏执行后是否自动补做
   // 推送通知配置
   wxpusherEnabled: false,
   wxpusherAppToken: "",
@@ -3497,6 +4127,38 @@ const scheduledTasks = ref([]); // List of all scheduled tasks
 const showTaskModal = ref(false); // Control the visibility of the add/edit task modal
 const showTasksModal = ref(false); // Control the visibility of the tasks list modal
 const editingTask = ref(null); // Currently editing task
+
+const createScheduledTaskConfig = (config = {}) => ({
+  batchSmartBoxWeekly: {
+    smartBoxTypes: Array.isArray(config.batchSmartBoxWeekly?.smartBoxTypes)
+      ? [...config.batchSmartBoxWeekly.smartBoxTypes]
+      : [2002, 2003, 2004],
+    smartBoxGroupCount:
+      Math.min(
+        4,
+        Math.max(
+          1,
+          Math.trunc(
+            Number(config.batchSmartBoxWeekly?.smartBoxGroupCount) || 1,
+          ),
+        ),
+      ),
+  },
+  batchSmartRecruitWeekly: {
+    startCount: 360,
+    totalCount: 400,
+    roundCount: Math.min(
+      4,
+      Math.max(
+        1,
+        Math.trunc(
+          Number(config.batchSmartRecruitWeekly?.roundCount) || 1,
+        ),
+      ),
+    ),
+  },
+});
+
 const taskForm = reactive({
   name: "", // Task name
   runType: "daily", // 'daily' or 'cron'
@@ -3504,8 +4166,126 @@ const taskForm = reactive({
   cronExpression: "", // Cron expression for complex scheduling
   selectedTokens: [], // Selected token IDs
   selectedTasks: [], // Selected task function names
+  taskConfig: createScheduledTaskConfig(),
+  legacyExcludedTokens: [], // Token IDs skipped by legacy tasks
   enabled: true, // Whether the task is enabled
 });
+
+const integratedDailyTaskNames = ["claimHangUpRewardsFiveTimes"];
+const legacyTaskNames = [
+  "batchLegacyClaim",
+  "batchLegacyBeginHangUp",
+  "batchLegacyClaimChargeReward",
+  "batchLegacyGiftSendEnhanced",
+];
+
+const isLegacyTaskName = (taskName) => legacyTaskNames.includes(taskName);
+
+const hasLegacyTaskSelected = computed(() =>
+  taskForm.selectedTasks.some((taskName) => isLegacyTaskName(taskName)),
+);
+
+const hasSmartBoxWeeklySelected = computed(() =>
+  taskForm.selectedTasks.includes("batchSmartBoxWeekly"),
+);
+
+const hasSmartRecruitWeeklySelected = computed(() =>
+  taskForm.selectedTasks.includes("batchSmartRecruitWeekly"),
+);
+
+const syncTokenIdListOrder = (getValue, setValue) => {
+  const current = getValue();
+  const normalized = normalizeTokenIdsByBatchOrder(current);
+  if (JSON.stringify(current) !== JSON.stringify(normalized)) {
+    setValue(normalized);
+  }
+};
+
+watch(
+  () => tokenStore.gameTokens.map((token) => token.id),
+  () => {
+    normalizeStoredTokenOrder();
+    syncTokenIdListOrder(
+      () => selectedTokens.value,
+      (orderedIds) => {
+        selectedTokens.value = orderedIds;
+      },
+    );
+    syncTokenIdListOrder(
+      () => selectedTokensForApply.value,
+      (orderedIds) => {
+        selectedTokensForApply.value = orderedIds;
+      },
+    );
+    syncTokenIdListOrder(
+      () => taskForm.selectedTokens,
+      (orderedIds) => {
+        taskForm.selectedTokens = orderedIds;
+      },
+    );
+    syncTokenIdListOrder(
+      () => taskForm.legacyExcludedTokens,
+      (orderedIds) => {
+        taskForm.legacyExcludedTokens = orderedIds.filter((id) =>
+          taskForm.selectedTokens.includes(id),
+        );
+      },
+    );
+  },
+  { immediate: true },
+);
+
+watch(
+  selectedTokens,
+  () =>
+    syncTokenIdListOrder(
+      () => selectedTokens.value,
+      (orderedIds) => {
+        selectedTokens.value = orderedIds;
+      },
+    ),
+  { deep: true },
+);
+
+watch(
+  selectedTokensForApply,
+  () =>
+    syncTokenIdListOrder(
+      () => selectedTokensForApply.value,
+      (orderedIds) => {
+        selectedTokensForApply.value = orderedIds;
+      },
+    ),
+  { deep: true },
+);
+
+watch(
+  () => taskForm.selectedTokens,
+  () => {
+    syncTokenIdListOrder(
+      () => taskForm.selectedTokens,
+      (orderedIds) => {
+        taskForm.selectedTokens = orderedIds;
+      },
+    );
+    taskForm.legacyExcludedTokens = normalizeTokenIdsByBatchOrder(
+      taskForm.legacyExcludedTokens.filter((id) =>
+        taskForm.selectedTokens.includes(id),
+      ),
+    );
+  },
+  { deep: true },
+);
+
+watch(
+  () => taskForm.selectedTasks,
+  () => {
+    if (!hasLegacyTaskSelected.value) {
+      taskForm.legacyExcludedTokens = [];
+    }
+  },
+  { deep: true },
+);
 
 // 任务分组定义
 const taskGroupDefinitions = [
@@ -3519,7 +4299,7 @@ const taskGroupDefinitions = [
       "resetBottles",
       "batchlingguanzi",
       "batchclubsign",
-      "batchStudy",
+      "batchSaltSignup",
       "batcharenafight",
       "batchSmartSendCar",
       "batchClaimCars",
@@ -3536,19 +4316,13 @@ const taskGroupDefinitions = [
       "batchmengjing",
       "skinChallenge",
       "batchClaimPeachTasks",
-      "batchBuyDreamItems",
     ],
   },
   { name: "baoku", label: "宝库", tasks: ["batchbaoku13", "batchbaoku45"] },
   {
     name: "weirdTower",
     label: "怪异塔",
-    tasks: [
-      "climbWeirdTower",
-      "batchUseItems",
-      "batchMergeItems",
-      "batchClaimFreeEnergy",
-    ],
+    tasks: ["batchWeirdTower"],
   },
   {
     name: "resource",
@@ -3565,12 +4339,27 @@ const taskGroupDefinitions = [
   {
     name: "legacy",
     label: "功法",
-    tasks: ["batchLegacyClaim", "batchLegacyGiftSendEnhanced"],
+    tasks: [
+      "batchLegacyClaim",
+      "batchLegacyBeginHangUp",
+      "batchLegacyClaimChargeReward",
+      "batchLegacyGiftSendEnhanced",
+    ],
   },
   {
     name: "monthly",
     label: "月度",
     tasks: ["batchTopUpFish", "batchTopUpArena"],
+  },
+  {
+    name: "small-account",
+    label: "小号任务",
+    tasks: [
+      "batchTopUpGoldFish",
+      "batchPushMainLevelInfo",
+      "batchSmartBoxWeekly",
+      "batchSmartRecruitWeekly",
+    ],
   },
 ];
 
@@ -3595,9 +4384,53 @@ const groupedAvailableTasks = computed(() => {
   return groups;
 });
 
+const legacyExcludableTokens = computed(() => {
+  const selectedTokenIds = new Set(taskForm.selectedTokens);
+  return sortedTokens.value.filter((token) => selectedTokenIds.has(token.id));
+});
+
+const selectAllLegacyExcludedTokens = () => {
+  taskForm.legacyExcludedTokens = normalizeTokenIdsByBatchOrder(
+    legacyExcludableTokens.value.map((token) => token.id),
+  );
+};
+
+const clearLegacyExcludedTokens = () => {
+  taskForm.legacyExcludedTokens = [];
+};
+
 // Cron表达式解析相关变量
 const cronValidation = ref({ valid: true, message: "" });
 const cronNextRuns = ref([]);
+
+// 自动刷新 cron 表达式的独立校验状态（与任务表单互不影响）
+const refreshCronValidation = ref({ valid: true, message: "" });
+const refreshCronNextRuns = ref([]);
+
+const parseRefreshCronExpression = (expression) => {
+  const validation = validateCronExpression(expression);
+  refreshCronValidation.value = validation;
+  if (!validation.valid) {
+    refreshCronNextRuns.value = [];
+    return;
+  }
+  const cronParts = expression.split(" ").filter(Boolean);
+  const [m, h, dom, mon, dow] = cronParts;
+  refreshCronNextRuns.value = calculateNextRuns(m, h, dom, mon, dow, 5);
+};
+
+// 监听 batchSettings 中刷新 cron 表达式的变化，自动刷新预览
+watch(
+  () => batchSettings.refreshCronExpression,
+  (val) => {
+    if (val) parseRefreshCronExpression(val);
+    else {
+      refreshCronValidation.value = { valid: true, message: "" };
+      refreshCronNextRuns.value = [];
+    }
+  },
+  { immediate: true },
+);
 
 // 注: availableTasks, CarresearchItem, taskColumns 已从 @/utils/batch 导入
 
@@ -3664,6 +4497,159 @@ const saveScheduledTasks = () => {
   }
 };
 
+// ======================
+// 定时任务执行历史 & 漏执行检测
+// ======================
+
+const MISSED_EXECUTION_TOLERANCE_MS = 15 * 60 * 1000;     // 15分钟容忍窗口
+const MISSED_EXECUTION_MAX_STALE_MS = 2 * 60 * 60 * 1000; // 超过2小时只通知不补执行
+const MAX_TASK_DURATION_MS = 2 * 60 * 60 * 1000;          // 单次任务最长允许执行2小时（实际批量约1.5h，留余量）
+
+const taskExecutionHistory = ref({});
+
+const loadTaskExecutionHistory = () => {
+  try {
+    const saved = localStorage.getItem("taskExecutionHistory");
+    if (saved) {
+      taskExecutionHistory.value = JSON.parse(saved);
+    }
+  } catch (error) {
+    console.error("Failed to load task execution history:", error);
+    taskExecutionHistory.value = {};
+  }
+};
+
+const saveTaskExecutionHistory = () => {
+  try {
+    localStorage.setItem("taskExecutionHistory", JSON.stringify(taskExecutionHistory.value));
+  } catch (error) {
+    console.error("Failed to save task execution history:", error);
+  }
+};
+
+// 记录定时任务执行成功
+const recordTaskExecution = (taskId) => {
+  taskExecutionHistory.value[taskId] = {
+    ...taskExecutionHistory.value[taskId],
+    lastSuccessfulExecution: new Date().toISOString(),
+    executionCount: (taskExecutionHistory.value[taskId]?.executionCount || 0) + 1,
+    isReExecuting: false,
+  };
+  saveTaskExecutionHistory();
+};
+
+// 清理超过48小时的 missed_ localStorage key
+const cleanupStaleMissedKeys = () => {
+  const twoDaysAgo = new Date();
+  twoDaysAgo.setHours(twoDaysAgo.getHours() - 48);
+
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith("missed_")) {
+      // key 格式: missed_{taskId}_{ISO timestamp}
+      const lastUnderscoreIdx = key.lastIndexOf("_");
+      if (lastUnderscoreIdx > 7) {
+        const dateStr = key.substring(lastUnderscoreIdx + 1);
+        try {
+          const keyDate = new Date(decodeURIComponent(dateStr));
+          if (!isNaN(keyDate.getTime()) && keyDate < twoDaysAgo) {
+            localStorage.removeItem(key);
+          }
+        } catch {
+          localStorage.removeItem(key);
+        }
+      }
+    }
+  }
+};
+
+// 检测漏执行的定时任务
+const checkMissedExecutions = async () => {
+  if (!batchSettings.enableMissedTaskReExecution) {
+    return;
+  }
+
+  const now = new Date();
+
+  for (const task of scheduledTasks.value) {
+    if (!task.enabled) continue;
+    if (taskExecutionHistory.value[task.id]?.isReExecuting) continue;
+
+    // 计算最近一次应执行的时间
+    const lastExpectedTime = calculateLastExpectedExecutionTime(task, now);
+    if (!lastExpectedTime) continue;
+
+    const lastSuccessful = taskExecutionHistory.value[task.id]?.lastSuccessfulExecution;
+    const lastSuccessfulDate = lastSuccessful ? new Date(lastSuccessful) : null;
+
+    // 如果上次执行时间 >= 上次应执行时间，说明没有漏执行
+    if (lastSuccessfulDate && lastSuccessfulDate >= lastExpectedTime) {
+      continue;
+    }
+
+    // 任务正在运行（已开始本周期且仍在合理执行时长内），跳过；超出 MAX_TASK_DURATION_MS 视为崩溃由后续逻辑兜底
+    const lastStarted = taskExecutionHistory.value[task.id]?.lastStartedAt;
+    const lastStartedDate = lastStarted ? new Date(lastStarted) : null;
+    if (
+      lastStartedDate &&
+      lastStartedDate >= lastExpectedTime &&
+      now.getTime() - lastStartedDate.getTime() < MAX_TASK_DURATION_MS
+    ) {
+      continue;
+    }
+
+    const timeSinceExpected = now.getTime() - lastExpectedTime.getTime();
+
+    // 还在容忍窗口内，scheduler 可能还会正常触发
+    if (timeSinceExpected < MISSED_EXECUTION_TOLERANCE_MS) {
+      continue;
+    }
+
+    // 去重：避免同一漏执行重复处理
+    const missedKey = `missed_${task.id}_${encodeURIComponent(lastExpectedTime.toISOString())}`;
+    if (localStorage.getItem(missedKey)) continue;
+    localStorage.setItem(missedKey, "1");
+
+    const canReExecuteByStale =
+      timeSinceExpected <= MISSED_EXECUTION_MAX_STALE_MS;
+    const willReExecute = canReExecuteByStale;
+
+    // 发送漏执行通知
+    const { title, content } = formatMissedExecutionNotification(task, lastExpectedTime, now, willReExecute);
+    await sendNotifications(title, content);
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 检测到定时任务 ${task.name} 漏执行 (预期 ${lastExpectedTime.toLocaleTimeString()}, 延迟 ${Math.round(timeSinceExpected / 60000)}分钟) ===`,
+      type: "warning",
+    });
+
+    if (willReExecute) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `=== 补执行定时任务: ${task.name} ===`,
+        type: "info",
+      });
+
+      taskExecutionHistory.value[task.id] = {
+        ...taskExecutionHistory.value[task.id],
+        isReExecuting: true,
+        lastMissedAt: now.toISOString(),
+        missedCount: (taskExecutionHistory.value[task.id]?.missedCount || 0) + 1,
+      };
+      saveTaskExecutionHistory();
+
+      await executeScheduledTask(task);
+    } else {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `=== 定时任务 ${task.name} 漏执行时间过久(>2小时)，仅发送通知不补执行 ===`,
+        type: "warning",
+      });
+    }
+  }
+};
+
 // Open task modal for adding new task
 const openTaskModal = () => {
   editingTask.value = null;
@@ -3674,6 +4660,8 @@ const openTaskModal = () => {
     cronExpression: "",
     selectedTokens: [],
     selectedTasks: [],
+    taskConfig: createScheduledTaskConfig(),
+    legacyExcludedTokens: [],
     enabled: true,
   });
   taskScheduleSelectedGroupIds.value = [];
@@ -3699,6 +4687,13 @@ const editTask = (task) => {
       minutes,
     );
   }
+  taskData.selectedTokens = normalizeTokenIdsByBatchOrder(
+    taskData.selectedTokens || [],
+  );
+  taskData.taskConfig = createScheduledTaskConfig(taskData.taskConfig || {});
+  taskData.legacyExcludedTokens = normalizeTokenIdsByBatchOrder(
+    taskData.legacyExcludedTokens || [],
+  ).filter((tokenId) => taskData.selectedTokens.includes(tokenId));
   Object.assign(taskForm, taskData);
   taskScheduleSelectedGroupIds.value = [];
   showTaskModal.value = true;
@@ -3789,8 +4784,12 @@ const saveTask = () => {
     runType: taskForm.runType,
     runTime: formattedRunTime,
     cronExpression: taskForm.runType === "cron" ? taskForm.cronExpression : "",
-    selectedTokens: [...taskForm.selectedTokens],
+    selectedTokens: normalizeTokenIdsByBatchOrder(taskForm.selectedTokens),
     selectedTasks: [...taskForm.selectedTasks],
+    taskConfig: createScheduledTaskConfig(taskForm.taskConfig),
+    legacyExcludedTokens: normalizeTokenIdsByBatchOrder(
+      taskForm.legacyExcludedTokens,
+    ).filter((tokenId) => taskForm.selectedTokens.includes(tokenId)),
     enabled: taskForm.enabled,
   };
 
@@ -3861,7 +4860,7 @@ const resetRunType = () => {
 
 // Select all tokens
 const selectAllTokens = () => {
-  taskForm.selectedTokens = tokens.value.map((token) => token.id);
+  taskForm.selectedTokens = sortedTokens.value.map((token) => token.id);
 };
 
 // Deselect all tokens
@@ -3883,84 +4882,24 @@ const deselectAllTasks = () => {
 // Import/Export Config
 // ======================
 
-// Export all tokens and scheduled tasks configuration
-const exportConfig = () => {
+// Export all tokens and scheduled tasks configuration（统一走 buildSnapshot）
+const exportConfig = async () => {
   try {
-    // Get all valid token IDs
-    const validTokenIds = new Set(tokens.value.map((t) => t.id));
-
-    // Filter scheduled tasks: remove invalid token IDs from selectedTokens
-    const filteredScheduledTasks = scheduledTasks.value
+    const snap = await buildSnapshotWithIndexedDB("manual");
+    // 与历史行为一致：清掉无效 token 引用
+    const validTokenIds = new Set(snap.tokens.map((t) => t.id));
+    snap.scheduledTasks = (snap.scheduledTasks || [])
       .map((task) => ({
         ...task,
         selectedTokens:
-          task.selectedTokens?.filter((tokenId) =>
-            validTokenIds.has(tokenId),
-          ) || [],
+          task?.selectedTokens?.filter((id) => validTokenIds.has(id)) || [],
+        legacyExcludedTokens:
+          task?.legacyExcludedTokens?.filter((id) => validTokenIds.has(id)) ||
+          [],
       }))
-      .filter((task) => task.selectedTokens.length > 0); // Remove tasks with no valid tokens
+      .filter((task) => task.selectedTokens.length > 0);
 
-    // Gather token settings
-    const tokenSettings = [];
-    tokens.value.forEach((token) => {
-      const settings = localStorage.getItem(`daily-settings:${token.id}`);
-      if (settings) {
-        try {
-          tokenSettings.push({
-            tokenId: token.id,
-            settings: JSON.parse(settings),
-          });
-        } catch (e) {
-          console.warn(`Failed to parse settings for token ${token.id}`, e);
-        }
-      }
-    });
-
-    const exportData = {
-      version: "1.1",
-      exportTime: new Date().toISOString(),
-      tokens: tokens.value.map((t) => ({
-        id: t.id,
-        name: t.name,
-        token: t.token,
-        server: t.server,
-        wsUrl: t.wsUrl,
-        remark: t.remark,
-        importMethod: t.importMethod,
-        sourceUrl: t.sourceUrl,
-        upgradedToPermanent: true,
-        upgradedAt: t.upgradedAt,
-        updatedAt: t.updatedAt,
-      })),
-      scheduledTasks: filteredScheduledTasks,
-      batchSettings: {
-        boxCount: batchSettings.boxCount,
-        fishCount: batchSettings.fishCount,
-        recruitCount: batchSettings.recruitCount,
-        defaultBoxType: batchSettings.defaultBoxType,
-        defaultFishType: batchSettings.defaultFishType,
-        carMinColor: batchSettings.carMinColor,
-        commandDelay: batchSettings.commandDelay,
-        taskDelay: batchSettings.taskDelay,
-        actionDelay: batchSettings.actionDelay,
-        battleDelay: batchSettings.battleDelay,
-        refreshDelay: batchSettings.refreshDelay,
-        longDelay: batchSettings.longDelay,
-        maxActive: batchSettings.maxActive,
-        tokenListColumns: batchSettings.tokenListColumns,
-        useGoldRefreshFallback: batchSettings.useGoldRefreshFallback,
-        smartDepartureGoldThreshold: batchSettings.smartDepartureGoldThreshold,
-        smartDepartureRecruitThreshold:
-          batchSettings.smartDepartureRecruitThreshold,
-        smartDepartureJadeThreshold: batchSettings.smartDepartureJadeThreshold,
-        smartDepartureTicketThreshold:
-          batchSettings.smartDepartureTicketThreshold,
-        smartDepartureMatchAll: batchSettings.smartDepartureMatchAll,
-      },
-      tokenSettings: tokenSettings,
-    };
-
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+    const blob = new Blob([JSON.stringify(snap, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -3973,7 +4912,7 @@ const exportConfig = () => {
     URL.revokeObjectURL(url);
 
     message.success(
-      `导出成功: ${exportData.tokens.length} 个账号, ${exportData.scheduledTasks.length} 个定时任务`,
+      `导出成功: ${snap.tokens.length} 个账号, ${snap.scheduledTasks.length} 个定时任务, ${snap.tokenBinaryData?.length || 0} 份BIN数据`,
     );
   } catch (error) {
     console.error("Export failed:", error);
@@ -3981,91 +4920,57 @@ const exportConfig = () => {
   }
 };
 
-// Import tokens and scheduled tasks configuration
+// Import tokens and scheduled tasks configuration（统一走 applySnapshot，兼容 v1.1 / v1.2）
 const importConfig = async ({ file }) => {
   try {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const importData = JSON.parse(e.target.result);
-
-        // Validate structure
-        if (
-          !importData.version ||
-          !importData.tokens ||
-          !importData.scheduledTasks
-        ) {
+        if (!importData?.tokens && !importData?.scheduledTasks) {
           message.error("无效的配置文件格式");
           return;
         }
-
-        let importedTokens = 0;
-        let importedTasks = 0;
-
-        // Import tokens
-        if (Array.isArray(importData.tokens)) {
-          importData.tokens.forEach((token) => {
-            // Check if token already exists
-            const exists = gameTokens.value.some(
-              (t) => t.token === token.token || t.id === token.id,
-            );
-            if (!exists && token.token) {
-              // Add new token directly to gameTokens (useLocalStorage)
-              gameTokens.value.push({
-                id:
-                  token.id ||
-                  "token_" + Date.now() + Math.random().toString(36).slice(2),
-                name: token.name || "",
-                token: token.token,
-                server: token.server || "",
-                wsUrl: token.wsUrl || null,
-                remark: token.remark || "",
-                importMethod: "import",
-                sourceUrl: token.sourceUrl || null,
-                upgradedToPermanent: true,
-                upgradedAt: token.upgradedAt || null,
-                updatedAt: token.updatedAt || new Date().toISOString(),
-                createdAt: new Date().toISOString(),
-                lastUsed: new Date().toISOString(),
-              });
-              importedTokens++;
-            }
-          });
+        const result = await applySnapshotWithIndexedDB(importData, {
+          tokenStrategy: "merge",
+        });
+        // applySnapshot 走 localStorage.setItem，同标签页内 useLocalStorage 不会
+        // 自动同步，这里手动把 in-memory ref 与 LS 对齐，避免必须刷新页面。
+        try {
+          gameTokens.value = JSON.parse(
+            localStorage.getItem("gameTokens") || "[]",
+          );
+        } catch {
+          /* ignore */
         }
-
-        // Import scheduled tasks
-        if (Array.isArray(importData.scheduledTasks)) {
-          importData.scheduledTasks.forEach((task) => {
-            // Check if task already exists
-            const exists = scheduledTasks.value.some((t) => t.id === task.id);
-            if (!exists && task.id) {
-              scheduledTasks.value.push(task);
-              importedTasks++;
-            }
-          });
-          saveScheduledTasks();
-        }
-
-        // Import batch settings if provided
         if (importData.batchSettings) {
           Object.assign(batchSettings, importData.batchSettings);
           saveBatchSettings();
         }
-
-        // Import token settings
-        if (Array.isArray(importData.tokenSettings)) {
-          importData.tokenSettings.forEach((item) => {
-            if (item.tokenId && item.settings) {
-              localStorage.setItem(
-                `daily-settings:${item.tokenId}`,
-                JSON.stringify(item.settings),
-              );
+        if (Array.isArray(importData.scheduledTasks)) {
+          const seen = new Set(scheduledTasks.value.map((t) => t.id));
+          for (const t of importData.scheduledTasks) {
+            if (t?.id && !seen.has(t.id)) {
+              const sanitizedTask = sanitizeScheduledTaskForSnapshot(t);
+              if (Array.isArray(sanitizedTask?.legacyExcludedTokens)) {
+                const selectedTokenIds = Array.isArray(
+                  sanitizedTask.selectedTokens,
+                )
+                  ? sanitizedTask.selectedTokens
+                  : [];
+                sanitizedTask.legacyExcludedTokens =
+                  sanitizedTask.legacyExcludedTokens.filter((tokenId) =>
+                    selectedTokenIds.includes(tokenId),
+                  );
+              }
+              scheduledTasks.value.push(sanitizedTask);
+              seen.add(t.id);
             }
-          });
+          }
+          saveScheduledTasks();
         }
-
         message.success(
-          `导入成功: ${importedTokens} 个新账号, ${importedTasks} 个新定时任务`,
+          `导入成功: ${result.importedTokens} 个新账号, ${result.importedScheduledTasks} 个新定时任务, ${result.importedTokenBinaryData || 0} 份BIN数据`,
         );
       } catch (parseError) {
         console.error("Parse error:", parseError);
@@ -4088,6 +4993,117 @@ const importConfig = async ({ file }) => {
 // Task countdowns ref
 const taskCountdowns = ref({});
 const nextExecutionTimes = ref({});
+
+const validTokenIdSet = computed(() => new Set(tokens.value.map((t) => t.id)));
+
+const invalidScheduledTokenCount = computed(() => {
+  const invalidTokenIds = new Set();
+  scheduledTasks.value.forEach((task) => {
+    (task.selectedTokens || []).forEach((tokenId) => {
+      if (!validTokenIdSet.value.has(tokenId)) {
+        invalidTokenIds.add(tokenId);
+      }
+    });
+  });
+  return invalidTokenIds.size;
+});
+
+const filterExistingTokenIds = (tokenIds = []) => {
+  return tokenIds.filter((tokenId) => validTokenIdSet.value.has(tokenId));
+};
+
+const cleanupInvalidDailySettings = () => {
+  let removedCount = 0;
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i);
+    if (!key?.startsWith("daily-settings:")) continue;
+
+    const tokenId = key.slice("daily-settings:".length);
+    if (!validTokenIdSet.value.has(tokenId)) {
+      localStorage.removeItem(key);
+      removedCount++;
+    }
+  }
+  return removedCount;
+};
+
+const cleanupInvalidBatchTokens = () => {
+  const invalidTokenIds = new Set();
+  let removedRefsCount = 0;
+  let emptiedTaskCount = 0;
+
+  scheduledTasks.value = scheduledTasks.value.map((task) => {
+    const selectedTokens = Array.isArray(task.selectedTokens)
+      ? task.selectedTokens
+      : [];
+    const cleanedSelectedTokens = selectedTokens.filter((tokenId) => {
+      const isValid = validTokenIdSet.value.has(tokenId);
+      if (!isValid) {
+        invalidTokenIds.add(tokenId);
+        removedRefsCount++;
+      }
+      return isValid;
+    });
+    const cleanedLegacyExcludedTokens = Array.isArray(
+      task.legacyExcludedTokens,
+    )
+      ? task.legacyExcludedTokens.filter((tokenId) => {
+          const isValid =
+            validTokenIdSet.value.has(tokenId) &&
+            cleanedSelectedTokens.includes(tokenId);
+          if (!isValid) {
+            invalidTokenIds.add(tokenId);
+            removedRefsCount++;
+          }
+          return isValid;
+        })
+      : [];
+
+    const nextTask = {
+      ...task,
+      selectedTokens: cleanedSelectedTokens,
+      legacyExcludedTokens: cleanedLegacyExcludedTokens,
+    };
+
+    if (Array.isArray(task.connectedTokens)) {
+      nextTask.connectedTokens = filterExistingTokenIds(task.connectedTokens);
+    }
+
+    if (selectedTokens.length > 0 && cleanedSelectedTokens.length === 0) {
+      nextTask.enabled = false;
+      emptiedTaskCount++;
+    }
+
+    return nextTask;
+  });
+
+  selectedTokens.value = filterExistingTokenIds(selectedTokens.value);
+  selectedTokensForApply.value = filterExistingTokenIds(
+    selectedTokensForApply.value,
+  );
+  taskForm.selectedTokens = filterExistingTokenIds(taskForm.selectedTokens);
+  newGroupSelectedTokens.value = filterExistingTokenIds(
+    newGroupSelectedTokens.value,
+  );
+
+  tokenStore.cleanupInvalidTokens();
+  const removedSettingsCount = cleanupInvalidDailySettings();
+  saveScheduledTasks();
+
+  if (removedRefsCount === 0 && removedSettingsCount === 0) {
+    message.info("没有需要清理的无效账号数据");
+    return;
+  }
+
+  addLog({
+    time: new Date().toLocaleTimeString(),
+    message: `=== 已清理无效账号: 定时任务引用 ${removedRefsCount} 处，账号设置 ${removedSettingsCount} 条，涉及 ${invalidTokenIds.size} 个已删除账号${emptiedTaskCount ? `，${emptiedTaskCount} 个定时任务因无可用账号已禁用` : ""} ===`,
+    type: "success",
+  });
+  message.success(
+    `已清理 ${removedRefsCount} 处无效账号引用${emptiedTaskCount ? `，并禁用 ${emptiedTaskCount} 个空任务` : ""}`,
+  );
+};
 
 // Update countdowns for all tasks
 const updateCountdowns = () => {
@@ -4117,6 +5133,38 @@ const updateCountdowns = () => {
       };
     }
   });
+};
+
+const getUpcomingScheduledTaskRuns = (limit = 2, fromTime = new Date()) => {
+  const upcomingRuns = [];
+
+  scheduledTasks.value
+    .filter((task) => task.enabled)
+    .forEach((task) => {
+      let cursor = new Date(fromTime);
+
+      for (let index = 0; index < limit; index++) {
+        try {
+          const startTime = calculateNextExecutionTime(task, cursor);
+          if (!startTime) break;
+
+          upcomingRuns.push({
+            id: task.id,
+            name: task.name,
+            startTime,
+          });
+
+          cursor = new Date(startTime.getTime() + 60 * 1000);
+        } catch (error) {
+          console.warn(`计算定时任务 ${task.name} 后续启动时间失败:`, error);
+          break;
+        }
+      }
+    });
+
+  return upcomingRuns
+    .sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
+    .slice(0, limit);
 };
 
 // 计算最短倒计时任务
@@ -4222,21 +5270,51 @@ const healthCheck = () => {
     }
   }
 
-  // Check for page refresh
-  if (batchSettings.enableRefresh && batchSettings.refreshInterval > 0) {
-    const elapsedMinutes = (Date.now() - pageLoadTime) / 1000 / 60;
-    if (elapsedMinutes >= batchSettings.refreshInterval) {
-      if (!isRunning.value) {
-        console.log(
-          `[${new Date().toISOString()}] Refreshing page as scheduled (Interval: ${batchSettings.refreshInterval}m, Elapsed: ${elapsedMinutes.toFixed(1)}m)`,
-        );
-        window.location.reload();
-      } else {
-        console.log(
-          `[${new Date().toISOString()}] Scheduled refresh postponed due to running task`,
-        );
+  // 自动刷新调度已迁移至 10s scheduler（保证 cron 分钟级精度）
+
+  // 仅在漏执行自动补做开启时检测漏执行的定时任务
+  if (batchSettings.enableMissedTaskReExecution) {
+    checkMissedExecutions();
+  }
+};
+
+// 上一次记录"任务运行中跳过刷新"日志的分钟 key，用于节流
+let _lastRefreshSkipLogMinute = "";
+
+// 在 10s scheduler tick 中调用：评估并执行自动刷新
+const evaluateAndApplyRefresh = () => {
+  if (!batchSettings.enableRefresh) return;
+  try {
+    const now = new Date();
+    const result = evaluateRefresh(batchSettings, {
+      now,
+      pageLoadTime,
+      isTaskRunning: isRunning.value,
+    });
+    if (result.shouldRefresh) {
+      addLog({
+        time: now.toLocaleTimeString(),
+        message: `=== 触发自动刷新页面 (${result.reason}) ===`,
+        type: "info",
+      });
+      console.log(
+        `[${now.toISOString()}] Refreshing page (reason: ${result.reason})`,
+      );
+      window.location.reload();
+    } else if (result.reason === "task-running") {
+      // 同一分钟内只记录一次，避免日志刷屏
+      const mk = `${now.getHours()}:${now.getMinutes()}`;
+      if (_lastRefreshSkipLogMinute !== mk) {
+        _lastRefreshSkipLogMinute = mk;
+        addLog({
+          time: now.toLocaleTimeString(),
+          message: "=== 自动刷新触发命中，但任务运行中，已跳过本次 ===",
+          type: "warning",
+        });
       }
     }
+  } catch (error) {
+    console.error("evaluateAndApplyRefresh error:", error);
   }
 };
 
@@ -4279,6 +5357,23 @@ const startScheduler = () => {
           });
           shouldRun = nowTime === taskTime;
           reason = `currentTime=${nowTime}, taskTime=${taskTime}, match=${shouldRun}`;
+
+          if (shouldRun) {
+            // Deduplication: same pattern as cron tasks
+            const taskExecutionKey = `${task.id}_${now.getDate()}_${now.getHours()}_${now.getMinutes()}`;
+            const lastExecutionKey = localStorage.getItem(
+              `lastTaskExecution_${task.id}`,
+            );
+
+            if (lastExecutionKey !== taskExecutionKey) {
+              localStorage.setItem(
+                `lastTaskExecution_${task.id}`,
+                taskExecutionKey,
+              );
+              lastTaskExecution = Date.now();
+              executeScheduledTask(task);
+            }
+          }
         } else if (task.runType === "cron") {
           // Improved cron expression parsing using shared utility
           try {
@@ -4321,6 +5416,9 @@ const startScheduler = () => {
           }
         }
       });
+
+      // 自动刷新评估（与任务调度共用 10s tick，保证 cron 分钟级精度）
+      evaluateAndApplyRefresh();
     } catch (error) {
       console.error(
         `[${new Date().toISOString()}] Error in task scheduler:`,
@@ -4346,17 +5444,22 @@ const handleTokenRefreshWaiting = (data) => {
 
 // Debug: Log initial state when component mounts
 onMounted(() => {
+  document.addEventListener("visibilitychange", handleVisibilityLogScroll);
+  // 加载执行历史
+  loadTaskExecutionHistory();
+  // 清理过期的漏执行记录
+  cleanupStaleMissedKeys();
   // Start the task scheduler after all functions are initialized
   scheduleTaskExecution();
   // Start countdown timer
   startCountdown();
   loadTaskTemplates();
-  // 监听Token刷新等待事件
-  $emit.on("token:refresh:waiting", handleTokenRefreshWaiting);
 });
 
 // Cleanup countdown interval on unmount
 onBeforeUnmount(() => {
+  document.removeEventListener("visibilitychange", handleVisibilityLogScroll);
+
   if (countdownInterval) {
     clearInterval(countdownInterval);
     countdownInterval = null;
@@ -4442,6 +5545,8 @@ const verifyTaskDependencies = async (task) => {
 
   // Verify task functions exist
   for (const taskName of task.selectedTasks) {
+    if (integratedDailyTaskNames.includes(taskName)) continue;
+
     const taskFunction = eval(taskName);
     if (typeof taskFunction !== "function") {
       addLog({
@@ -4455,7 +5560,9 @@ const verifyTaskDependencies = async (task) => {
 
   // 直接使用所有选中的token，WebSocket连接由具体任务函数内部管理
   // ensureConnection函数会自动处理并行连接和连接池管理
-  const connectedTokens = task.selectedTokens.map((tokenId) => {
+  const connectedTokens = normalizeTokenIdsByBatchOrder(
+    task.selectedTokens,
+  ).map((tokenId) => {
     const tokenName =
       tokenStore.gameTokens.find((t) => t.id === tokenId)?.name || tokenId;
     return { id: tokenId, name: tokenName };
@@ -4481,7 +5588,28 @@ const verifyTaskDependencies = async (task) => {
 
 // Execute a scheduled task with dependency verification
 const executeScheduledTask = async (task) => {
+  if (scheduledTaskExecutionActive || isRunning.value) {
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 跳过定时任务 ${task.name}：已有任务正在执行 ===`,
+      type: "warning",
+    });
+    return;
+  }
+
+  scheduledTaskExecutionActive = true;
+  isRunning.value = true;
   const scheduledTaskStartTime = new Date();
+  let previousSelectedTokens = null;
+
+  // 立即写入 lastStartedAt，让 checkMissedExecutions 知道本周期已开始执行
+  // 这样长任务（>15min 容忍窗口）不会被误判为漏执行而重复触发
+  taskExecutionHistory.value[task.id] = {
+    ...taskExecutionHistory.value[task.id],
+    lastStartedAt: scheduledTaskStartTime.toISOString(),
+  };
+  saveTaskExecutionHistory();
+
   addLog({
     time: new Date().toLocaleTimeString(),
     message: `=== 开始执行定时任务: ${task.name} ===`,
@@ -4501,8 +5629,8 @@ const executeScheduledTask = async (task) => {
     }
 
     // Filter out tokens that don't exist in current tokens.value
-    const availableTokens = (
-      task.connectedTokens || task.selectedTokens
+    const availableTokens = normalizeTokenIdsByBatchOrder(
+      task.connectedTokens || task.selectedTokens,
     ).filter((tokenId) => {
       return tokens.value.some((t) => t.id === tokenId);
     });
@@ -4530,63 +5658,105 @@ const executeScheduledTask = async (task) => {
       return;
     }
 
+    // 保存界面当前选择，定时任务按账号执行结束后恢复。
+    previousSelectedTokens = [...selectedTokens.value];
+
     // Always use the latest selectedTokens from the task that exist in current tokens.value
     selectedTokens.value = [...availableTokens];
 
-    // Execute selected tasks in parallel
-    const taskPromises = task.selectedTasks.map(async (taskName) => {
-      if (shouldStop.value) return;
+    const selectedTaskNames = task.selectedTasks.filter((taskName) => {
+      if (integratedDailyTaskNames.includes(taskName)) return false;
+      if (
+        task.selectedTasks.includes("batchmengjing") &&
+        taskName === "batchBuyDreamItems"
+      ) {
+        return false;
+      }
+      return true;
+    });
 
+    if (selectedTaskNames.length !== task.selectedTasks.length) {
+      if (
+        task.selectedTasks.some((taskName) =>
+          integratedDailyTaskNames.includes(taskName),
+        )
+      ) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: "五次领取挂机已整合进日常任务，本次定时任务跳过单独项",
+          type: "info",
+        });
+      }
+
+      if (
+        task.selectedTasks.includes("batchmengjing") &&
+        task.selectedTasks.includes("batchBuyDreamItems")
+      ) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: "一键购买梦境商品已整合进一键梦境，本次定时任务跳过单独购买项",
+          type: "info",
+        });
+      }
+    }
+
+    const legacyExcludedTokens = normalizeTokenIdsByBatchOrder(
+      Array.isArray(task.legacyExcludedTokens) ? task.legacyExcludedTokens : [],
+    ).filter((tokenId) => availableTokens.includes(tokenId));
+    const hasLegacyTasksToRun = selectedTaskNames.some((taskName) =>
+      isLegacyTaskName(taskName),
+    );
+    const onlyLegacyTasks =
+      selectedTaskNames.length > 0 &&
+      selectedTaskNames.every((taskName) => isLegacyTaskName(taskName));
+
+    if (hasLegacyTasksToRun && legacyExcludedTokens.length > 0) {
+      const skippedNames = legacyExcludedTokens.map((tokenId) => {
+        const token = tokens.value.find((t) => t.id === tokenId);
+        return token?.name || tokenId;
+      });
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `功法任务跳过 ${legacyExcludedTokens.length} 个账号: ${skippedNames.join(", ")}`,
+        type: "info",
+      });
+
+      if (onlyLegacyTasks) {
+        legacyExcludedTokens.forEach((tokenId) => {
+          tokenStatus.value[tokenId] = "skipped";
+        });
+      }
+    }
+
+    const taskLabel = (taskName) =>
+      availableTasks.find((t) => t.value === taskName)?.label || taskName;
+    const aggregatedMainLevelResults = [];
+
+    const shouldSkipTaskForActivity = (taskName) => {
       if (
         ["batchbaoku45", "batchbaoku13"].includes(taskName) &&
         !isbaokuActivityOpen.value
       ) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在宝库开放时间)`,
-          type: "warning",
-        });
-        return;
+        return "不在宝库开放时间";
       }
-
       if (
         ["batchmengjing", "batchBuyDreamItems"].includes(taskName) &&
         !ismengjingActivityOpen.value
       ) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在梦境开放时间)`,
-          type: "warning",
-        });
-        return;
+        return "不在梦境开放时间";
       }
-
-      if (
-        ["batchSmartSendCar", "batchClaimCars"].includes(taskName) &&
-        !isCarActivityOpen.value
-      ) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在发车开放时间)`,
-          type: "warning",
-        });
-        return;
+      if (taskName === "batchSmartSendCar" && !isCarActivityOpen.value) {
+        return "不在发车开放时间";
       }
-
       if (
         ["batchTopUpArena", "batcharenafight"].includes(taskName) &&
         !isarenaActivityOpen.value
       ) {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在竞技场开放时间)`,
-          type: "warning",
-        });
-        return;
+        return "不在竞技场开放时间";
       }
-
       if (
         [
+          "batchWeirdTower",
           "climbWeirdTower",
           "batchUseItems",
           "batchMergeItems",
@@ -4594,49 +5764,170 @@ const executeScheduledTask = async (task) => {
         ].includes(taskName) &&
         !isWeirdTowerActivityOpen.value
       ) {
+        return "不在怪异塔开放时间";
+      }
+      return "";
+    };
+
+    const executeTaskForToken = async (taskName, tokenId) => {
+      const activitySkipReason = shouldSkipTaskForActivity(taskName);
+      if (activitySkipReason) {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在怪异塔开放时间)`,
+          message: `跳过任务: ${taskLabel(taskName)} (${activitySkipReason})`,
           type: "warning",
         });
         return;
       }
 
+      const taskFunction = eval(taskName);
+      if (typeof taskFunction !== "function") {
+        throw new Error(`任务函数不存在: ${taskName}`);
+      }
+
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `执行任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName}`,
+        message: `执行任务: ${taskLabel(taskName)}`,
         type: "info",
       });
 
-      // Call the task function dynamically
-      const taskFunction = eval(taskName);
-      if (typeof taskFunction === "function") {
-        // For batch operations, pass isScheduledTask = true
-        // 具体的batch任务函数内部会使用ensureConnection管理并行连接
-        if (
-          [
-            "batchOpenBox",
-            "batchOpenBoxByPoints",
-            "batchFish",
-            "batchRecruit",
-            "batchLegacyGiftSendEnhanced",
-          ].includes(taskName)
-        ) {
-          await taskFunction(true);
-        } else {
-          await taskFunction();
+      if (taskName === "batchPushMainLevelInfo") {
+        // 按账号执行阶段只采集结果，等所有账号完成后由调度器统一推送一份报告。
+        return taskFunction({ deferPush: true });
+      }
+
+      if (isLegacyTaskName(taskName)) {
+        if (legacyExcludedTokens.includes(tokenId)) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `跳过任务: ${taskLabel(taskName)} (该账号已排除功法任务)`,
+            type: "info",
+          });
+          return;
         }
+
+        await taskFunction({
+          tokenIds: [tokenId],
+          isScheduledTask: true,
+        });
+        return;
+      }
+
+      // 这些任务在定时模式下使用批量设置，但 selectedTokens 已被限定为当前账号。
+      if (
+        [
+          "batchOpenBox",
+          "batchOpenBoxByPoints",
+          "batchFish",
+          "batchRecruit",
+        ].includes(taskName)
+      ) {
+        await taskFunction(true);
+      } else if (
+        ["batchSmartBoxWeekly", "batchSmartRecruitWeekly"].includes(
+          taskName,
+        )
+      ) {
+        await taskFunction(task.taskConfig?.[taskName] || {});
       } else {
+        await taskFunction();
+      }
+    };
+
+    // 按账号执行：当前账号完成所有选中任务后才切换到下一个账号。
+    for (const tokenId of availableTokens) {
+      if (shouldStop.value) break;
+
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      const hasRunnableTask = selectedTaskNames.some(
+        (taskName) =>
+          !isLegacyTaskName(taskName) ||
+          !legacyExcludedTokens.includes(tokenId),
+      );
+
+      if (!hasRunnableTask) continue;
+
+      selectedTokens.value = [tokenId];
+      currentRunningTokenId.value = tokenId;
+      tokenStatus.value[tokenId] = "running";
+      beginScheduledTokenSession(tokenId);
+
+      let accountHasFailure = false;
+      try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `任务函数不存在: ${taskName}`,
+          message: `=== 开始执行账号: ${tokenName}（共 ${selectedTaskNames.length} 个任务）===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+
+        for (const taskName of selectedTaskNames) {
+          if (shouldStop.value) break;
+
+          try {
+            const taskResult = await executeTaskForToken(taskName, tokenId);
+            if (
+              taskName === "batchPushMainLevelInfo" &&
+              Array.isArray(taskResult)
+            ) {
+              aggregatedMainLevelResults.push(...taskResult);
+            }
+            if (tokenStatus.value[tokenId] === "failed") {
+              accountHasFailure = true;
+            }
+          } catch (error) {
+            accountHasFailure = true;
+            tokenStatus.value[tokenId] = "failed";
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 任务 ${taskLabel(taskName)} 失败: ${error.message}`,
+              type: "error",
+            });
+          }
+        }
+
+        tokenStatus.value[tokenId] = accountHasFailure ? "failed" : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${tokenName} 全部选中任务执行${accountHasFailure ? "结束（存在失败）" : "完成"} ===`,
+          type: accountHasFailure ? "warning" : "success",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 账号任务执行失败: ${error.message}`,
           type: "error",
         });
+      } finally {
+        endScheduledTokenSession(tokenId, tokenName);
       }
-    });
+    }
 
-    // Wait for all tasks to complete
-    await Promise.all(taskPromises);
+    if (aggregatedMainLevelResults.length > 0) {
+      aggregatedMainLevelResults.sort(
+        (a, b) =>
+          availableTokens.indexOf(a.tokenId) - availableTokens.indexOf(b.tokenId),
+      );
+
+      try {
+        await pushMainLevelInfo(
+          aggregatedMainLevelResults,
+          scheduledTaskStartTime,
+        );
+      } catch (error) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `主线关卡信息统一推送失败: ${error.message || "未知错误"}`,
+          type: "error",
+        });
+        message.error(`主线关卡信息统一推送失败: ${error.message || "未知错误"}`);
+      }
+    }
+
+    selectedTokens.value = [...previousSelectedTokens];
 
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -4649,8 +5940,19 @@ const executeScheduledTask = async (task) => {
       const token = tokens.value.find((t) => t.id === tokenId);
       return { name: token?.name || tokenId, status: tokenStatus.value[tokenId] || "completed" };
     });
-    const { title, content } = formatScheduledTaskNotification(task.name, scheduledTokenResults, scheduledTaskStartTime);
-    await sendNotifications(title, content);
+    const upcomingScheduledTasks = getUpcomingScheduledTaskRuns(2);
+    const { title, content } = formatScheduledTaskNotification(
+      task.name,
+      scheduledTokenResults,
+      scheduledTaskStartTime,
+      upcomingScheduledTasks,
+    );
+    await sendNotifications(title, content, {
+      skipWxPusher: selectedTaskNames.includes("batchPushMainLevelInfo"),
+    });
+
+    // 记录执行成功，用于漏执行检测
+    recordTaskExecution(task.id);
   } catch (error) {
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -4666,6 +5968,18 @@ const executeScheduledTask = async (task) => {
     const failedTitle = `❌ 定时任务失败: ${task.name}`;
     const failedContent = `## ❌ 定时任务执行失败\n\n**任务名称**: ${task.name}\n\n**失败原因**: ${error.message}\n\n**时间**: ${new Date().toLocaleTimeString()}`;
     await sendNotifications(failedTitle, failedContent);
+  } finally {
+    if (scheduledTokenSession.active) {
+      const tokenId = scheduledTokenSession.tokenId;
+      const token = tokens.value.find((item) => item.id === tokenId);
+      endScheduledTokenSession(tokenId, token?.name || tokenId);
+    }
+    if (previousSelectedTokens) {
+      selectedTokens.value = [...previousSelectedTokens];
+    }
+    scheduledTaskExecutionActive = false;
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
   }
 };
 
@@ -4674,6 +5988,10 @@ const executeScheduledTask = async (task) => {
 const openHelperModal = (type) => {
   helperType.value = type;
   showHelperModal.value = true;
+};
+
+const openSmartBoxWeeklyModal = () => {
+  showSmartBoxWeeklyModal.value = true;
 };
 
 // 批量功法残卷赠送相关方法
@@ -4922,6 +6240,19 @@ const executeHelper = () => {
   }
 };
 
+const executeSmartBoxWeekly = () => {
+  if (smartBoxWeeklySettings.smartBoxTypes.length === 0) {
+    message.warning("至少选择一种宝箱类型");
+    return;
+  }
+
+  showSmartBoxWeeklyModal.value = false;
+  batchSmartBoxWeekly({
+    smartBoxTypes: [...smartBoxWeeklySettings.smartBoxTypes],
+    smartBoxGroupCount: smartBoxWeeklySettings.smartBoxGroupCount,
+  });
+};
+
 // Dream Buy Modal Logic
 const showDreamBuyModal = ref(false);
 const dreamBuyList = ref([]);
@@ -4992,12 +6323,19 @@ const loadSettings = (tokenId) => {
       bossFormation: 1,
       bossTimes: 2,
       claimBottle: true,
-      payRecruit: true,
-      openBox: true,
+      payRecruit: false,
+      openBox: false,
+      autoDiamondBoxPaidRecruit: false,
       arenaEnable: true,
       claimHangUp: true,
       claimEmail: true,
       blackMarketPurchase: true,
+      holyBeastFragmentPurchase: false,
+      studyEnable: true,
+      dreamEnable: true,
+      genieSweepEnable: false,
+      monthlyFishTopUpEnable: true,
+      monthlyArenaTopUpEnable: true,
     };
     return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
   } catch (error) {
@@ -5036,12 +6374,19 @@ const openTaskTemplateModal = () => {
     bossFormation: 1,
     bossTimes: 2,
     claimBottle: true,
-    payRecruit: true,
-    openBox: true,
+    payRecruit: false,
+    openBox: false,
+    autoDiamondBoxPaidRecruit: false,
     arenaEnable: true,
     claimHangUp: true,
     claimEmail: true,
     blackMarketPurchase: true,
+    holyBeastFragmentPurchase: false,
+    studyEnable: true,
+    dreamEnable: true,
+    genieSweepEnable: false,
+    monthlyFishTopUpEnable: true,
+    monthlyArenaTopUpEnable: true,
   });
   currentTemplateName.value = "";
   showTaskTemplateModal.value = true;
@@ -5113,6 +6458,7 @@ const openTemplateManagerModal = () => {
 
 const openEditTemplateModal = (template) => {
   // 加载模板数据到当前编辑模板
+  resetTemplateForm();
   currentTemplateId.value = template.id;
   currentTemplateName.value = template.name;
   Object.assign(currentTemplate, template.settings);
@@ -5184,12 +6530,19 @@ const resetTemplateForm = () => {
     bossFormation: 1,
     bossTimes: 2,
     claimBottle: true,
-    payRecruit: true,
-    openBox: true,
+    payRecruit: false,
+    openBox: false,
+    autoDiamondBoxPaidRecruit: false,
     arenaEnable: true,
     claimHangUp: true,
     claimEmail: true,
     blackMarketPurchase: true,
+    holyBeastFragmentPurchase: false,
+    studyEnable: true,
+    dreamEnable: true,
+    genieSweepEnable: false,
+    monthlyFishTopUpEnable: true,
+    monthlyArenaTopUpEnable: true,
   });
 };
 
@@ -5312,6 +6665,29 @@ const currentRunningTokenName = computed(() => {
   return t ? t.name : "";
 });
 
+const scrollLogToBottom = () => {
+  if (!autoScrollLog.value) return;
+
+  nextTick(() => {
+    const scroll = () => {
+      const container = logContainer.value;
+      if (!container || !autoScrollLog.value) return;
+
+      container.scrollTop = container.scrollHeight;
+    };
+
+    requestAnimationFrame(scroll);
+    setTimeout(scroll, 0);
+    setTimeout(scroll, 50);
+  });
+};
+
+const handleVisibilityLogScroll = () => {
+  if (!document.hidden) {
+    scrollLogToBottom();
+  }
+};
+
 // Selection logic
 const isAllSelected = computed(
   () =>
@@ -5326,7 +6702,7 @@ const isIndeterminate = computed(
 
 const handleSelectAll = (checked) => {
   if (checked) {
-    selectedTokens.value = tokens.value.map((t) => t.id);
+    selectedTokens.value = sortedTokens.value.map((t) => t.id);
   } else {
     selectedTokens.value = [];
   }
@@ -5473,7 +6849,7 @@ const updateSelectedTokensFromGroups = () => {
     validTokenIds.forEach((id) => tokenIds.add(id));
   });
 
-  selectedTokens.value = Array.from(tokenIds);
+  setSelectedTokensInBatchOrder(Array.from(tokenIds));
 };
 
 /**
@@ -5527,42 +6903,20 @@ const addLog = (log) => {
     logs.value = logs.value.slice(-maxLogEntries);
   }
 
-  // 尝试DOM操作，但不依赖nextTick确保日志显示
-  // 在后台运行时，浏览器可能会限制DOM操作
-  try {
-    if (logContainer.value && autoScrollLog.value) {
-      // 直接尝试滚动，不使用nextTick
-      logContainer.value.scrollTop = logContainer.value.scrollHeight;
-    }
-  } catch (error) {
-    // 忽略DOM操作错误，确保日志数据仍然被记录
-    console.warn("Failed to scroll log container:", error);
-  }
-
-  // 同时使用nextTick作为后备，确保在页面回到前台时能正确滚动
-  nextTick(() => {
-    try {
-      if (logContainer.value && autoScrollLog.value) {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight;
-      }
-    } catch (error) {
-      // 忽略错误
-    }
-  });
+  scrollLogToBottom();
 };
 
 watch(autoScrollLog, (newValue) => {
-  if (newValue && logContainer.value) {
-    nextTick(() => {
-      try {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight;
-      } catch (error) {
-        // 忽略DOM操作错误
-        console.warn("Failed to scroll log container:", error);
-      }
-    });
-  }
+  if (newValue) scrollLogToBottom();
 });
+
+watch(
+  [() => filteredLogs.value.length, filterErrorsOnly],
+  () => {
+    scrollLogToBottom();
+  },
+  { flush: "post" },
+);
 
 const copyLogs = () => {
   if (logs.value.length === 0) {
@@ -5603,6 +6957,62 @@ const waitForConnection = async (
 // 全局连接队列控制 - 限制并发连接数
 const connectionQueue = { active: 0 };
 
+// 定时任务按账号执行时的连接会话。任务模块原本会在每个任务的 finally 中
+// 关闭连接，这里让同一账号的多个任务共享一条连接，账号任务全部完成后再统一释放。
+const scheduledTokenSession = {
+  active: false,
+  tokenId: null,
+  initialized: false,
+  initResult: null,
+  ownsConnection: false,
+  slotAcquired: false,
+};
+
+let scheduledTaskExecutionActive = false;
+
+const isScheduledTokenSession = (tokenId) =>
+  scheduledTokenSession.active && scheduledTokenSession.tokenId === tokenId;
+
+const beginScheduledTokenSession = (tokenId) => {
+  scheduledTokenSession.active = true;
+  scheduledTokenSession.tokenId = tokenId;
+  scheduledTokenSession.initialized = false;
+  scheduledTokenSession.initResult = null;
+  scheduledTokenSession.ownsConnection = false;
+  scheduledTokenSession.slotAcquired = false;
+};
+
+const endScheduledTokenSession = (tokenId, tokenName) => {
+  if (!isScheduledTokenSession(tokenId)) return;
+
+  const ownsConnection = scheduledTokenSession.ownsConnection;
+  const slotAcquired = scheduledTokenSession.slotAcquired;
+
+  // 先关闭会话标记，确保下面的真实关闭不会被 taskTokenStore 拦截。
+  scheduledTokenSession.active = false;
+  scheduledTokenSession.tokenId = null;
+  scheduledTokenSession.initialized = false;
+  scheduledTokenSession.initResult = null;
+  scheduledTokenSession.ownsConnection = false;
+  scheduledTokenSession.slotAcquired = false;
+
+  if (ownsConnection) {
+    tokenStore.closeWebSocketConnection(tokenId);
+    if (slotAcquired) releaseConnectionSlot();
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 全部任务完成，连接已关闭 (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+      type: "info",
+    });
+  } else {
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 全部任务完成，保留原有连接`,
+      type: "info",
+    });
+  }
+};
+
 const waitForConnectionSlot = async () => {
   while (connectionQueue.active >= batchSettings.maxActive) {
     await new Promise((r) => setTimeout(r, 1000));
@@ -5622,12 +7032,25 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     throw new Error(`Token not found: ${tokenId}`);
   }
 
+  // 同一账号会话内只初始化一次，后续任务直接复用连接和战斗版本数据。
+  if (
+    isScheduledTokenSession(tokenId) &&
+    scheduledTokenSession.initialized
+  ) {
+    return scheduledTokenSession.initResult || true;
+  }
+
   let status = tokenStore.getWebSocketStatus(tokenId);
   let connected = status === "connected";
 
   if (!connected) {
     // 等待连接槽位，限制并发连接数
     await waitForConnectionSlot();
+
+    if (isScheduledTokenSession(tokenId)) {
+      scheduledTokenSession.ownsConnection = true;
+      scheduledTokenSession.slotAcquired = true;
+    }
 
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -5671,6 +7094,10 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     if (!connected) {
       // 连接失败，释放槽位
       releaseConnectionSlot();
+      if (isScheduledTokenSession(tokenId)) {
+        scheduledTokenSession.ownsConnection = false;
+        scheduledTokenSession.slotAcquired = false;
+      }
       throw new Error("连接失败 (重试后仍超时)");
     }
   }
@@ -5678,6 +7105,7 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
   // 连接成功，槽位保持占用，直到任务完成后手动释放
 
   // Initialize Game Data (Critical for Battle Version and Session)
+  let mainLevelResult = null;
   try {
     // Fetch Role Info first (Standard flow)
     await tokenStore.sendMessageWithPromise(
@@ -5694,6 +7122,7 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
       {},
       5000,
     );
+    mainLevelResult = res;
     if (res?.battleData?.version) {
       tokenStore.setBattleVersion(res.battleData.version);
     }
@@ -5705,23 +7134,102 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     });
   }
 
-  return true;
+  if (isScheduledTokenSession(tokenId)) {
+    scheduledTokenSession.initialized = true;
+    scheduledTokenSession.initResult = mainLevelResult || true;
+  }
+
+  return mainLevelResult || true;
 };
+
+// 任务模块使用的会话感知依赖：普通批量任务行为不变，定时任务会话期间
+// 忽略模块内部的关闭/释放动作，避免每个子任务重复登录。
+const taskIsRunning = {
+  get value() {
+    return isRunning.value;
+  },
+  set value(value) {
+    if (scheduledTokenSession.active && value === false) return;
+    isRunning.value = value;
+  },
+};
+
+const taskShouldStop = {
+  get value() {
+    return shouldStop.value;
+  },
+  set value(value) {
+    // 任务模块每次开始都会把停止标记重置为 false；如果用户已经点击停止，
+    // 定时任务会话期间不能允许下一个子任务把停止请求清掉。
+    if (
+      scheduledTokenSession.active &&
+      value === false &&
+      shouldStop.value === true
+    ) {
+      return;
+    }
+    shouldStop.value = value;
+  },
+};
+
+const taskCurrentRunningTokenId = {
+  get value() {
+    return currentRunningTokenId.value;
+  },
+  set value(value) {
+    if (scheduledTokenSession.active && value === null) return;
+    currentRunningTokenId.value = value;
+  },
+};
+
+const taskReleaseConnectionSlot = () => {
+  if (scheduledTokenSession.active) return;
+  releaseConnectionSlot();
+};
+
+const taskAddLog = (log) => {
+  if (
+    scheduledTokenSession.active &&
+    typeof log?.message === "string" &&
+    log.message.includes("连接已关闭")
+  ) {
+    addLog({
+      ...log,
+      message: log.message.replace("连接已关闭", "当前任务完成，保持连接"),
+    });
+    return;
+  }
+  addLog(log);
+};
+
+const taskTokenStore = new Proxy(tokenStore, {
+  get(target, property) {
+    if (property === "closeWebSocketConnection") {
+      return (tokenId) => {
+        if (isScheduledTokenSession(tokenId)) return;
+        return target.closeWebSocketConnection(tokenId);
+      };
+    }
+
+    const value = target[property];
+    return typeof value === "function" ? value.bind(target) : value;
+  },
+});
 
 const createTaskDeps = () => ({
   selectedTokens,
   tokens,
   tokenStatus,
-  isRunning,
-  shouldStop,
+  isRunning: taskIsRunning,
+  shouldStop: taskShouldStop,
   ensureConnection,
-  releaseConnectionSlot,
+  releaseConnectionSlot: taskReleaseConnectionSlot,
   connectionQueue,
   batchSettings,
-  tokenStore,
-  addLog,
+  tokenStore: taskTokenStore,
+  addLog: taskAddLog,
   message,
-  currentRunningTokenId,
+  currentRunningTokenId: taskCurrentRunningTokenId,
   // 延迟配置
   delayConfig: {
     command: batchSettings.commandDelay,
@@ -5743,6 +7251,7 @@ const createTaskDeps = () => ({
   // 设置相关
   currentSettings,
   helperSettings,
+  activityWeek: getCurrentActivityWeek,
   // 功法赠送相关
   recipientIdInput,
   recipientInfo,
@@ -5774,6 +7283,7 @@ const tasksTower = createTasksTower(createTaskDeps());
 const {
   climbTower,
   climbWeirdTower,
+  batchWeirdTower,
   batchClaimFreeEnergy,
   skinChallenge,
   batchUseItems,
@@ -5788,9 +7298,12 @@ const {
   batchOpenBox,
   batchOpenBoxByPoints,
   batchClaimBoxPointReward,
+  batchSmartBoxWeekly,
+  batchSmartRecruitWeekly,
   batchFish,
   batchRecruit,
   batchHeroUpgrade,
+  batchHeroLevelUpgrade,
   batchBookUpgrade,
   batchClaimStarRewards,
   batchClaimPeachTasks,
@@ -5802,7 +7315,8 @@ const { batchbaoku13, batchbaoku45, batchmengjing, batchBuyDreamItems } =
   tasksDungeon;
 
 const tasksArena = createTasksArena(createTaskDeps());
-const { batcharenafight, batchTopUpFish, batchTopUpArena } = tasksArena;
+const { batcharenafight, batchTopUpFish, batchTopUpGoldFish, batchTopUpArena } =
+  tasksArena;
 
 const tasksStore = createTasksStore(createTaskDeps());
 const {
@@ -5813,13 +7327,51 @@ const {
 } = tasksStore;
 
 const tasksLegacy = createTasksLegacy(createTaskDeps());
-const { batchLegacyClaim, batchLegacyGiftSendEnhanced } = tasksLegacy;
+const {
+  batchLegacyClaim,
+  batchLegacyBeginHangUp,
+  batchLegacyClaimChargeReward,
+  batchLegacyGiftSendEnhanced,
+} = tasksLegacy;
+
+const tasksSalt = createTasksSalt(createTaskDeps());
+const { batchSaltSignup } = tasksSalt;
+
+const tasksMainLevel = createTasksMainLevel(createTaskDeps());
+const { batchPushMainLevelInfo, pushMainLevelInfo } = tasksMainLevel;
+
+const tasksFootball = createTasksFootball(createTaskDeps());
+const { batchFootballBet } = tasksFootball;
+
+const tasksApex = createTasksApex(createTaskDeps());
+const { batchApexGuess } = tasksApex;
+
+// 逐鹿盐山竞猜配置
+const apexScheduleId = ref(46);
+
+// 盐杯竞猜 pick 选择
+const footballPick = ref(3);
+const footballPickOptions = [
+  { label: "主胜", value: 1 },
+  { label: "平局", value: 2 },
+  { label: "客胜", value: 3 },
+];
+const footballPickLabel = computed(() => {
+  return footballPickOptions.find((o) => o.value === footballPick.value)?.label || "";
+});
+const onFootballPickChange = async (val) => {
+  footballPick.value = val;
+  await batchFootballBet(val);
+};
 
 const startBatch = async () => {
   if (selectedTokens.value.length === 0) return;
 
+  selectedTokens.value = normalizeTokenIdsByBatchOrder(selectedTokens.value);
   isRunning.value = true;
-  shouldStop.value = false;
+  if (!scheduledTaskExecutionActive) {
+    shouldStop.value = false;
+  }
   const batchStartTime = new Date();
   // 不再重置logs数组，保留之前的日志
   // logs.value = [];
@@ -5902,14 +7454,17 @@ const startBatch = async () => {
           });
         }
       } finally {
-        // 完成后关闭连接并释放槽位
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
-          type: "info",
-        });
+        // 定时任务按账号复用连接，统一由 executeScheduledTask 在账号全部
+        // 任务完成后关闭；普通批量执行仍保持原来的释放行为。
+        if (!isScheduledTokenSession(tokenId)) {
+          tokenStore.closeWebSocketConnection(tokenId);
+          releaseConnectionSlot();
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+            type: "info",
+          });
+        }
       }
     }
   });
@@ -5920,27 +7475,23 @@ const startBatch = async () => {
   // 等待所有任务完成后再继续
   await new Promise((r) => setTimeout(r, 1000));
 
-  isRunning.value = false;
-  currentRunningTokenId.value = null;
-  message.success("批量任务执行结束");
-
-  // 推送通知
-  const tokenResults = selectedTokens.value.map((tokenId) => {
-    const token = tokens.value.find((t) => t.id === tokenId);
-    return {
-      name: token?.name || tokenId,
-      status: tokenStatus.value[tokenId] || "failed",
-    };
-  });
-  const { title, content } = formatBatchTaskNotification(tokenResults, batchStartTime);
-  await sendNotifications(title, content);
+  if (!scheduledTaskExecutionActive) {
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量任务执行结束");
+  }
 };
 
 // 发送推送通知到所有已启用渠道
-const sendNotifications = async (title, content) => {
+const sendNotifications = async (title, content, options = {}) => {
   const promises = [];
 
-  if (batchSettings.wxpusherEnabled && batchSettings.wxpusherAppToken && batchSettings.wxpusherUids) {
+  if (
+    !options.skipWxPusher &&
+    batchSettings.wxpusherEnabled &&
+    batchSettings.wxpusherAppToken &&
+    batchSettings.wxpusherUids
+  ) {
     promises.push(
       sendWxPusherMessage(
         { appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids },
@@ -5950,6 +7501,12 @@ const sendNotifications = async (title, content) => {
         .then(() => addLog({ time: new Date().toLocaleTimeString(), message: "WxPusher 推送已发送", type: "success" }))
         .catch((err) => addLog({ time: new Date().toLocaleTimeString(), message: `WxPusher 推送失败: ${err.message}`, type: "error" })),
     );
+  } else if (options.skipWxPusher) {
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: "已跳过定时任务完成通知的 WxPusher 推送，避免主线关卡信息重复推送",
+      type: "info",
+    });
   }
 
   if (batchSettings.pushplusEnabled && batchSettings.pushplusToken) {
@@ -6002,9 +7559,10 @@ const stopBatch = () => {
 <style scoped>
 .batch-daily-tasks {
   padding: 20px;
-  height: 100vh;
+  height: calc(100vh - 64px);
   box-sizing: border-box;
   overflow: hidden;
+  min-height: 0;
 }
 
 .main-layout {
@@ -6012,12 +7570,14 @@ const stopBatch = () => {
   gap: 20px;
   height: 100%;
   overflow: hidden;
+  min-height: 0;
 }
 
 .left-column {
   flex: 1;
   overflow-y: auto;
   min-width: 0;
+  min-height: 0;
   padding-right: 8px;
 }
 
@@ -6026,7 +7586,11 @@ const stopBatch = () => {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  height: 700px;
+  height: calc(100vh - 104px);
+  max-height: calc(100vh - 104px);
+  min-height: 0;
+  position: sticky;
+  top: 20px;
 }
 
 .page-header {
@@ -6045,6 +7609,8 @@ const stopBatch = () => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .custom-card-header {
@@ -6116,11 +7682,18 @@ const stopBatch = () => {
   border-bottom: none;
 }
 
-.log-card :deep(.n-card__content) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+.log-card :deep(.n-card-content) {
+  flex: 1 1 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  row-gap: 10px;
   overflow: hidden;
+  min-height: 0;
+  height: 100%;
+}
+
+.log-card :deep(.n-card-header) {
+  flex: 0 0 auto;
 }
 
 .log-header-controls {
@@ -6130,14 +7703,42 @@ const stopBatch = () => {
 }
 
 .log-container {
-  flex: 1;
-  overflow-y: auto;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: #8f96a3 #e8e8e8;
   background: #f5f5f5;
-  padding: 10px;
   border-radius: 4px;
-  margin-top: 10px;
   font-family: monospace;
-  min-height: 200px;
+}
+
+.log-container::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.log-container::-webkit-scrollbar-track {
+  background: #e8e8e8;
+  border-radius: 6px;
+}
+
+.log-container::-webkit-scrollbar-thumb {
+  background: #8f96a3;
+  border: 2px solid #e8e8e8;
+  border-radius: 6px;
+}
+
+.log-container::-webkit-scrollbar-thumb:hover {
+  background: #6f7785;
+}
+
+.log-content {
+  padding: 10px;
 }
 
 .log-item {
@@ -6180,6 +7781,15 @@ const stopBatch = () => {
   gap: 16px;
 }
 
+.daily-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.daily-settings-full {
+  grid-column: 1 / -1;
+}
+
 .setting-item {
   display: flex;
   flex-direction: column;
@@ -6191,10 +7801,28 @@ const stopBatch = () => {
   color: #666;
 }
 
+.setting-label-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-description {
+  color: #999;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .setting-switches {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.daily-setting-switches {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .switch-row {
@@ -6241,12 +7869,35 @@ const stopBatch = () => {
   .right-column {
     width: 100%;
     height: auto;
+    max-height: none;
     flex-shrink: 0;
+    position: static;
+    top: auto;
+  }
+
+  .log-card {
+    height: auto;
+  }
+
+  .log-card :deep(.n-card-content) {
+    flex: none;
+    display: grid;
+    grid-template-rows: auto 300px;
+    height: auto;
+    overflow: hidden;
   }
 
   .log-container {
-    height: 300px;
+    height: 100%;
     min-height: 300px;
+    flex: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .daily-settings-grid,
+  .daily-setting-switches {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -6273,8 +7924,11 @@ const stopBatch = () => {
 
   .right-column {
     height: auto;
+    max-height: none;
     width: 100%;
     flex: none;
+    position: static;
+    top: auto;
   }
 
   .page-header {
@@ -6292,14 +7946,16 @@ const stopBatch = () => {
     height: auto !important;
   }
 
-  .log-card :deep(.n-card__content) {
+  .log-card :deep(.n-card-content) {
     flex: none !important;
-    overflow: visible !important;
-    display: block !important;
+    overflow: hidden !important;
+    display: grid !important;
+    grid-template-rows: auto 300px !important;
+    height: auto !important;
   }
 
   .log-container {
-    height: 300px;
+    height: 100%;
     min-height: 300px;
     flex: none !important;
   }

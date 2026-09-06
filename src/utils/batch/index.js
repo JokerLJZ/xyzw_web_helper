@@ -4,6 +4,9 @@ export * from './constants.js';
 // Cron utilities
 export * from './cronUtils.js';
 
+// Refresh scheduler
+export * from './refreshScheduler.js';
+
 // Connection manager
 export * from './connectionManager.js';
 
@@ -23,3 +26,7 @@ export { createTasksDungeon } from './tasksDungeon.js';
 export { createTasksArena } from './tasksArena.js';
 export { createTasksStore } from './tasksStore.js';
 export { createTasksLegacy } from './tasksLegacy.js';
+export { createTasksSalt } from './tasksSalt.js';
+export { createTasksMainLevel } from './tasksMainLevel.js';
+export { createTasksFootball } from './tasksFootball.js';
+export { createTasksApex } from './tasksApex.js';
