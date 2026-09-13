@@ -268,6 +268,8 @@ export function registerDefaultCommands(reg) {
     .register("mergebox_claimcostprogress", { actType: 1 })
     .register("mergebox_claimmergeprogress", { actType: 1 })
     .register("evotower_claimtask", { taskId: 1 })
+    .register("evotower_buyenergy", { energy: 1 })
+    .register("tower_buyenergy", { buyNum: 1 })
 
     // 瓶子机器人
     .register("bottlehelper_claim")
