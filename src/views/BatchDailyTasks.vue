@@ -375,6 +375,18 @@
                 >
                   一键盐场报名
                 </n-button>
+                <n-tooltip>
+                  <template #trigger>
+                    <n-button
+                      size="small"
+                      @click="batchCampChallenge"
+                      :disabled="isRunning || selectedTokens.length === 0"
+                    >
+                      自动营地挑战
+                    </n-button>
+                  </template>
+                  周二至周四：低战力优先，当日累计3胜即停；普通挑战至当日12次后，挑战宠物补齐。使用当前阵容，不使用挑战道具。
+                </n-tooltip>
                 <n-button
                   size="small"
                   @click="batcharenafight"
@@ -3324,6 +3336,7 @@ import {
   createTasksStore,
   createTasksLegacy,
   createTasksSalt,
+  createTasksCamp,
   createTasksMainLevel,
   createTasksFootball,
   createTasksApex,
@@ -4300,6 +4313,7 @@ const taskGroupDefinitions = [
       "batchlingguanzi",
       "batchclubsign",
       "batchSaltSignup",
+      "batchCampChallenge",
       "batcharenafight",
       "batchSmartSendCar",
       "batchClaimCars",
@@ -7336,6 +7350,7 @@ const {
 
 const tasksSalt = createTasksSalt(createTaskDeps());
 const { batchSaltSignup } = tasksSalt;
+const { batchCampChallenge } = createTasksCamp(createTaskDeps());
 
 const tasksMainLevel = createTasksMainLevel(createTaskDeps());
 const { batchPushMainLevelInfo, pushMainLevelInfo } = tasksMainLevel;

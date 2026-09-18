@@ -225,6 +225,8 @@ export function registerDefaultCommands(reg) {
     .register("legion_signup") // 盐场报名
     // 营地挑战 / 俱乐部战
     .register("club_getinfo")
+    .register("club_attack", { useItem: false })
+    .register("club_attackmonster", { useItem: false })
     .register("club_gettargetteam", { targetId: 0 })
     .register("club_getattackrecord")
     .register("club_getdefenserecord", { targetId: 0, targetIsMirror: false })
@@ -1142,6 +1144,8 @@ export class XyzwWebSocketClient {
       legionmatch_getrankresp: "legionmatch_getrank",
       legionmatch_getbattlerecordresp: "legionmatch_getbattlerecord",
       club_getinforesp: "club_getinfo",
+      club_attackresp: "club_attack",
+      club_attackmonsterresp: "club_attackmonster",
       club_gettargetteamresp: "club_gettargetteam",
       club_getattackrecordresp: "club_getattackrecord",
       club_getdefenserecordresp: "club_getdefenserecord",

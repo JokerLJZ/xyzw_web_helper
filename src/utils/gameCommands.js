@@ -775,6 +775,28 @@ export class GameCommands {
     };
   }
 
+  /** 营地据点挑战；阵容及据点计数由调用者从当前账号实时读取。 */
+  club_attack(ack = 0, seq = 0, params = {}) {
+    return {
+      ack,
+      body: this.g_utils.bon.encode({ useItem: false, ...params }),
+      cmd: "club_attack",
+      seq,
+      time: Date.now(),
+    };
+  }
+
+  /** 挑战营地宠物目标，补充个人成功次数。 */
+  club_attackmonster(ack = 0, seq = 0, params = {}) {
+    return {
+      ack,
+      body: this.g_utils.bon.encode({ useItem: false, ...params }),
+      cmd: "club_attackmonster",
+      seq,
+      time: Date.now(),
+    };
+  }
+
   /**
    * 获取营地挑战成员阵容详情
    *
