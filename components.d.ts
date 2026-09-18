@@ -26,6 +26,7 @@ declare module 'vue' {
     BossTower: typeof import('./src/components/Tower/BossTower.vue')['default']
     BottleHelperCard: typeof import('./src/components/cards/BottleHelperCard.vue')['default']
     BoxHelperCard: typeof import('./src/components/cards/BoxHelperCard.vue')['default']
+    CampChallenge: typeof import('./src/components/Club/CampChallenge.vue')['default']
     CarScoreInfo: typeof import('./src/components/Club/CarScoreInfo.vue')['default']
     CarTaskCard: typeof import('./src/components/CarTaskCard.vue')['default']
     ChangelogCard: typeof import('./src/components/ChangelogCard.vue')['default']

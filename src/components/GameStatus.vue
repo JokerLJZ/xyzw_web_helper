@@ -5,6 +5,7 @@
       'full-grid': activeSection === 'fightPvp',
       'full-page-mode':
         activeSection === 'saltFieldGroup' ||
+        activeSection === 'campChallengeGroup' ||
         activeSection === 'peachGroup' ||
         activeSection === 'rankGroup',
       'club-mode': activeSection === 'club',
@@ -25,6 +26,7 @@
       <n-tab-pane name="club" tab="俱乐部" />
       <n-tab-pane name="activity" tab="活动" />
       <n-tab-pane v-if="ENABLE_TOOLS_TAB" name="tools" tab="工具" />
+      <n-tab-pane name="campChallengeGroup" tab="营地挑战" />
       <n-tab-pane name="saltFieldGroup" tab="盐场" />
       <n-tab-pane name="peachGroup" tab="蟠桃园" />
       <n-tab-pane name="rankGroup" tab="排行榜" />
@@ -167,6 +169,11 @@
 
     <!-- 换皮闯关 -->
     <SkinChallengeCard v-show="activeSection === 'activity'" />
+
+    <!-- 营地挑战分组 -->
+    <div class="camp-challenge-group" v-if="activeSection === 'campChallengeGroup'">
+      <CampChallenge :key="tokenStore.selectedToken?.id" />
+    </div>
 
     <!-- 盐场分组（包含盐场、周战绩、月战绩） -->
     <div class="salt-field-group" v-if="activeSection === 'saltFieldGroup'">
@@ -389,6 +396,7 @@ import ServerRankList from "./cards/ServerRankListPageCard.vue";
 import LegionWarMap from "./Club/LegionWarMap.vue";
 import LegionWarStatistics from "./Club/LegionWarStatistics.vue";
 import Unlimitedlineup from "./cards/Unlimitedlineup.vue";
+import CampChallenge from "./Club/CampChallenge.vue";
 
 const tokenStore = useTokenStore();
 const message = useMessage();
