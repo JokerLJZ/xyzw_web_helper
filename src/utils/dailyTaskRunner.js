@@ -411,6 +411,34 @@ export class DailyTaskRunner {
     this.log("四圣碎片购买成功", "success");
   }
 
+  async runWhiteJadePurchase(tokenId) {
+    this.log("开始购买白玉");
+
+    const result = await this.executeGameCommand(
+      tokenId,
+      "legion_storebuygoods",
+      { id: 5 },
+      "购买白玉",
+      5000,
+    );
+
+    if (result?.error) {
+      if (result.error.includes("俱乐部商品购买数量超出上限")) {
+        this.log("本周已购买过白玉，跳过", "info");
+        return;
+      }
+
+      if (result.error.includes("物品不存在")) {
+        this.log("盐锭不足或未加入军团，购买白玉失败", "warning");
+        return;
+      }
+
+      throw new Error(result.error);
+    }
+
+    this.log("白玉购买成功", "success");
+  }
+
   async getLatestRole(tokenId, description = "获取最新角色信息") {
     const roleInfoRes = await this.executeGameCommand(
       tokenId,
@@ -809,6 +837,7 @@ export class DailyTaskRunner {
         blackMarketPurchase: true,
         blackMarketDiscountPurchase: false,
         holyBeastFragmentPurchase: false,
+        whiteJadePurchase: false,
         freeGachaEnable: true,
         studyEnable: true,
         dreamEnable: true,
@@ -1230,6 +1259,17 @@ export class DailyTaskRunner {
         });
       } else {
         this.log("四圣碎片购买跳过：仅周一执行", "info");
+      }
+    }
+
+    if (settings.whiteJadePurchase === true) {
+      if (isMonday()) {
+        taskList.push({
+          name: "购买白玉",
+          execute: () => this.runWhiteJadePurchase(tokenId),
+        });
+      } else {
+        this.log("白玉购买跳过：仅周一执行", "info");
       }
     }
 

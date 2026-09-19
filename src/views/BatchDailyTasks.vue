@@ -615,6 +615,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="legionStoreBuyWhiteJade"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键购买白玉
+                </n-button>
+                <n-button
+                  size="small"
                   @click="legionStoreBuySkinCoins"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -877,6 +884,10 @@
               ><n-switch v-model:value="currentSettings.holyBeastFragmentPurchase" />
             </div>
             <div class="switch-row">
+              <span class="switch-label">周一购买白玉</span
+              ><n-switch v-model:value="currentSettings.whiteJadePurchase" />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">付费招募</span
               ><n-switch v-model:value="currentSettings.payRecruit" />
             </div>
@@ -1000,6 +1011,10 @@
             <div class="switch-row">
               <span class="switch-label">周一购买四圣碎片</span
               ><n-switch v-model:value="currentTemplate.holyBeastFragmentPurchase" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">周一购买白玉</span
+              ><n-switch v-model:value="currentTemplate.whiteJadePurchase" />
             </div>
             <div class="switch-row">
               <span class="switch-label">付费招募</span
@@ -3947,6 +3962,7 @@ const currentSettings = reactive({
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
   holyBeastFragmentPurchase: false,
+  whiteJadePurchase: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -3979,6 +3995,7 @@ const currentTemplate = reactive({
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
   holyBeastFragmentPurchase: false,
+  whiteJadePurchase: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -4454,6 +4471,7 @@ const taskGroupDefinitions = [
       "batchFish",
       "batchRecruit",
       "legion_storebuygoods",
+      "legionStoreBuyWhiteJade",
     ],
   },
   {
@@ -6453,6 +6471,7 @@ const loadSettings = (tokenId) => {
       blackMarketPurchase: true,
       blackMarketDiscountPurchase: false,
       holyBeastFragmentPurchase: false,
+      whiteJadePurchase: false,
       studyEnable: true,
       dreamEnable: true,
       genieSweepEnable: false,
@@ -6505,6 +6524,7 @@ const openTaskTemplateModal = () => {
     blackMarketPurchase: true,
     blackMarketDiscountPurchase: false,
     holyBeastFragmentPurchase: false,
+    whiteJadePurchase: false,
     studyEnable: true,
     dreamEnable: true,
     genieSweepEnable: false,
@@ -6662,6 +6682,7 @@ const resetTemplateForm = () => {
     blackMarketPurchase: true,
     blackMarketDiscountPurchase: false,
     holyBeastFragmentPurchase: false,
+    whiteJadePurchase: false,
     studyEnable: true,
     dreamEnable: true,
     genieSweepEnable: false,
@@ -7445,6 +7466,7 @@ const { batcharenafight, batchTopUpFish, batchTopUpGoldFish, batchTopUpArena } =
 const tasksStore = createTasksStore(createTaskDeps());
 const {
   legion_storebuygoods,
+  legionStoreBuyWhiteJade,
   legionStoreBuySkinCoins,
   store_purchase,
   store_discount_purchase,

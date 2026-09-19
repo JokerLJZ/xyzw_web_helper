@@ -199,6 +199,11 @@
             </div>
 
             <div class="switch-row">
+              <span class="switch-label">周一购买白玉</span>
+              <n-switch v-model:value="settings.whiteJadePurchase" />
+            </div>
+
+            <div class="switch-row">
               <span class="switch-label">付费招募</span>
               <n-switch v-model:value="settings.payRecruit" />
             </div>
@@ -363,6 +368,7 @@ const settings = reactive({
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
   holyBeastFragmentPurchase: false,
+  whiteJadePurchase: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -386,6 +392,7 @@ const defaultDailySettings = {
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
   holyBeastFragmentPurchase: false,
+  whiteJadePurchase: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,

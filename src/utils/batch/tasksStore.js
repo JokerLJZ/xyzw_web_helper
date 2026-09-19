@@ -1,7 +1,8 @@
 /**
  * 商店类任务
- * 包含: legion_storebuygoods, legionStoreBuySkinCoins, store_purchase,
- * store_discount_purchase, collection_claimfreereward
+ * 包含: legion_storebuygoods, legionStoreBuyWhiteJade,
+ * legionStoreBuySkinCoins, store_purchase, store_discount_purchase,
+ * collection_claimfreereward
  */
 
 import {
@@ -32,10 +33,7 @@ export function createTasksStore(deps) {
     delayConfig,
   } = deps;
 
-  /**
-   * 一键购买四圣碎片
-   */
-  const legion_storebuygoods = async () => {
+  const purchaseSingleLegionStoreGood = async ({ goodsId, itemName }) => {
     if (selectedTokens.value.length === 0) return;
 
     isRunning.value = true;
@@ -55,7 +53,7 @@ export function createTasksStore(deps) {
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始购买四圣碎片: ${token.name} ===`,
+          message: `=== 开始购买${itemName}: ${token.name} ===`,
           type: "info",
         });
 
@@ -69,7 +67,7 @@ export function createTasksStore(deps) {
         const result = await tokenStore.sendMessageWithPromise(
           tokenId,
           "legion_storebuygoods",
-          { id: 6 },
+          { id: goodsId },
           5000,
         );
 
@@ -79,7 +77,7 @@ export function createTasksStore(deps) {
           if (result.error.includes("俱乐部商品购买数量超出上限")) {
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 本周已购买过四圣碎片，跳过`,
+              message: `${token.name} 本周已购买过${itemName}，跳过`,
               type: "info",
             });
           } else if (result.error.includes("物品不存在")) {
@@ -100,7 +98,7 @@ export function createTasksStore(deps) {
         } else {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 购买成功，获得四圣碎片`,
+            message: `${token.name} 购买成功，获得${itemName}`,
             type: "success",
           });
           tokenStatus.value[tokenId] = "completed";
@@ -129,6 +127,14 @@ export function createTasksStore(deps) {
     isRunning.value = false;
     shouldStop.value = false;
   };
+
+  /** 一键购买四圣碎片。 */
+  const legion_storebuygoods = () =>
+    purchaseSingleLegionStoreGood({ goodsId: 6, itemName: "四圣碎片" });
+
+  /** 一键购买白玉。 */
+  const legionStoreBuyWhiteJade = () =>
+    purchaseSingleLegionStoreGood({ goodsId: 5, itemName: "白玉" });
 
   /**
    * 一键购买俱乐部5皮肤币
@@ -418,6 +424,7 @@ export function createTasksStore(deps) {
 
   return {
     legion_storebuygoods,
+    legionStoreBuyWhiteJade,
     legionStoreBuySkinCoins,
     store_purchase,
     store_discount_purchase,
