@@ -1,9 +1,13 @@
 /**
  * 商店类任务
- * 包含: legion_storebuygoods, legionStoreBuySkinCoins, store_purchase, collection_claimfreereward
+ * 包含: legion_storebuygoods, legionStoreBuySkinCoins, store_purchase,
+ * store_discount_purchase, collection_claimfreereward
  */
 
-import { runBlackMarketPurchase } from "@/utils/blackMarket.js";
+import {
+  BLACK_MARKET_MODES,
+  runBlackMarketPurchase,
+} from "@/utils/blackMarket.js";
 
 /**
  * 创建商店类任务执行器
@@ -71,7 +75,7 @@ export function createTasksStore(deps) {
 
         await new Promise((r) => setTimeout(r, delayConfig.action));
 
-        if (result.error) {
+        if (result?.error) {
           if (result.error.includes("俱乐部商品购买数量超出上限")) {
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -310,10 +314,7 @@ export function createTasksStore(deps) {
     shouldStop.value = false;
   };
 
-  /**
-   * 黑市一键采购
-   */
-  const store_purchase = async () => {
+  const executeBlackMarketPurchase = async (mode, taskName) => {
     if (selectedTokens.value.length === 0) return;
 
     isRunning.value = true;
@@ -333,7 +334,7 @@ export function createTasksStore(deps) {
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始黑市一键采购: ${token.name} ===`,
+          message: `=== 开始${taskName}: ${token.name} ===`,
           type: "info",
         });
 
@@ -341,11 +342,11 @@ export function createTasksStore(deps) {
 
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 发送黑市采购请求...`,
+          message: `${token.name} 发送${taskName}请求...`,
           type: "info",
         });
         const purchase = await runBlackMarketPurchase({
-          settings: batchSettings,
+          settings: { ...batchSettings, blackMarketPurchaseMode: mode },
           send: (cmd, params) =>
             tokenStore.sendMessageWithPromise(tokenId, cmd, params, 5000),
         });
@@ -367,14 +368,14 @@ export function createTasksStore(deps) {
         if (result.error) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 黑市采购失败: ${result.error}`,
+            message: `${token.name} ${taskName}失败: ${result.error}`,
             type: "error",
           });
           tokenStatus.value[tokenId] = "failed";
         } else {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 黑市采购成功`,
+            message: `${token.name} ${taskName}成功`,
             type: "success",
           });
           tokenStatus.value[tokenId] = "completed";
@@ -382,7 +383,7 @@ export function createTasksStore(deps) {
       } catch (error) {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 黑市采购过程出错: ${error.message}`,
+          message: `${token.name} ${taskName}过程出错: ${error.message}`,
           type: "error",
         });
         tokenStatus.value[tokenId] = "failed";
@@ -404,10 +405,22 @@ export function createTasksStore(deps) {
     shouldStop.value = false;
   };
 
+  /** 原有游戏内采购清单模式。 */
+  const store_purchase = () =>
+    executeBlackMarketPurchase(BLACK_MARKET_MODES.LEGACY, "黑市一键采购");
+
+  /** 读取当前商品折扣后直接购买，不读取或修改游戏内采购清单。 */
+  const store_discount_purchase = () =>
+    executeBlackMarketPurchase(
+      BLACK_MARKET_MODES.DISCOUNT,
+      "黑市按折扣直购",
+    );
+
   return {
     legion_storebuygoods,
     legionStoreBuySkinCoins,
     store_purchase,
+    store_discount_purchase,
     collection_claimfreereward,
   };
 }

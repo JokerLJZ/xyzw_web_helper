@@ -718,6 +718,14 @@
                 >
                   智能招募周任务
                 </n-button>
+                <n-button
+                  size="small"
+                  @click="store_discount_purchase"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="按通用折扣阈值读取当前商品并直接购买，不影响游戏内采购清单"
+                >
+                  黑市按折扣直购
+                </n-button>
               </n-space>
             </n-tab-pane>
           </n-tabs>
@@ -856,6 +864,15 @@
               ><n-switch v-model:value="currentSettings.blackMarketPurchase" />
             </div>
             <div class="switch-row">
+              <span
+                class="switch-label"
+                title="按批量设置中的通用折扣阈值读取当前商品并直接购买，不影响游戏内采购清单"
+              >黑市按折扣直购</span
+              ><n-switch
+                v-model:value="currentSettings.blackMarketDiscountPurchase"
+              />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">周一购买四圣碎片</span
               ><n-switch v-model:value="currentSettings.holyBeastFragmentPurchase" />
             </div>
@@ -970,6 +987,15 @@
             <div class="switch-row">
               <span class="switch-label">黑市购买物品</span
               ><n-switch v-model:value="currentTemplate.blackMarketPurchase" />
+            </div>
+            <div class="switch-row">
+              <span
+                class="switch-label"
+                title="按批量设置中的通用折扣阈值读取当前商品并直接购买，不影响游戏内采购清单"
+              >黑市按折扣直购</span
+              ><n-switch
+                v-model:value="currentTemplate.blackMarketDiscountPurchase"
+              />
             </div>
             <div class="switch-row">
               <span class="switch-label">周一购买四圣碎片</span
@@ -2380,63 +2406,39 @@
               </div>
             </div>
             <n-divider title-placement="left" style="margin: 12px 0 8px 0"
-              >黑市采购设置</n-divider
+              >黑市按折扣直购设置</n-divider
             >
-            <div class="settings-grid">
+            <n-alert
+              type="success"
+              :show-icon="false"
+              style="margin: 8px 0"
+            >
+              这些阈值只供“黑市按折扣直购”使用。实际折扣小于或等于阈值时直接购买，不读取或修改游戏内采购清单，也不影响原有“一键黑市采购”。
+            </n-alert>
+            <div class="black-market-discount-grid">
               <div
-                class="setting-item"
-                style="
-                  flex-direction: row;
-                  justify-content: space-between;
-                  align-items: center;
-                "
+                v-for="item in BLACK_MARKET_ITEMS"
+                :key="item.itemId"
+                class="black-market-discount-item"
               >
-                <label class="setting-label">采购模式</label>
-                <n-select
-                  v-model:value="batchSettings.blackMarketPurchaseMode"
-                  :options="blackMarketModeOptions"
+                <span>{{ item.name }}</span>
+                <n-input-number
+                  v-model:value="batchSettings.blackMarketDiscounts[item.itemId]"
+                  :min="1"
+                  :max="10"
+                  :step="1"
                   size="small"
-                  style="width: 180px"
-                />
+                  style="width: 82px"
+                >
+                  <template #suffix>折</template>
+                </n-input-number>
               </div>
             </div>
-            <n-alert
-              v-if="batchSettings.blackMarketPurchaseMode === 'legacy'"
-              type="info"
-              :show-icon="false"
-              style="margin-top: 8px"
-            >
-              沿用账号在游戏内保存的自动采购清单。
-            </n-alert>
-            <template v-else>
-              <n-alert type="success" :show-icon="false" style="margin: 8px 0">
-                读取当前商品后直接购买实际折扣小于或等于阈值的商品；不会读取或修改游戏内采购清单。这里的设置对所有账号通用。
-              </n-alert>
-              <div class="black-market-discount-grid">
-                <div
-                  v-for="item in BLACK_MARKET_ITEMS"
-                  :key="item.itemId"
-                  class="black-market-discount-item"
-                >
-                  <span>{{ item.name }}</span>
-                  <n-input-number
-                    v-model:value="batchSettings.blackMarketDiscounts[item.itemId]"
-                    :min="1"
-                    :max="10"
-                    :step="1"
-                    size="small"
-                    style="width: 82px"
-                  >
-                    <template #suffix>折</template>
-                  </n-input-number>
-                </div>
-              </div>
-              <div style="margin-top: 8px; text-align: right">
-                <n-button size="tiny" @click="resetBlackMarketDiscounts">
-                  恢复预设阈值
-                </n-button>
-              </div>
-            </template>
+            <div style="margin-top: 8px; text-align: right">
+              <n-button size="tiny" @click="resetBlackMarketDiscounts">
+                恢复预设阈值
+              </n-button>
+            </div>
             <n-divider title-placement="left" style="margin: 12px 0 8px 0"
               >智能发车条件设置(0为不限制)</n-divider
             >
@@ -3922,6 +3924,7 @@ const currentSettings = reactive({
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  blackMarketDiscountPurchase: false,
   holyBeastFragmentPurchase: false,
   studyEnable: true,
   dreamEnable: true,
@@ -3953,6 +3956,7 @@ const currentTemplate = reactive({
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  blackMarketDiscountPurchase: false,
   holyBeastFragmentPurchase: false,
   studyEnable: true,
   dreamEnable: true,
@@ -4101,7 +4105,6 @@ for (const merchantId in goldItemsConfig) {
 
 const batchSettings = reactive({
   dreamPurchaseList: defaultDreamPurchaseList,
-  blackMarketPurchaseMode: "legacy",
   blackMarketDiscounts: { ...DEFAULT_BLACK_MARKET_DISCOUNTS },
   boxCount: 100,
   fishCount: 100,
@@ -4154,7 +4157,9 @@ const loadBatchSettings = () => {
       const parsed = JSON.parse(saved);
       Object.assign(batchSettings, parsed);
     }
-    Object.assign(batchSettings, normalizeBlackMarketSettings(batchSettings));
+    batchSettings.blackMarketDiscounts =
+      normalizeBlackMarketSettings(batchSettings).blackMarketDiscounts;
+    delete batchSettings.blackMarketPurchaseMode;
   } catch (error) {
     console.error("Failed to load batch settings:", error);
   }
@@ -4163,7 +4168,9 @@ const loadBatchSettings = () => {
 // Save batch settings to localStorage
 const saveBatchSettings = () => {
   try {
-    Object.assign(batchSettings, normalizeBlackMarketSettings(batchSettings));
+    batchSettings.blackMarketDiscounts =
+      normalizeBlackMarketSettings(batchSettings).blackMarketDiscounts;
+    delete batchSettings.blackMarketPurchaseMode;
     localStorage.setItem("batchSettings", JSON.stringify(batchSettings));
     message.success("定时批量任务设置已保存");
     showBatchSettingsModal.value = false;
@@ -4172,11 +4179,6 @@ const saveBatchSettings = () => {
     message.error("保存设置失败");
   }
 };
-
-const blackMarketModeOptions = [
-  { label: "游戏内采购清单", value: "legacy" },
-  { label: "通用折扣阈值", value: "discount" },
-];
 
 const resetBlackMarketDiscounts = () => {
   batchSettings.blackMarketDiscounts = { ...DEFAULT_BLACK_MARKET_DISCOUNTS };
@@ -4449,6 +4451,7 @@ const taskGroupDefinitions = [
       "batchPushMainLevelInfo",
       "batchSmartBoxWeekly",
       "batchSmartRecruitWeekly",
+      "store_discount_purchase",
     ],
   },
 ];
@@ -6420,6 +6423,7 @@ const loadSettings = (tokenId) => {
       claimHangUp: true,
       claimEmail: true,
       blackMarketPurchase: true,
+      blackMarketDiscountPurchase: false,
       holyBeastFragmentPurchase: false,
       studyEnable: true,
       dreamEnable: true,
@@ -6471,6 +6475,7 @@ const openTaskTemplateModal = () => {
     claimHangUp: true,
     claimEmail: true,
     blackMarketPurchase: true,
+    blackMarketDiscountPurchase: false,
     holyBeastFragmentPurchase: false,
     studyEnable: true,
     dreamEnable: true,
@@ -6627,6 +6632,7 @@ const resetTemplateForm = () => {
     claimHangUp: true,
     claimEmail: true,
     blackMarketPurchase: true,
+    blackMarketDiscountPurchase: false,
     holyBeastFragmentPurchase: false,
     studyEnable: true,
     dreamEnable: true,
@@ -7413,6 +7419,7 @@ const {
   legion_storebuygoods,
   legionStoreBuySkinCoins,
   store_purchase,
+  store_discount_purchase,
   collection_claimfreereward,
 } = tasksStore;
 

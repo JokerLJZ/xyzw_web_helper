@@ -8,6 +8,7 @@ import {
   runBlackMarketPurchase,
   selectDiscountPurchases,
 } from "../src/utils/blackMarket.js";
+import { createTasksStore } from "../src/utils/batch/tasksStore.js";
 
 test("黑市九种物品使用固定商品槽位及预设折扣阈值", () => {
   assert.deepEqual(
@@ -137,4 +138,48 @@ test("通用设置可持久化读取并修正越界阈值", () => {
   assert.equal(settings.blackMarketDiscounts[2003], 10);
   assert.equal(settings.blackMarketDiscounts[2004], 6);
   assert.equal(settings.blackMarketDiscounts[1001], 8);
+});
+
+test("批量旧采购与折扣直购是两个互不切换的任务", async () => {
+  const calls = [];
+  const ref = (value) => ({ value });
+  const tasks = createTasksStore({
+    selectedTokens: ref(["token-1"]),
+    tokens: ref([{ id: "token-1", name: "测试账号" }]),
+    tokenStatus: ref({}),
+    isRunning: ref(false),
+    shouldStop: ref(false),
+    ensureConnection: async () => {},
+    releaseConnectionSlot: () => {},
+    connectionQueue: { active: 0 },
+    batchSettings: {
+      maxActive: 2,
+      blackMarketPurchaseMode: "discount",
+      blackMarketDiscounts: { 2002: 5 },
+    },
+    tokenStore: {
+      sendMessageWithPromise: async (_tokenId, cmd, params) => {
+        calls.push({ cmd, params });
+        if (cmd === "store_goodslist") {
+          return { goodsList: { 1: { buy_quantity: 0, discount: 0.5 } } };
+        }
+        return { ok: true };
+      },
+      closeWebSocketConnection: () => {},
+    },
+    addLog: () => {},
+    message: {},
+    currentRunningTokenId: ref(null),
+    delayConfig: { action: 0 },
+  });
+
+  await tasks.store_purchase();
+  assert.deepEqual(calls, [{ cmd: "store_purchase", params: {} }]);
+
+  calls.length = 0;
+  await tasks.store_discount_purchase();
+  assert.deepEqual(calls, [
+    { cmd: "store_goodslist", params: { storeId: 1 } },
+    { cmd: "store_buy", params: { goodsId: 1 } },
+  ]);
 });

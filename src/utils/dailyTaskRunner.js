@@ -3,6 +3,7 @@ import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
 import { isDreamEnabled, runAutomaticDream } from "@/utils/dreamTaskRunner.js";
 import { goldItemsConfig, merchantConfig } from "@/utils/dreamConstants";
 import {
+  BLACK_MARKET_MODES,
   loadBlackMarketSettings,
   runBlackMarketPurchase,
 } from "@/utils/blackMarket.js";
@@ -157,8 +158,11 @@ export class DailyTaskRunner {
     }
   }
 
-  async runBlackMarketTask(tokenId) {
-    const blackMarketSettings = loadBlackMarketSettings();
+  async runBlackMarketTask(tokenId, mode = BLACK_MARKET_MODES.LEGACY) {
+    const blackMarketSettings = {
+      ...loadBlackMarketSettings(),
+      blackMarketPurchaseMode: mode,
+    };
     return runBlackMarketPurchase({
       settings: blackMarketSettings,
       send: (cmd, params) =>
@@ -801,6 +805,7 @@ export class DailyTaskRunner {
         claimHangUp: true,
         claimEmail: true,
         blackMarketPurchase: true,
+        blackMarketDiscountPurchase: false,
         holyBeastFragmentPurchase: false,
         freeGachaEnable: true,
         studyEnable: true,
@@ -1326,7 +1331,16 @@ export class DailyTaskRunner {
     if (!isTaskCompleted(12) && settings.blackMarketPurchase) {
       taskList.push({
         name: "黑市购买1次物品",
-        execute: () => this.runBlackMarketTask(tokenId),
+        execute: () =>
+          this.runBlackMarketTask(tokenId, BLACK_MARKET_MODES.LEGACY),
+      });
+    }
+
+    if (settings.blackMarketDiscountPurchase === true) {
+      taskList.push({
+        name: "黑市按折扣直购",
+        execute: () =>
+          this.runBlackMarketTask(tokenId, BLACK_MARKET_MODES.DISCOUNT),
       });
     }
 
