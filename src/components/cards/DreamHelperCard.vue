@@ -11,6 +11,7 @@
     </template>
     <template #default>
       <div class="dream-helper-content">
+        <p v-if="dreamProgress" role="status">{{ dreamProgress }}</p>
         <div class="tabs">
           <div
             class="tab"
@@ -44,7 +45,7 @@
                   type="primary"
                   size="small"
                   :class="{ 'stop-btn': continuousBattles[hero.id] }"
-                  @click="toggleContinuousBattle(hero.id)"
+                  :disabled="dreamPushRunning" @click="toggleContinuousBattle(hero.id)"
                 >
                   {{ continuousBattles[hero.id] ? "停止" : "连续战斗" }}
                 </a-button>
@@ -52,10 +53,10 @@
             </div>
           </div>
           <div class="team-actions">
-            <a-button type="primary" size="small" @click="getDefaultTeam"
+            <a-button type="primary" size="small" :disabled="dreamPushRunning" @click="getDefaultTeam"
               >获取队伍</a-button
             >
-            <a-button type="primary" size="small" @click="selectDreamTeam"
+            <a-button type="primary" size="small" :disabled="dreamPushRunning" @click="selectDreamTeam"
               >选择阵容</a-button
             >
             <a-button type="primary" size="small" @click="stopAllBattles"
@@ -69,13 +70,13 @@
           <div class="merchant-info">
             <div class="merchant-title">商品列表</div>
             <div class="merchant-actions">
-              <a-button type="primary" size="small" @click="refreshMerchantList"
+              <a-button type="primary" size="small" :disabled="dreamPushRunning" @click="refreshMerchantList"
                 >获取商品</a-button
               >
-              <a-button type="primary" size="small" @click="buyAllGoldItems"
+              <a-button type="primary" size="small" :disabled="dreamPushRunning" @click="buyAllGoldItems"
                 >一键购买金币商品</a-button
               >
-              <a-button type="primary" size="small" @click="buyAllGoldFishItems"
+              <a-button type="primary" size="small" :disabled="dreamPushRunning" @click="buyAllGoldFishItems"
                 >一键购买高级商人鱼竿</a-button
               >
             </div>
@@ -113,8 +114,9 @@
         block
         @click="startDreamHelper"
       >
-        {{ isRunning ? "运行中" : "启动梦境助手" }}
+        {{ isRunning ? "运行中" : "梦境自动推层" }}
       </a-button>
+      <a-button v-if="dreamPushRunning" size="small" block @click="stopAllBattles">停止推层</a-button>
     </template>
   </MyCard>
 </template>
@@ -123,6 +125,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, watchEffect } from "vue";
 import { useMessage } from "naive-ui";
 import { useTokenStore } from "@/stores/tokenStore";
+import { isDreamEnabled, runDreamAutoPush } from "@/utils/dreamTaskRunner.js";
 import MyCard from "../Common/MyCard.vue";
 import {
   merchantConfig,
@@ -139,6 +142,9 @@ const iconPath = computed(
 
 // 状态管理
 const isRunning = ref(false);
+const dreamPushRunning = ref(false);
+const dreamPushStopped = ref(false);
+const dreamProgress = ref("");
 const activeTab = ref("battle");
 const isLoading = ref(false);
 const hasDefaultInfo = ref(false);
@@ -415,6 +421,7 @@ function toggleContinuousBattle(heroId) {
 
 // 停止所有战斗
 function stopAllBattles() {
+  dreamPushStopped.value = true;
   continuousBattles.value = {};
   message.info("所有连续战斗已停止");
 }
@@ -704,29 +711,48 @@ async function refreshMerchantList() {
   }
 }
 
-// 启动梦境助手
+// 启动梦境助手：与日常、批量任务共用相同的推层逻辑。
 const startDreamHelper = async () => {
-  if (!tokenStore.selectedToken) {
-    message.warning("请先选择Token");
+  const tokenId = tokenStore.selectedToken?.id;
+  if (!tokenId || isRunning.value) return;
+  if (Object.values(continuousBattles.value).some(Boolean)) {
+    message.warning("请先停止单英雄连续战斗，再启动自动推层");
     return;
   }
-  if (!isDungeonOpen()) {
-    message.warning("当前不是梦境开放时间（周三/周四/周日/周一）");
+  if (tokenStore.getWebSocketStatus(tokenId) !== "connected") {
+    message.warning("请先连接当前账号");
     return;
   }
-
   isRunning.value = true;
-  message.info("梦境助手运行中");
-
-  // 这里可以根据需要实现自动运行逻辑
-  // 例如：自动获取队伍 -> 选择阵容 -> 开始连续战斗 -> 购买商品
-
-  // 暂时先简单实现，获取队伍信息
-  await getDefaultTeam();
-
-  isRunning.value = false;
-  message.success("梦境助手运行完毕");
+  dreamPushRunning.value = true;
+  dreamPushStopped.value = false;
+  try {
+    const result = await runDreamAutoPush({
+      enabled: isDreamEnabled(tokenId),
+      send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
+      stopped: () => dreamPushStopped.value || tokenStore.selectedToken?.id !== tokenId,
+      log: (text) => { dreamProgress.value = text; },
+    });
+    dreamProgress.value = `${result.reason}${result.floor === undefined ? "" : `，当前第 ${result.floor} 层`}`;
+    message.info(dreamProgress.value);
+  } catch (error) {
+    dreamProgress.value = error.message;
+    if (!dreamPushStopped.value) message.error(error.message);
+  } finally {
+    dreamPushRunning.value = false;
+    isRunning.value = false;
+  }
 };
+
+watch(() => tokenStore.selectedToken?.id, () => {
+  dreamPushStopped.value = true;
+  continuousBattles.value = {};
+  dreamProgress.value = "";
+});
+onUnmounted(() => {
+  dreamPushStopped.value = true;
+  continuousBattles.value = {};
+});
 </script>
 
 <style scoped lang="scss">

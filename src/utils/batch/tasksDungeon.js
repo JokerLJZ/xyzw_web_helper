@@ -1,4 +1,5 @@
 import { isDungeonOpen, merchantConfig } from "@/utils/dreamConstants";
+import { isDreamEnabled, runDreamAutoPush } from "@/utils/dreamTaskRunner.js";
 
 /**
  * 宝库、梦境类任务
@@ -31,13 +32,6 @@ export function createTasksDungeon(deps) {
 
   const getDreamPurchaseList = () => batchSettings.dreamPurchaseList || [];
 
-  const getServerErrorCode = (error) => {
-    const messageText = error?.message || "";
-    const match = messageText.match(/服务器错误:\s*(\d+)/);
-    return match ? Number(match[1]) : null;
-  };
-
-  const DREAM_SELECT_CONTINUE_ERROR_CODES = new Set([2600040]);
 
   const runDreamPurchaseForToken = async (tokenId, token, purchaseList) => {
     if (purchaseList.length === 0) {
@@ -333,42 +327,34 @@ export function createTasksDungeon(deps) {
       if (shouldStop.value) return;
       tokenStatus.value[tokenId] = "running";
       const token = tokens.value.find((t) => t.id === tokenId);
+      let connected = false;
+      const ownsSlot = tokenStore.getWebSocketStatus(tokenId) !== "connected";
       try {
+        if (!isDreamEnabled(tokenId)) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} 已关闭梦境功能，跳过`, type: "info" });
+          return;
+        }
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `=== 开始咸王梦境: ${token.name} ===`,
           type: "info",
         });
         await ensureConnection(tokenId);
+        connected = true;
         if (shouldStop.value) return;
-        const mjbattleTeam = { 0: 107 };
-
-        try {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "dungeon_selecthero",
-            { battleTeam: mjbattleTeam },
-            5000,
-          );
-        } catch (dreamError) {
-          const errorCode = getServerErrorCode(dreamError);
-          if (!DREAM_SELECT_CONTINUE_ERROR_CODES.has(errorCode)) {
-            throw dreamError;
-          }
-
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 咸王梦境指令返回 ${errorCode}，继续执行梦境购买`,
-            type: "warning",
-          });
-        }
-
-        await sleep(500);
+        const result = await runDreamAutoPush({
+          send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
+          stopped: () => shouldStop.value,
+          pause: () => sleep(Math.max(500, Number(batchSettings.commandDelay) || 500)),
+          log: (text) => addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} ${text}`, type: "info" }),
+        });
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 咸王梦境指令已完成，开始执行梦境购买 ===`,
-          type: "success",
+          message: `${token.name} 梦境自动推层：${result.reason}，当前层数 ${result.floor ?? "未知"}`,
+          type: "info",
         });
+        if (shouldStop.value || result.status === "skipped") return;
 
         await runDreamPurchaseForToken(tokenId, token, purchaseList);
 
@@ -387,9 +373,11 @@ export function createTasksDungeon(deps) {
           type: "error",
         });
       } finally {
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-        addLog({
+        if (connected) {
+          tokenStore.closeWebSocketConnection(tokenId);
+          if (ownsSlot) releaseConnectionSlot();
+        }
+        if (connected) addLog({
           time: new Date().toLocaleTimeString(),
           message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
           type: "info",
@@ -400,7 +388,8 @@ export function createTasksDungeon(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("批量梦境结束");
+    if (shouldStop.value) message.warning("梦境自动推层已停止");
+    else message.info("批量梦境结束，请查看各账号推层结果");
   };
 
   /**
@@ -431,13 +420,22 @@ export function createTasksDungeon(deps) {
       if (shouldStop.value) return;
       tokenStatus.value[tokenId] = "running";
       const token = tokens.value.find((t) => t.id === tokenId);
+      let connected = false;
+      const ownsSlot = tokenStore.getWebSocketStatus(tokenId) !== "connected";
       try {
+        if (!isDreamEnabled(tokenId)) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} 已关闭梦境功能，跳过购买`, type: "info" });
+          return;
+        }
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `=== 开始梦境购买: ${token.name} ===`,
           type: "info",
         });
         await ensureConnection(tokenId);
+        connected = true;
+        if (shouldStop.value) return;
 
         await runDreamPurchaseForToken(tokenId, token, purchaseList);
 
@@ -451,9 +449,11 @@ export function createTasksDungeon(deps) {
           type: "error",
         });
       } finally {
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-        addLog({
+        if (connected) {
+          tokenStore.closeWebSocketConnection(tokenId);
+          if (ownsSlot) releaseConnectionSlot();
+        }
+        if (connected) addLog({
           time: new Date().toLocaleTimeString(),
           message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
           type: "info",

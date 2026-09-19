@@ -202,7 +202,7 @@
             </div>
 
             <div class="switch-row">
-              <span class="switch-label">咸王梦境</span>
+              <span class="switch-label" title="启用后自动推层；关闭时日常、批量及定时梦境任务均跳过">梦境自动推层</span>
               <n-switch v-model:value="settings.dreamEnable" />
             </div>
 

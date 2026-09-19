@@ -1083,6 +1083,8 @@ export class XyzwWebSocketClient {
       legion_getarearankresp: "legion_getarearank",
       legionwar_getgoldmonthwarrankresp: "legionwar_getgoldmonthwarrank",
       nightmare_getroleinforesp: "nightmare_getroleinfo",
+      fight_startdungeonresp: "fight_startdungeon",
+      dungeon_selectheroresp: "dungeon_selecthero",
       fight_calcleveltimeresp: "fight_calcleveltime",
       fight_levelresp: "fight_level",
       studyresp: "study_startgame",

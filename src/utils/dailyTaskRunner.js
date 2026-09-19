@@ -1,5 +1,6 @@
 import { useTokenStore } from "@/stores/tokenStore";
 import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
+import { isDreamEnabled, runDreamAutoPush } from "@/utils/dreamTaskRunner.js";
 import { goldItemsConfig, merchantConfig } from "@/utils/dreamConstants";
 
 // 辅助函数
@@ -54,11 +55,6 @@ const isMonday = () => {
   return new Date().getDay() === 1;
 };
 
-const isDailyDreamOpenDay = () => {
-  const dayOfWeek = new Date().getDay();
-  return dayOfWeek === 0 || dayOfWeek === 3;
-};
-
 const DIAMOND_BOX_ITEM_ID = 2005;
 const AUTO_DAILY_DIAMOND_BOX_COUNT = 10;
 
@@ -77,14 +73,6 @@ const getDefaultDreamPurchaseList = () => {
   }
   return list;
 };
-
-const getServerErrorCode = (error) => {
-  const messageText = error?.message || "";
-  const match = messageText.match(/服务器错误:\s*(\d+)/);
-  return match ? Number(match[1]) : null;
-};
-
-const DREAM_SELECT_CONTINUE_ERROR_CODES = new Set([2600040]);
 
 const calculateMonthShouldBe = (target) => {
   const now = new Date();
@@ -763,28 +751,15 @@ export class DailyTaskRunner {
   }
 
   async runDreamTask(tokenId) {
-    if (!isDailyDreamOpenDay()) {
-      this.log("咸王梦境跳过：仅周日、周三开放", "info");
-      return;
-    }
-
-    const battleTeam = { 0: 107 };
-    try {
-      await this.executeGameCommand(
-        tokenId,
-        "dungeon_selecthero",
-        { battleTeam },
-        "咸王梦境",
-        5000,
-      );
-    } catch (error) {
-      const errorCode = getServerErrorCode(error);
-      if (!DREAM_SELECT_CONTINUE_ERROR_CODES.has(errorCode)) {
-        throw error;
-      }
-      this.log(`咸王梦境指令返回 ${errorCode}，继续执行梦境购买`, "warning");
-    }
-
+    const result = await runDreamAutoPush({
+      enabled: isDreamEnabled(tokenId),
+      send: (cmd, params) => this.tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
+      stopped: () => this.callbacks?.shouldStop?.() === true,
+      pause: () => sleep(Math.max(500, Number(this.delaySettings.commandDelay) || 500)),
+      log: (text) => this.log(text),
+    });
+    this.log(`梦境自动推层：${result.reason}，当前层数 ${result.floor ?? "未知"}`);
+    if (result.status === "skipped" || this.callbacks?.shouldStop?.()) return;
     await this.runDreamPurchaseForToken(tokenId, this.loadDreamPurchaseList());
   }
 
@@ -1451,6 +1426,10 @@ export class DailyTaskRunner {
     this.log(`共有 ${totalTasks} 个任务待执行`);
 
     for (let i = 0; i < taskList.length; i++) {
+      if (this.callbacks?.shouldStop?.()) {
+        this.log("日常任务已停止", "warning");
+        return;
+      }
       const task = taskList[i];
       try {
         await task.execute();

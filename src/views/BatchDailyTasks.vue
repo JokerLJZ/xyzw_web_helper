@@ -460,7 +460,7 @@
                     !ismengjingActivityOpen
                   "
                 >
-                  一键梦境
+                  梦境自动推层
                 </n-button>
                 <n-button
                   size="small"
@@ -868,7 +868,7 @@
               ><n-switch v-model:value="currentSettings.studyEnable" />
             </div>
             <div class="switch-row">
-              <span class="switch-label">咸王梦境</span
+              <span class="switch-label" title="启用后自动推层；关闭时日常、批量及定时梦境任务均跳过">梦境自动推层</span
               ><n-switch v-model:value="currentSettings.dreamEnable" />
             </div>
             <div class="switch-row">
@@ -984,7 +984,7 @@
               ><n-switch v-model:value="currentTemplate.studyEnable" />
             </div>
             <div class="switch-row">
-              <span class="switch-label">咸王梦境</span
+              <span class="switch-label" title="启用后自动推层；关闭时日常、批量及定时梦境任务均跳过">梦境自动推层</span
               ><n-switch v-model:value="currentTemplate.dreamEnable" />
             </div>
             <div class="switch-row">
@@ -7436,6 +7436,7 @@ const startBatch = async () => {
 
         // Run tasks
         await runner.run(tokenId, {
+          shouldStop: () => shouldStop.value,
           onLog: (log) => addLog(log),
           onProgress: (p) => {
             // 每个token维护自己的进度
