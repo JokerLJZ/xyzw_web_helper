@@ -440,6 +440,13 @@
                 >
                   一键灯神扫荡
                 </n-button>
+                <n-button
+                  size="small"
+                  @click="batchXuanwuBlessing"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键玄武赐福
+                </n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="dungeon" tab="副本">
@@ -3435,6 +3442,7 @@ import {
   createTasksMainLevel,
   createTasksFootball,
   createTasksApex,
+  createTasksXuanwuBlessing,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
@@ -4443,6 +4451,7 @@ const taskGroupDefinitions = [
       "store_purchase",
       "collection_claimfreereward",
       "batchGenieSweep",
+      "batchXuanwuBlessing",
     ],
   },
   {
@@ -7493,6 +7502,9 @@ const { batchFootballBet } = tasksFootball;
 
 const tasksApex = createTasksApex(createTaskDeps());
 const { batchApexGuess } = tasksApex;
+
+const tasksXuanwuBlessing = createTasksXuanwuBlessing(createTaskDeps());
+const { batchXuanwuBlessing } = tasksXuanwuBlessing;
 
 // 逐鹿盐山竞猜配置
 const apexScheduleId = ref(46);
