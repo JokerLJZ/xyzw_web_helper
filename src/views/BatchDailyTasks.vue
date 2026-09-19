@@ -2441,14 +2441,14 @@
                 :key="item.itemId"
                 class="black-market-discount-item"
               >
-                <span>{{ item.name }}</span>
+                <span class="black-market-discount-name">{{ item.name }}</span>
                 <n-input-number
                   v-model:value="batchSettings.blackMarketDiscounts[item.itemId]"
                   :min="1"
                   :max="10"
                   :step="1"
                   size="small"
-                  style="width: 82px"
+                  class="black-market-discount-input"
                 >
                   <template #suffix>折</template>
                 </n-input-number>
@@ -7971,16 +7971,37 @@ const stopBatch = () => {
 
 .black-market-discount-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 10px 12px;
 }
 
 .black-market-discount-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  font-size: 13px;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  border-radius: 6px;
+  background: rgba(128, 128, 128, 0.05);
+}
+
+.black-market-discount-name {
+  min-width: 0;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.black-market-discount-input {
+  width: 148px;
+  min-width: 148px;
+  flex: 0 0 148px;
+}
+
+.black-market-discount-input :deep(.n-input__input-el) {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Responsive Design */
