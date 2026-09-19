@@ -188,7 +188,7 @@
             <div class="switch-row">
               <span
                 class="switch-label"
-                title="按批量设置中的通用折扣阈值读取当前商品并直接购买，不影响游戏内采购清单"
+                title="按批量设置中的折扣阈值直购，并按刷新次数继续采购，不影响游戏内采购清单"
               >黑市按折扣直购</span>
               <n-switch v-model:value="settings.blackMarketDiscountPurchase" />
             </div>

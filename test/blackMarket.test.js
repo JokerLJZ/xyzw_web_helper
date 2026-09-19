@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   BLACK_MARKET_ITEMS,
   DEFAULT_BLACK_MARKET_DISCOUNTS,
+  DEFAULT_BLACK_MARKET_REFRESH_COUNT,
   loadBlackMarketSettings,
   normalizeBlackMarketSettings,
   runBlackMarketPurchase,
@@ -51,6 +52,7 @@ test("折扣模式只查询实时商品并直接购买符合阈值的槽位", as
   const calls = [];
   const settings = normalizeBlackMarketSettings({
     blackMarketPurchaseMode: "discount",
+    blackMarketRefreshCount: 0,
     blackMarketDiscounts: { 2002: 5, 2003: 6, 2004: 8, 1026: 7 },
   });
   const result = await runBlackMarketPurchase({
@@ -87,7 +89,10 @@ test("折扣模式只查询实时商品并直接购买符合阈值的槽位", as
 test("折扣模式没有符合商品时不购买且绝不调用采购清单接口", async () => {
   const calls = [];
   const result = await runBlackMarketPurchase({
-    settings: { blackMarketPurchaseMode: "discount" },
+    settings: {
+      blackMarketPurchaseMode: "discount",
+      blackMarketRefreshCount: 0,
+    },
     send: async (cmd, params) => {
       calls.push({ cmd, params });
       assert.notEqual(cmd, "store_getpurchase");
@@ -138,6 +143,37 @@ test("通用设置可持久化读取并修正越界阈值", () => {
   assert.equal(settings.blackMarketDiscounts[2003], 10);
   assert.equal(settings.blackMarketDiscounts[2004], 6);
   assert.equal(settings.blackMarketDiscounts[1001], 8);
+  assert.equal(
+    settings.blackMarketRefreshCount,
+    DEFAULT_BLACK_MARKET_REFRESH_COUNT,
+  );
+});
+
+test("折扣直购默认刷新一次并继续购买刷新后的商品", async () => {
+  const calls = [];
+  let goodsListCount = 0;
+  const result = await runBlackMarketPurchase({
+    settings: { blackMarketPurchaseMode: "discount" },
+    send: async (cmd, params) => {
+      calls.push({ cmd, params });
+      if (cmd === "store_goodslist") {
+        goodsListCount++;
+        return goodsListCount === 1
+          ? { goodsList: { 1: { buy_quantity: 0, discount: 0.6 } } }
+          : { goodsList: { 2: { buy_quantity: 0, discount: 0.6 } } };
+      }
+      return { ok: true };
+    },
+  });
+
+  assert.equal(result.refreshCount, 1);
+  assert.deepEqual(calls, [
+    { cmd: "store_goodslist", params: { storeId: 1 } },
+    { cmd: "store_refresh", params: { storeId: 1 } },
+    { cmd: "store_goodslist", params: { storeId: 1 } },
+    { cmd: "store_buy", params: { goodsId: 2 } },
+  ]);
+  assert.deepEqual(result.purchases.map(({ goodsId }) => goodsId), [2]);
 });
 
 test("批量旧采购与折扣直购是两个互不切换的任务", async () => {
@@ -155,6 +191,7 @@ test("批量旧采购与折扣直购是两个互不切换的任务", async () =>
     batchSettings: {
       maxActive: 2,
       blackMarketPurchaseMode: "discount",
+      blackMarketRefreshCount: 0,
       blackMarketDiscounts: { 2002: 5 },
     },
     tokenStore: {

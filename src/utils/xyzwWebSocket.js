@@ -1114,6 +1114,7 @@ export class XyzwWebSocketClient {
       mail_claimallattachmentresp: "mail_claimallattachment",
       store_goodslistresp: "store_goodslist",
       store_buyresp: ["store_buy", "store_purchase"],
+      store_refreshresp: "store_refresh",
       system_getdatabundleverresp: "system_getdatabundlever",
       tower_claimrewardresp: "tower_claimreward",
       fight_starttowerresp: "fight_starttower",

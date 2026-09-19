@@ -24,10 +24,18 @@ export const DEFAULT_BLACK_MARKET_DISCOUNTS = Object.freeze(
   ),
 );
 
+export const DEFAULT_BLACK_MARKET_REFRESH_COUNT = 1;
+
 const normalizeDiscount = (value, fallback) => {
   const discount = Number(value);
   if (!Number.isFinite(discount)) return fallback;
   return Math.min(10, Math.max(1, Math.trunc(discount)));
+};
+
+const normalizeRefreshCount = (value) => {
+  const count = Number(value);
+  if (!Number.isFinite(count)) return DEFAULT_BLACK_MARKET_REFRESH_COUNT;
+  return Math.min(10, Math.max(0, Math.trunc(count)));
 };
 
 export const normalizeBlackMarketSettings = (settings = {}) => ({
@@ -44,6 +52,9 @@ export const normalizeBlackMarketSettings = (settings = {}) => ({
         defaultDiscount,
       ),
     ]),
+  ),
+  blackMarketRefreshCount: normalizeRefreshCount(
+    settings.blackMarketRefreshCount,
   ),
 });
 
@@ -95,16 +106,32 @@ export const runBlackMarketPurchase = async ({ send, settings }) => {
     return { mode: BLACK_MARKET_MODES.LEGACY, purchases: [], result };
   }
 
-  const goodsListResult = (await send("store_goodslist", { storeId: 1 })) || {};
-  const purchases = selectDiscountPurchases(goodsListResult, normalized);
+  const purchases = [];
   const purchaseResults = [];
-  for (const item of purchases) {
-    purchaseResults.push(await send("store_buy", { goodsId: item.goodsId }));
+  let lastResult = {};
+
+  const purchaseCurrentRound = async () => {
+    const goodsListResult =
+      (await send("store_goodslist", { storeId: 1 })) || {};
+    lastResult = goodsListResult;
+    const roundPurchases = selectDiscountPurchases(goodsListResult, normalized);
+    purchases.push(...roundPurchases);
+    for (const item of roundPurchases) {
+      lastResult = await send("store_buy", { goodsId: item.goodsId });
+      purchaseResults.push(lastResult);
+    }
+  };
+
+  await purchaseCurrentRound();
+  for (let index = 0; index < normalized.blackMarketRefreshCount; index++) {
+    lastResult = await send("store_refresh", { storeId: 1 });
+    await purchaseCurrentRound();
   }
 
   return {
     mode: BLACK_MARKET_MODES.DISCOUNT,
     purchases,
-    result: purchaseResults.at(-1) || goodsListResult,
+    refreshCount: normalized.blackMarketRefreshCount,
+    result: purchaseResults.at(-1) || lastResult,
   };
 };

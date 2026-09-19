@@ -2,7 +2,10 @@
  * 批量日常任务常量配置
  */
 
-import { DEFAULT_BLACK_MARKET_DISCOUNTS } from "@/utils/blackMarket.js";
+import {
+  DEFAULT_BLACK_MARKET_DISCOUNTS,
+  DEFAULT_BLACK_MARKET_REFRESH_COUNT,
+} from "@/utils/blackMarket.js";
 
 // 宝箱类型选项
 export const boxTypeOptions = [
@@ -151,6 +154,7 @@ export const defaultBatchSettings = {
   password: "",
   useGoldRefreshFallback: false,
   blackMarketDiscounts: { ...DEFAULT_BLACK_MARKET_DISCOUNTS },
+  blackMarketRefreshCount: DEFAULT_BLACK_MARKET_REFRESH_COUNT,
   tokenListColumns: 2,
   commandDelay: 500,
   taskDelay: 500,

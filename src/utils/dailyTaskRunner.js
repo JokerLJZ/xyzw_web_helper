@@ -174,6 +174,8 @@ export class DailyTaskRunner {
             ? "读取黑市当前商品与折扣"
             : cmd === "store_buy"
               ? "购买符合折扣阈值的黑市商品"
+              : cmd === "store_refresh"
+                ? "刷新黑市商品"
               : "执行原有黑市自动采购",
         ),
     });

@@ -722,7 +722,7 @@
                   size="small"
                   @click="store_discount_purchase"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="按通用折扣阈值读取当前商品并直接购买，不影响游戏内采购清单"
+                  title="按通用折扣阈值直购，并按刷新次数继续采购，不影响游戏内采购清单"
                 >
                   黑市按折扣直购
                 </n-button>
@@ -866,7 +866,7 @@
             <div class="switch-row">
               <span
                 class="switch-label"
-                title="按批量设置中的通用折扣阈值读取当前商品并直接购买，不影响游戏内采购清单"
+                title="按批量设置中的折扣阈值直购，并按刷新次数继续采购，不影响游戏内采购清单"
               >黑市按折扣直购</span
               ><n-switch
                 v-model:value="currentSettings.blackMarketDiscountPurchase"
@@ -991,7 +991,7 @@
             <div class="switch-row">
               <span
                 class="switch-label"
-                title="按批量设置中的通用折扣阈值读取当前商品并直接购买，不影响游戏内采购清单"
+                title="按批量设置中的折扣阈值直购，并按刷新次数继续采购，不影响游戏内采购清单"
               >黑市按折扣直购</span
               ><n-switch
                 v-model:value="currentTemplate.blackMarketDiscountPurchase"
@@ -2413,8 +2413,28 @@
               :show-icon="false"
               style="margin: 8px 0"
             >
-              这些阈值只供“黑市按折扣直购”使用。实际折扣小于或等于阈值时直接购买，不读取或修改游戏内采购清单，也不影响原有“一键黑市采购”。
+              这些设置只供“黑市按折扣直购”使用。每轮购买后按次数刷新，并继续购买刷新后的符合商品；默认刷新1次。该任务不读取或修改游戏内采购清单，也不影响原有“一键黑市采购”。
             </n-alert>
+            <div class="settings-grid" style="margin-bottom: 8px">
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: row;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
+                <label class="setting-label">自动刷新次数</label>
+                <n-input-number
+                  v-model:value="batchSettings.blackMarketRefreshCount"
+                  :min="0"
+                  :max="10"
+                  :step="1"
+                  size="small"
+                  style="width: 120px"
+                />
+              </div>
+            </div>
             <div class="black-market-discount-grid">
               <div
                 v-for="item in BLACK_MARKET_ITEMS"
@@ -3406,6 +3426,7 @@ import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
 import {
   BLACK_MARKET_ITEMS,
   DEFAULT_BLACK_MARKET_DISCOUNTS,
+  DEFAULT_BLACK_MARKET_REFRESH_COUNT,
   normalizeBlackMarketSettings,
 } from "@/utils/blackMarket.js";
 import { HERO_DICT } from "@/utils/HeroList";
@@ -4106,6 +4127,7 @@ for (const merchantId in goldItemsConfig) {
 const batchSettings = reactive({
   dreamPurchaseList: defaultDreamPurchaseList,
   blackMarketDiscounts: { ...DEFAULT_BLACK_MARKET_DISCOUNTS },
+  blackMarketRefreshCount: DEFAULT_BLACK_MARKET_REFRESH_COUNT,
   boxCount: 100,
   fishCount: 100,
   recruitCount: 100,
@@ -4157,8 +4179,11 @@ const loadBatchSettings = () => {
       const parsed = JSON.parse(saved);
       Object.assign(batchSettings, parsed);
     }
+    const normalizedBlackMarket = normalizeBlackMarketSettings(batchSettings);
     batchSettings.blackMarketDiscounts =
-      normalizeBlackMarketSettings(batchSettings).blackMarketDiscounts;
+      normalizedBlackMarket.blackMarketDiscounts;
+    batchSettings.blackMarketRefreshCount =
+      normalizedBlackMarket.blackMarketRefreshCount;
     delete batchSettings.blackMarketPurchaseMode;
   } catch (error) {
     console.error("Failed to load batch settings:", error);
@@ -4168,8 +4193,11 @@ const loadBatchSettings = () => {
 // Save batch settings to localStorage
 const saveBatchSettings = () => {
   try {
+    const normalizedBlackMarket = normalizeBlackMarketSettings(batchSettings);
     batchSettings.blackMarketDiscounts =
-      normalizeBlackMarketSettings(batchSettings).blackMarketDiscounts;
+      normalizedBlackMarket.blackMarketDiscounts;
+    batchSettings.blackMarketRefreshCount =
+      normalizedBlackMarket.blackMarketRefreshCount;
     delete batchSettings.blackMarketPurchaseMode;
     localStorage.setItem("batchSettings", JSON.stringify(batchSettings));
     message.success("定时批量任务设置已保存");
