@@ -9,6 +9,7 @@ import {
   BLACK_MARKET_MODES,
   runBlackMarketPurchase,
 } from "@/utils/blackMarket.js";
+import { resolveRedemptionCodes } from "@/utils/redemptionCodes.js";
 
 /**
  * 创建商店类任务执行器
@@ -422,12 +423,116 @@ export function createTasksStore(deps) {
       "黑市按折扣直购",
     );
 
+  /** 批量使用默认或自定义兑换码，单个兑换失败不影响后续兑换码。 */
+  const batchRedeemCodes = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const codes = resolveRedemptionCodes(batchSettings);
+    if (codes.length === 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: "自定义兑换码清单为空，已跳过自动兑换码任务",
+        type: "warning",
+      });
+      return;
+    }
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      let successCount = 0;
+      let failureCount = 0;
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始自动兑换码: ${tokenName}（共${codes.length}个） ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        for (let index = 0; index < codes.length; index += 1) {
+          if (shouldStop.value) break;
+          const code = codes[index];
+
+          try {
+            const result = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "system_claimcdkreward",
+              { key: code, platformType: "h5" },
+              5000,
+            );
+
+            if (result?.error) throw new Error(result.error);
+
+            successCount += 1;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 兑换码 ${code} 兑换成功`,
+              type: "success",
+            });
+          } catch (error) {
+            failureCount += 1;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 兑换码 ${code} 兑换失败: ${error.message}`,
+              type: "error",
+            });
+          }
+
+          if (index < codes.length - 1 && !shouldStop.value) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, delayConfig.action),
+            );
+          }
+        }
+
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 自动兑换码完成：成功${successCount}个，失败${failureCount}个`,
+          type: failureCount > 0 ? "warning" : "success",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 自动兑换码任务出错: ${error.message}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+  };
+
   return {
     legion_storebuygoods,
     legionStoreBuyWhiteJade,
     legionStoreBuySkinCoins,
     store_purchase,
     store_discount_purchase,
+    batchRedeemCodes,
     collection_claimfreereward,
   };
 }

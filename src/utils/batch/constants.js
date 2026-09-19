@@ -6,6 +6,7 @@ import {
   DEFAULT_BLACK_MARKET_DISCOUNTS,
   DEFAULT_BLACK_MARKET_REFRESH_COUNT,
 } from "@/utils/blackMarket.js";
+import { REDEMPTION_CODE_MODES } from "@/utils/redemptionCodes.js";
 
 // 宝箱类型选项
 export const boxTypeOptions = [
@@ -49,6 +50,7 @@ export const availableTasks = [
   { label: "领取宝箱积分", value: "batchClaimBoxPointReward" },
   { label: "智能宝箱周任务", value: "batchSmartBoxWeekly" },
   { label: "智能招募周任务", value: "batchSmartRecruitWeekly" },
+  { label: "自动兑换码", value: "batchRedeemCodes" },
   { label: "批量钓鱼", value: "batchFish" },
   { label: "批量招募", value: "batchRecruit" },
   { label: "一键宝库前3层", value: "batchbaoku13" },
@@ -149,6 +151,8 @@ export const defaultSettings = {
 
 // 默认批量设置
 export const defaultBatchSettings = {
+  redemptionCodeMode: REDEMPTION_CODE_MODES.DEFAULT,
+  customRedemptionCodes: "",
   boxCount: 100,
   fishCount: 100,
   recruitCount: 100,

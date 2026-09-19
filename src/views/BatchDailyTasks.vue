@@ -734,6 +734,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchRedeemCodes"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  自动兑换码
+                </n-button>
+                <n-button
+                  size="small"
                   @click="store_discount_purchase"
                   :disabled="isRunning || selectedTokens.length === 0"
                   title="按通用折扣阈值直购，并按刷新次数继续采购，不影响游戏内采购清单"
@@ -2428,6 +2435,34 @@
               </div>
             </div>
             <n-divider title-placement="left" style="margin: 12px 0 8px 0"
+              >自动兑换码设置</n-divider
+            >
+            <n-alert type="info" :show-icon="false" style="margin: 8px 0">
+              可执行内置默认清单，或输入多个自定义兑换码。单个兑换失败会写入日志，并继续执行后续兑换码。
+            </n-alert>
+            <div class="setting-item">
+              <n-radio-group v-model:value="batchSettings.redemptionCodeMode">
+                <n-space>
+                  <n-radio value="default">默认清单</n-radio>
+                  <n-radio value="custom">自定义清单</n-radio>
+                </n-space>
+              </n-radio-group>
+            </div>
+            <n-input
+              v-if="batchSettings.redemptionCodeMode === 'custom'"
+              v-model:value="batchSettings.customRedemptionCodes"
+              type="textarea"
+              placeholder="每行输入一个兑换码，也支持逗号或空格分隔"
+              :autosize="{ minRows: 5, maxRows: 10 }"
+            />
+            <n-input
+              v-else
+              :value="DEFAULT_REDEMPTION_CODES.join('\n')"
+              type="textarea"
+              readonly
+              :autosize="{ minRows: 5, maxRows: 10 }"
+            />
+            <n-divider title-placement="left" style="margin: 12px 0 8px 0"
               >黑市按折扣直购设置</n-divider
             >
             <n-alert
@@ -3400,6 +3435,8 @@ import {
   defaultTemplate,
   defaultTaskForm,
   defaultHelperSettings,
+  DEFAULT_REDEMPTION_CODES,
+  normalizeRedemptionCodeSettings,
   // Cron utilities
   validateCronField,
   validateCronExpression,
@@ -4151,6 +4188,8 @@ for (const merchantId in goldItemsConfig) {
 
 const batchSettings = reactive({
   dreamPurchaseList: defaultDreamPurchaseList,
+  redemptionCodeMode: "default",
+  customRedemptionCodes: "",
   blackMarketDiscounts: { ...DEFAULT_BLACK_MARKET_DISCOUNTS },
   blackMarketRefreshCount: DEFAULT_BLACK_MARKET_REFRESH_COUNT,
   boxCount: 100,
@@ -4209,6 +4248,12 @@ const loadBatchSettings = () => {
       normalizedBlackMarket.blackMarketDiscounts;
     batchSettings.blackMarketRefreshCount =
       normalizedBlackMarket.blackMarketRefreshCount;
+    const normalizedRedemptionCodes =
+      normalizeRedemptionCodeSettings(batchSettings);
+    batchSettings.redemptionCodeMode =
+      normalizedRedemptionCodes.redemptionCodeMode;
+    batchSettings.customRedemptionCodes =
+      normalizedRedemptionCodes.customRedemptionCodes;
     delete batchSettings.blackMarketPurchaseMode;
   } catch (error) {
     console.error("Failed to load batch settings:", error);
@@ -4223,6 +4268,12 @@ const saveBatchSettings = () => {
       normalizedBlackMarket.blackMarketDiscounts;
     batchSettings.blackMarketRefreshCount =
       normalizedBlackMarket.blackMarketRefreshCount;
+    const normalizedRedemptionCodes =
+      normalizeRedemptionCodeSettings(batchSettings);
+    batchSettings.redemptionCodeMode =
+      normalizedRedemptionCodes.redemptionCodeMode;
+    batchSettings.customRedemptionCodes =
+      normalizedRedemptionCodes.customRedemptionCodes;
     delete batchSettings.blackMarketPurchaseMode;
     localStorage.setItem("batchSettings", JSON.stringify(batchSettings));
     message.success("定时批量任务设置已保存");
@@ -4506,6 +4557,7 @@ const taskGroupDefinitions = [
       "batchPushMainLevelInfo",
       "batchSmartBoxWeekly",
       "batchSmartRecruitWeekly",
+      "batchRedeemCodes",
       "store_discount_purchase",
     ],
   },
@@ -7479,6 +7531,7 @@ const {
   legionStoreBuySkinCoins,
   store_purchase,
   store_discount_purchase,
+  batchRedeemCodes,
   collection_claimfreereward,
 } = tasksStore;
 

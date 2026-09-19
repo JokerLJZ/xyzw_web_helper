@@ -151,6 +151,23 @@ export class GameCommands {
   }
 
   /**
+   * 使用兑换码
+   */
+  system_claimcdkreward(ack = 0, seq = 0, params = {}) {
+    return {
+      ack,
+      body: this.g_utils.bon.encode({
+        key: "",
+        platformType: "h5",
+        ...params,
+      }),
+      cmd: "system_claimcdkreward",
+      seq,
+      time: Date.now(),
+    };
+  }
+
+  /**
    * 开宝箱
    */
   item_openbox(ack = 0, seq = 0, params = {}) {

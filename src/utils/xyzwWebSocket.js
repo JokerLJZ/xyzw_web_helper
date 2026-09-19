@@ -158,6 +158,7 @@ export function registerDefaultCommands(reg) {
     .register("system_getdatabundlever", { isAudit: false })
     .register("system_buygold", { buyNum: 1 })
     .register("system_claimhangupreward")
+    .register("system_claimcdkreward", { key: "", platformType: "h5" })
     .register("system_hangupupgrade", { upgradeNum: 1 })
     .register("system_signinreward")
     .register("system_mysharecallback", { isSkipShareCard: true, type: 2 })
@@ -1236,6 +1237,7 @@ export class XyzwWebSocketClient {
       syncrewardresp: [
         "activity_commonbuygoods",
         "system_buygold",
+        "system_claimcdkreward",
         "discount_claimreward",
         "card_claimreward",
         "artifact_lottery",
