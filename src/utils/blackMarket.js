@@ -4,15 +4,15 @@ export const BLACK_MARKET_MODES = Object.freeze({
 });
 
 export const BLACK_MARKET_ITEMS = Object.freeze([
-  { itemId: 2002, name: "青铜宝箱", defaultDiscount: 5 },
-  { itemId: 2003, name: "黄金宝箱", defaultDiscount: 6 },
-  { itemId: 2004, name: "铂金宝箱", defaultDiscount: 8 },
-  { itemId: 1001, name: "招募令", defaultDiscount: 8 },
-  { itemId: 1011, name: "普通鱼竿", defaultDiscount: 7 },
-  { itemId: 1012, name: "黄金鱼竿", defaultDiscount: 7 },
-  { itemId: 1022, name: "白玉", defaultDiscount: 7 },
-  { itemId: 1023, name: "彩玉", defaultDiscount: 7 },
-  { itemId: 1026, name: "扳手", defaultDiscount: 7 },
+  { goodsId: 1, itemId: 2002, name: "青铜宝箱", defaultDiscount: 5 },
+  { goodsId: 2, itemId: 2003, name: "黄金宝箱", defaultDiscount: 6 },
+  { goodsId: 3, itemId: 2004, name: "铂金宝箱", defaultDiscount: 8 },
+  { goodsId: 6, itemId: 1001, name: "招募令", defaultDiscount: 8 },
+  { goodsId: 11, itemId: 1011, name: "普通鱼竿", defaultDiscount: 7 },
+  { goodsId: 12, itemId: 1012, name: "黄金鱼竿", defaultDiscount: 7 },
+  { goodsId: 14, itemId: 1022, name: "白玉", defaultDiscount: 7 },
+  { goodsId: 15, itemId: 1023, name: "彩玉", defaultDiscount: 7 },
+  { goodsId: 16, itemId: 1026, name: "扳手", defaultDiscount: 7 },
 ]);
 
 export const DEFAULT_BLACK_MARKET_DISCOUNTS = Object.freeze(
@@ -58,41 +58,33 @@ export const loadBlackMarketSettings = (storage = globalThis.localStorage) => {
   }
 };
 
-export const buildBlackMarketPurchaseRule = (settings, currentRule = {}) => {
-  const normalized = normalizeBlackMarketSettings(settings);
-  const currentPurchaseCount = Number(currentRule?.purchaseCnt);
-
-  return {
-    // purchaseCnt 的含义及可选范围由游戏端维护；只更新折扣清单时保留账号原值。
-    purchaseCnt: Number.isFinite(currentPurchaseCount)
-      ? currentPurchaseCount
-      : 2,
-    purchaseItemList: BLACK_MARKET_ITEMS.map(({ itemId }) => ({
-      itemId,
-      discount: normalized.blackMarketDiscounts[itemId],
-    })),
-  };
+const normalizeActualDiscount = (value) => {
+  const discount = Number(value);
+  if (!Number.isFinite(discount)) return null;
+  return discount <= 1 ? Math.round(discount * 10) : Math.round(discount);
 };
 
-const normalizeRuleItems = (items = []) =>
-  [...items]
-    .map((item) => ({
-      itemId: Number(item?.itemId),
-      discount: Number(item?.discount),
-    }))
-    .filter(
-      (item) => Number.isFinite(item.itemId) && Number.isFinite(item.discount),
-    )
-    .sort((a, b) => a.itemId - b.itemId);
+export const selectDiscountPurchases = (goodsList, settings) => {
+  const normalized = normalizeBlackMarketSettings(settings);
+  const currentGoods = goodsList?.goodsList || goodsList || {};
 
-export const isSameBlackMarketRule = (currentRule, expectedRule) =>
-  Number(currentRule?.purchaseCnt) === Number(expectedRule?.purchaseCnt) &&
-  JSON.stringify(normalizeRuleItems(currentRule?.purchaseItemList)) ===
-    JSON.stringify(normalizeRuleItems(expectedRule?.purchaseItemList));
+  return BLACK_MARKET_ITEMS.flatMap((item) => {
+    const goods = currentGoods[item.goodsId] || currentGoods[String(item.goodsId)];
+    if (!goods || Number(goods.buy_quantity ?? goods.buyQuantity ?? 0) > 0) {
+      return [];
+    }
+
+    const actualDiscount = normalizeActualDiscount(goods.discount);
+    const threshold = normalized.blackMarketDiscounts[item.itemId];
+    if (actualDiscount === null || actualDiscount > threshold) return [];
+
+    return [{ ...item, actualDiscount, threshold }];
+  });
+};
 
 /**
- * 执行黑市采购。折扣模式由游戏服务端按 itemId + discount 判断当前商品，
- * 因此阈值包含边界：实际折扣小于或等于阈值时购买。
+ * 执行黑市采购。旧模式只调用原有自动采购；折扣模式读取当前商品后逐个直购，
+ * 不读取或修改游戏内采购清单。阈值包含边界：实际折扣小于或等于阈值时购买。
  */
 export const runBlackMarketPurchase = async ({ send, settings }) => {
   if (typeof send !== "function") throw new Error("缺少黑市请求函数");
@@ -100,22 +92,19 @@ export const runBlackMarketPurchase = async ({ send, settings }) => {
   const normalized = normalizeBlackMarketSettings(settings);
   if (normalized.blackMarketPurchaseMode === BLACK_MARKET_MODES.LEGACY) {
     const result = await send("store_purchase", {});
-    return { mode: BLACK_MARKET_MODES.LEGACY, ruleUpdated: false, result };
+    return { mode: BLACK_MARKET_MODES.LEGACY, purchases: [], result };
   }
 
-  const currentRule = (await send("store_getpurchase", {})) || {};
-  const expectedRule = buildBlackMarketPurchaseRule(normalized, currentRule);
-  const ruleUpdated = !isSameBlackMarketRule(currentRule, expectedRule);
-
-  if (ruleUpdated) {
-    await send("store_setpurchase", expectedRule);
+  const goodsListResult = (await send("store_goodslist", { storeId: 1 })) || {};
+  const purchases = selectDiscountPurchases(goodsListResult, normalized);
+  const purchaseResults = [];
+  for (const item of purchases) {
+    purchaseResults.push(await send("store_buy", { goodsId: item.goodsId }));
   }
 
-  const result = await send("store_purchase", {});
   return {
     mode: BLACK_MARKET_MODES.DISCOUNT,
-    ruleUpdated,
-    rule: expectedRule,
-    result,
+    purchases,
+    result: purchaseResults.at(-1) || goodsListResult,
   };
 };

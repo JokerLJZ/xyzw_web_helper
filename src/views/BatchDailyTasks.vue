@@ -2410,7 +2410,7 @@
             </n-alert>
             <template v-else>
               <n-alert type="success" :show-icon="false" style="margin: 8px 0">
-                实际折扣小于或等于阈值时购买；这里的设置对所有账号通用。
+                读取当前商品后直接购买实际折扣小于或等于阈值的商品；不会读取或修改游戏内采购清单。这里的设置对所有账号通用。
               </n-alert>
               <div class="black-market-discount-grid">
                 <div

@@ -192,8 +192,6 @@ export function registerDefaultCommands(reg) {
     // 商店
     .register("store_goodslist", { storeId: 1 })
     .register("store_buy", { goodsId: 1 })
-    .register("store_getpurchase")
-    .register("store_setpurchase", { purchaseCnt: 2, purchaseItemList: [] })
     .register("store_purchase", { goodsId: 1 })
     .register("store_refresh", { storeId: 1 })
 
@@ -1114,9 +1112,8 @@ export class XyzwWebSocketClient {
       presetteam_saveteamresp: "presetteam_saveteam",
       presetteam_getinforesp: "presetteam_getinfo",
       mail_claimallattachmentresp: "mail_claimallattachment",
-      store_getpurchaseresp: "store_getpurchase",
-      store_setpurchaseresp: "store_setpurchase",
-      store_buyresp: "store_purchase",
+      store_goodslistresp: "store_goodslist",
+      store_buyresp: ["store_buy", "store_purchase"],
       system_getdatabundleverresp: "system_getdatabundlever",
       tower_claimrewardresp: "tower_claimreward",
       fight_starttowerresp: "fight_starttower",

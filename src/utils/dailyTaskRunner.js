@@ -166,11 +166,11 @@ export class DailyTaskRunner {
           tokenId,
           cmd,
           params,
-          cmd === "store_getpurchase"
-            ? "读取黑市采购规则"
-            : cmd === "store_setpurchase"
-              ? "更新黑市折扣规则"
-              : "执行黑市自动采购",
+          cmd === "store_goodslist"
+            ? "读取黑市当前商品与折扣"
+            : cmd === "store_buy"
+              ? "购买符合折扣阈值的黑市商品"
+              : "执行原有黑市自动采购",
         ),
     });
   }

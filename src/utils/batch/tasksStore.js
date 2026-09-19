@@ -354,7 +354,10 @@ export function createTasksStore(deps) {
         if (purchase.mode === "discount") {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 已按通用折扣阈值${purchase.ruleUpdated ? "更新清单并" : ""}执行采购`,
+            message:
+              purchase.purchases.length > 0
+                ? `${token.name} 按折扣直购 ${purchase.purchases.map((item) => `${item.name}${item.actualDiscount}折`).join("、")}`
+                : `${token.name} 当前没有符合折扣阈值且未购买的商品`,
             type: "info",
           });
         }

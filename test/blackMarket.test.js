@@ -3,29 +3,30 @@ import { test } from "node:test";
 import {
   BLACK_MARKET_ITEMS,
   DEFAULT_BLACK_MARKET_DISCOUNTS,
-  buildBlackMarketPurchaseRule,
   loadBlackMarketSettings,
   normalizeBlackMarketSettings,
   runBlackMarketPurchase,
+  selectDiscountPurchases,
 } from "../src/utils/blackMarket.js";
 
-test("黑市九种物品使用预设折扣阈值", () => {
+test("黑市九种物品使用固定商品槽位及预设折扣阈值", () => {
   assert.deepEqual(
-    BLACK_MARKET_ITEMS.map(({ itemId, name, defaultDiscount }) => ({
+    BLACK_MARKET_ITEMS.map(({ goodsId, itemId, name, defaultDiscount }) => ({
+      goodsId,
       itemId,
       name,
       defaultDiscount,
     })),
     [
-      { itemId: 2002, name: "青铜宝箱", defaultDiscount: 5 },
-      { itemId: 2003, name: "黄金宝箱", defaultDiscount: 6 },
-      { itemId: 2004, name: "铂金宝箱", defaultDiscount: 8 },
-      { itemId: 1001, name: "招募令", defaultDiscount: 8 },
-      { itemId: 1011, name: "普通鱼竿", defaultDiscount: 7 },
-      { itemId: 1012, name: "黄金鱼竿", defaultDiscount: 7 },
-      { itemId: 1022, name: "白玉", defaultDiscount: 7 },
-      { itemId: 1023, name: "彩玉", defaultDiscount: 7 },
-      { itemId: 1026, name: "扳手", defaultDiscount: 7 },
+      { goodsId: 1, itemId: 2002, name: "青铜宝箱", defaultDiscount: 5 },
+      { goodsId: 2, itemId: 2003, name: "黄金宝箱", defaultDiscount: 6 },
+      { goodsId: 3, itemId: 2004, name: "铂金宝箱", defaultDiscount: 8 },
+      { goodsId: 6, itemId: 1001, name: "招募令", defaultDiscount: 8 },
+      { goodsId: 11, itemId: 1011, name: "普通鱼竿", defaultDiscount: 7 },
+      { goodsId: 12, itemId: 1012, name: "黄金鱼竿", defaultDiscount: 7 },
+      { goodsId: 14, itemId: 1022, name: "白玉", defaultDiscount: 7 },
+      { goodsId: 15, itemId: 1023, name: "彩玉", defaultDiscount: 7 },
+      { goodsId: 16, itemId: 1026, name: "扳手", defaultDiscount: 7 },
     ],
   );
   assert.equal(DEFAULT_BLACK_MARKET_DISCOUNTS[2002], 5);
@@ -45,20 +46,25 @@ test("旧模式保留原有自动采购且不读取或覆盖清单", async () =>
   assert.deepEqual(calls, [{ cmd: "store_purchase", params: {} }]);
 });
 
-test("折扣模式保留账号采购次数并同步九种物品后采购", async () => {
+test("折扣模式只查询实时商品并直接购买符合阈值的槽位", async () => {
   const calls = [];
   const settings = normalizeBlackMarketSettings({
     blackMarketPurchaseMode: "discount",
-    blackMarketDiscounts: { 2002: 4, 1026: 6 },
+    blackMarketDiscounts: { 2002: 5, 2003: 6, 2004: 8, 1026: 7 },
   });
   const result = await runBlackMarketPurchase({
     settings,
     send: async (cmd, params) => {
       calls.push({ cmd, params });
-      if (cmd === "store_getpurchase") {
+      if (cmd === "store_goodslist") {
         return {
-          purchaseCnt: 1,
-          purchaseItemList: [{ itemId: 2002, discount: 5 }],
+          goodsList: {
+            1: { buy_quantity: 0, discount: 0.5 },
+            2: { buy_quantity: 0, discount: 0.699999988079071 },
+            3: { buy_quantity: 0, discount: 0.800000011920929 },
+            6: { buy_quantity: 1, discount: 0.1 },
+            16: { buy_quantity: 0, discount: 1 },
+          },
         };
       }
       return { ok: true };
@@ -66,43 +72,53 @@ test("折扣模式保留账号采购次数并同步九种物品后采购", async
   });
 
   assert.equal(result.mode, "discount");
-  assert.equal(result.ruleUpdated, true);
   assert.deepEqual(
     calls.map(({ cmd }) => cmd),
-    ["store_getpurchase", "store_setpurchase", "store_purchase"],
+    ["store_goodslist", "store_buy", "store_buy"],
   );
-  assert.equal(calls[1].params.purchaseCnt, 1);
-  assert.equal(calls[1].params.purchaseItemList.length, 9);
-  assert.deepEqual(
-    calls[1].params.purchaseItemList.find((item) => item.itemId === 2002),
-    { itemId: 2002, discount: 4 },
-  );
-  assert.deepEqual(
-    calls[1].params.purchaseItemList.find((item) => item.itemId === 1026),
-    { itemId: 1026, discount: 6 },
-  );
+  assert.deepEqual(calls.slice(1).map(({ params }) => params), [
+    { goodsId: 1 },
+    { goodsId: 3 },
+  ]);
+  assert.deepEqual(result.purchases.map(({ itemId }) => itemId), [2002, 2004]);
 });
 
-test("折扣清单相同时不重复设置", async () => {
-  const settings = normalizeBlackMarketSettings({
-    blackMarketPurchaseMode: "discount",
-  });
-  const currentRule = buildBlackMarketPurchaseRule(settings, { purchaseCnt: 2 });
-  currentRule.purchaseItemList.reverse();
+test("折扣模式没有符合商品时不购买且绝不调用采购清单接口", async () => {
   const calls = [];
-
   const result = await runBlackMarketPurchase({
-    settings,
+    settings: { blackMarketPurchaseMode: "discount" },
     send: async (cmd, params) => {
       calls.push({ cmd, params });
-      return cmd === "store_getpurchase" ? currentRule : { ok: true };
+      assert.notEqual(cmd, "store_getpurchase");
+      assert.notEqual(cmd, "store_setpurchase");
+      assert.notEqual(cmd, "store_purchase");
+      return { goodsList: { 1: { buy_quantity: 0, discount: 0.6 } } };
     },
   });
 
-  assert.equal(result.ruleUpdated, false);
+  assert.deepEqual(result.purchases, []);
+  assert.deepEqual(calls, [
+    { cmd: "store_goodslist", params: { storeId: 1 } },
+  ]);
+});
+
+test("实时折扣按折数取整并跳过已经购买的商品", () => {
+  const selected = selectDiscountPurchases(
+    {
+      1: { buy_quantity: 0, discount: 0.50000001 },
+      2: { buy_quantity: 1, discount: 0.1 },
+      3: { buy_quantity: 0, discount: 0.89999998 },
+      12: { buy_quantity: 0, discount: 7 },
+    },
+    { blackMarketPurchaseMode: "discount" },
+  );
+
   assert.deepEqual(
-    calls.map(({ cmd }) => cmd),
-    ["store_getpurchase", "store_purchase"],
+    selected.map(({ goodsId, actualDiscount }) => ({ goodsId, actualDiscount })),
+    [
+      { goodsId: 1, actualDiscount: 5 },
+      { goodsId: 12, actualDiscount: 7 },
+    ],
   );
 });
 

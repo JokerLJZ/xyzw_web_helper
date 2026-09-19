@@ -250,36 +250,6 @@ export class GameCommands {
   }
 
   /**
-   * 获取黑市自动采购规则
-   */
-  store_getpurchase(ack = 0, seq = 0, params = {}) {
-    return {
-      ack,
-      body: this.g_utils.bon.encode({ ...params }),
-      cmd: "store_getpurchase",
-      seq,
-      time: Date.now(),
-    };
-  }
-
-  /**
-   * 设置黑市自动采购规则
-   */
-  store_setpurchase(ack = 0, seq = 0, params = {}) {
-    return {
-      ack,
-      body: this.g_utils.bon.encode({
-        purchaseCnt: 2,
-        purchaseItemList: [],
-        ...params,
-      }),
-      cmd: "store_setpurchase",
-      seq,
-      time: Date.now(),
-    };
-  }
-
-  /**
    * 军团商店购买商品
    */
   legion_storebuygoods(ack = 0, seq = 0, params = {}) {
