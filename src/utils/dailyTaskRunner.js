@@ -2,6 +2,10 @@ import { useTokenStore } from "@/stores/tokenStore";
 import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
 import { isDreamEnabled, runAutomaticDream } from "@/utils/dreamTaskRunner.js";
 import { goldItemsConfig, merchantConfig } from "@/utils/dreamConstants";
+import {
+  loadBlackMarketSettings,
+  runBlackMarketPurchase,
+} from "@/utils/blackMarket.js";
 
 // 辅助函数
 const pickArenaTargetId = (targets) => {
@@ -151,6 +155,24 @@ export class DailyTaskRunner {
       }
       throw error;
     }
+  }
+
+  async runBlackMarketTask(tokenId) {
+    const blackMarketSettings = loadBlackMarketSettings();
+    return runBlackMarketPurchase({
+      settings: blackMarketSettings,
+      send: (cmd, params) =>
+        this.executeGameCommand(
+          tokenId,
+          cmd,
+          params,
+          cmd === "store_getpurchase"
+            ? "读取黑市采购规则"
+            : cmd === "store_setpurchase"
+              ? "更新黑市折扣规则"
+              : "执行黑市自动采购",
+        ),
+    });
   }
 
   async claimHangUpRewardsFiveTimes(tokenId) {
@@ -1304,13 +1326,7 @@ export class DailyTaskRunner {
     if (!isTaskCompleted(12) && settings.blackMarketPurchase) {
       taskList.push({
         name: "黑市购买1次物品",
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "store_purchase",
-            { goodsId: 1 },
-            "黑市购买1次物品",
-          ),
+        execute: () => this.runBlackMarketTask(tokenId),
       });
     }
 

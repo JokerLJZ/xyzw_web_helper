@@ -2251,7 +2251,7 @@
       v-model:show="showBatchSettingsModal"
       preset="card"
       title="任务设置"
-      style="width: 90%; max-width: 700px"
+      style="width: 90%; max-width: 820px"
     >
       <div class="settings-content">
         <n-grid :cols="2" :x-gap="24">
@@ -2379,6 +2379,64 @@
                 >
               </div>
             </div>
+            <n-divider title-placement="left" style="margin: 12px 0 8px 0"
+              >黑市采购设置</n-divider
+            >
+            <div class="settings-grid">
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: row;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
+                <label class="setting-label">采购模式</label>
+                <n-select
+                  v-model:value="batchSettings.blackMarketPurchaseMode"
+                  :options="blackMarketModeOptions"
+                  size="small"
+                  style="width: 180px"
+                />
+              </div>
+            </div>
+            <n-alert
+              v-if="batchSettings.blackMarketPurchaseMode === 'legacy'"
+              type="info"
+              :show-icon="false"
+              style="margin-top: 8px"
+            >
+              沿用账号在游戏内保存的自动采购清单。
+            </n-alert>
+            <template v-else>
+              <n-alert type="success" :show-icon="false" style="margin: 8px 0">
+                实际折扣小于或等于阈值时购买；这里的设置对所有账号通用。
+              </n-alert>
+              <div class="black-market-discount-grid">
+                <div
+                  v-for="item in BLACK_MARKET_ITEMS"
+                  :key="item.itemId"
+                  class="black-market-discount-item"
+                >
+                  <span>{{ item.name }}</span>
+                  <n-input-number
+                    v-model:value="batchSettings.blackMarketDiscounts[item.itemId]"
+                    :min="1"
+                    :max="10"
+                    :step="1"
+                    size="small"
+                    style="width: 82px"
+                  >
+                    <template #suffix>折</template>
+                  </n-input-number>
+                </div>
+              </div>
+              <div style="margin-top: 8px; text-align: right">
+                <n-button size="tiny" @click="resetBlackMarketDiscounts">
+                  恢复预设阈值
+                </n-button>
+              </div>
+            </template>
             <n-divider title-placement="left" style="margin: 12px 0 8px 0"
               >智能发车条件设置(0为不限制)</n-divider
             >
@@ -3343,6 +3401,11 @@ import {
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
+import {
+  BLACK_MARKET_ITEMS,
+  DEFAULT_BLACK_MARKET_DISCOUNTS,
+  normalizeBlackMarketSettings,
+} from "@/utils/blackMarket.js";
 import { HERO_DICT } from "@/utils/HeroList";
 import { sendWxPusherMessage, sendPushPlusMessage, formatScheduledTaskNotification, formatMissedExecutionNotification } from "@/utils/wxpusher";
 
@@ -4038,6 +4101,8 @@ for (const merchantId in goldItemsConfig) {
 
 const batchSettings = reactive({
   dreamPurchaseList: defaultDreamPurchaseList,
+  blackMarketPurchaseMode: "legacy",
+  blackMarketDiscounts: { ...DEFAULT_BLACK_MARKET_DISCOUNTS },
   boxCount: 100,
   fishCount: 100,
   recruitCount: 100,
@@ -4089,6 +4154,7 @@ const loadBatchSettings = () => {
       const parsed = JSON.parse(saved);
       Object.assign(batchSettings, parsed);
     }
+    Object.assign(batchSettings, normalizeBlackMarketSettings(batchSettings));
   } catch (error) {
     console.error("Failed to load batch settings:", error);
   }
@@ -4097,6 +4163,7 @@ const loadBatchSettings = () => {
 // Save batch settings to localStorage
 const saveBatchSettings = () => {
   try {
+    Object.assign(batchSettings, normalizeBlackMarketSettings(batchSettings));
     localStorage.setItem("batchSettings", JSON.stringify(batchSettings));
     message.success("定时批量任务设置已保存");
     showBatchSettingsModal.value = false;
@@ -4104,6 +4171,15 @@ const saveBatchSettings = () => {
     console.error("Failed to save batch settings:", error);
     message.error("保存设置失败");
   }
+};
+
+const blackMarketModeOptions = [
+  { label: "游戏内采购清单", value: "legacy" },
+  { label: "通用折扣阈值", value: "discount" },
+];
+
+const resetBlackMarketDiscounts = () => {
+  batchSettings.blackMarketDiscounts = { ...DEFAULT_BLACK_MARKET_DISCOUNTS };
 };
 
 // Open batch settings modal
@@ -7858,6 +7934,20 @@ const stopBatch = () => {
   color: #666;
 }
 
+.black-market-discount-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+
+.black-market-discount-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
   .right-column {
@@ -7912,7 +8002,8 @@ const stopBatch = () => {
 
 @media (max-width: 768px) {
   .daily-settings-grid,
-  .daily-setting-switches {
+  .daily-setting-switches,
+  .black-market-discount-grid {
     grid-template-columns: 1fr;
   }
 }

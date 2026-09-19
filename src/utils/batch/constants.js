@@ -2,6 +2,8 @@
  * 批量日常任务常量配置
  */
 
+import { DEFAULT_BLACK_MARKET_DISCOUNTS } from "@/utils/blackMarket.js";
+
 // 宝箱类型选项
 export const boxTypeOptions = [
   { label: "木质宝箱", value: 2001 },
@@ -146,6 +148,8 @@ export const defaultBatchSettings = {
   receiverId: "",
   password: "",
   useGoldRefreshFallback: false,
+  blackMarketPurchaseMode: "legacy",
+  blackMarketDiscounts: { ...DEFAULT_BLACK_MARKET_DISCOUNTS },
   tokenListColumns: 2,
   commandDelay: 500,
   taskDelay: 500,

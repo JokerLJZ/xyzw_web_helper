@@ -3,6 +3,8 @@
  * 包含: legion_storebuygoods, legionStoreBuySkinCoins, store_purchase, collection_claimfreereward
  */
 
+import { runBlackMarketPurchase } from "@/utils/blackMarket.js";
+
 /**
  * 创建商店类任务执行器
  * @param {Object} deps - 依赖项
@@ -342,12 +344,20 @@ export function createTasksStore(deps) {
           message: `${token.name} 发送黑市采购请求...`,
           type: "info",
         });
-        const result = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "store_purchase",
-          {},
-          5000,
-        );
+        const purchase = await runBlackMarketPurchase({
+          settings: batchSettings,
+          send: (cmd, params) =>
+            tokenStore.sendMessageWithPromise(tokenId, cmd, params, 5000),
+        });
+        const result = purchase.result;
+
+        if (purchase.mode === "discount") {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 已按通用折扣阈值${purchase.ruleUpdated ? "更新清单并" : ""}执行采购`,
+            type: "info",
+          });
+        }
 
         await new Promise((r) => setTimeout(r, delayConfig.action));
 
