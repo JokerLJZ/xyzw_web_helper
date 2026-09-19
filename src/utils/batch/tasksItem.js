@@ -1,9 +1,15 @@
 import { HERO_DICT } from "@/utils/HeroList";
 import { PEACH_TASKS } from "@/utils/PeachTaskIds";
+import {
+  HELPER_COMMAND_TIMEOUT_MS,
+  getErrorMessage,
+  getItemQuantity,
+  runInventoryVerifiedGameCommand,
+} from "@/utils/helperTaskRunner";
 
 /**
  * 开箱、钓鱼、招募类任务
- * 包含: batchOpenBox, batchClaimBoxPointReward, batchFish, batchRecruit
+ * 包含: batchOpenBox, batchSmartBoxWeekly, batchClaimBoxPointReward, batchFish, batchRecruit
  */
 
 /**
@@ -28,6 +34,7 @@ export function createTasksItem(deps) {
     currentRunningTokenId,
     helperSettings,
     delayConfig,
+    activityWeek,
   } = deps;
 
   const boxNames = {
@@ -39,7 +46,163 @@ export function createTasksItem(deps) {
 
   const fishNames = { 1: "普通鱼竿", 2: "黄金鱼竿" };
 
+  const smartBoxDefinitions = [
+    { id: 2001, name: "木质宝箱", points: 1, batchSize: 10, reserve: 200 },
+    { id: 2002, name: "青铜宝箱", points: 10, batchSize: 10 },
+    { id: 2003, name: "黄金宝箱", points: 20, batchSize: 10 },
+    { id: 2004, name: "铂金宝箱", points: 50, batchSize: 10 },
+  ];
+
+  const getSmartBoxInventory = (roleInfo) => {
+    const items =
+      roleInfo?.role?.items ||
+      roleInfo?.data?.role?.items ||
+      roleInfo?.items ||
+      roleInfo?.data?.items ||
+      {};
+
+    return Object.fromEntries(
+      smartBoxDefinitions.map((box) => {
+        const item = items[box.id] ?? items[String(box.id)] ?? 0;
+        const quantity =
+          item && typeof item === "object"
+            ? (item.quantity ?? item.count ?? 0)
+            : item;
+        return [box.id, Number(quantity) || 0];
+      }),
+    );
+  };
+
+  const getSmartBoxPoints = (inventory, selectedTypes) =>
+    smartBoxDefinitions
+      .filter((box) => selectedTypes.includes(box.id))
+      .reduce((total, box) => total + (inventory[box.id] || 0) * box.points, 0);
+
+  const smartBoxPointUnit = 10;
+
+  const getSmartBoxCandidates = (inventory, selectedTypes) =>
+    smartBoxDefinitions
+      .filter((box) => selectedTypes.includes(box.id))
+      .map((box) => ({
+        ...box,
+        availableBatches: Math.floor(
+          Math.max(0, (inventory[box.id] || 0) - (box.reserve || 0)) /
+            box.batchSize,
+        ),
+        batchPoints: box.points * box.batchSize,
+      }))
+      .filter((box) => box.availableBatches > 0)
+      .sort((left, right) => right.points - left.points);
+
+  const buildSmartBoxStates = (candidates, maxUnits) => {
+    let states = Array(maxUnits + 1).fill(null);
+    states[0] = [];
+
+    for (const candidate of candidates) {
+      const nextStates = states.slice();
+      const batchUnits = candidate.batchPoints / smartBoxPointUnit;
+      const maxBatches = Math.min(
+        candidate.availableBatches,
+        Math.floor(maxUnits / batchUnits),
+      );
+
+      for (let currentUnits = 0; currentUnits <= maxUnits; currentUnits += 1) {
+        if (!states[currentUnits]) continue;
+
+        for (let count = 1; count <= maxBatches; count += 1) {
+          const nextUnits = currentUnits + count * batchUnits;
+          if (nextUnits > maxUnits) break;
+          if (!nextStates[nextUnits]) {
+            nextStates[nextUnits] = [
+              ...states[currentUnits],
+              { ...candidate, batches: count },
+            ];
+          }
+        }
+      }
+
+      states = nextStates;
+    }
+
+    return states;
+  };
+
+  // Build the largest available opening plan up to the requested limit. The
+  // task accumulates these partial plans until one group reaches 8000 points.
+  const buildSmartBoxRefillPlan = (
+    inventory,
+    selectedTypes,
+    maxPoints = 7500,
+  ) => {
+    const candidates = getSmartBoxCandidates(inventory, selectedTypes);
+    if (candidates.length === 0) return null;
+
+    const maxUnits = Math.floor(maxPoints / smartBoxPointUnit);
+    const states = buildSmartBoxStates(candidates, maxUnits);
+    const planUnits = states.reduce(
+      (best, state, units) => (state && units > best ? units : best),
+      0,
+    );
+
+    if (planUnits <= 0) return null;
+
+    return {
+      boxes: states[planUnits],
+      points: planUnits * smartBoxPointUnit,
+    };
+  };
+
   const heroIds = Object.keys(HERO_DICT).map(Number);
+
+  const heroLevelOrderThresholds = [
+    { level: 100, order: 1 },
+    { level: 200, order: 2 },
+    { level: 300, order: 3 },
+    { level: 500, order: 4 },
+    { level: 700, order: 5 },
+    { level: 900, order: 6 },
+    { level: 1100, order: 7 },
+    { level: 1300, order: 8 },
+    { level: 1500, order: 9 },
+    { level: 1800, order: 10 },
+    { level: 2100, order: 11 },
+    { level: 2400, order: 12 },
+    { level: 2800, order: 13 },
+    { level: 3200, order: 14 },
+    { level: 3600, order: 15 },
+    { level: 4000, order: 16 },
+    { level: 4500, order: 17 },
+    { level: 5000, order: 18 },
+    { level: 5500, order: 19 },
+  ];
+
+  const getHeroFromRoleInfo = (roleInfo, heroId) => {
+    const heroes = roleInfo?.role?.heroes;
+    if (!heroes) return null;
+
+    if (Array.isArray(heroes)) {
+      return heroes.find((hero) => Number(hero?.heroId) === Number(heroId));
+    }
+
+    return heroes[heroId] || heroes[String(heroId)] || null;
+  };
+
+  const isSuccessfulHeroCommand = (result) =>
+    Boolean(
+      result &&
+        (result.role?.heroes ||
+          result.code === 0 ||
+          result.success === true ||
+          result.result === 0),
+    );
+
+  const getLatestHero = async (tokenId, heroId, response) => {
+    const responseHero = getHeroFromRoleInfo(response, heroId);
+    if (responseHero) return responseHero;
+
+    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+    return getHeroFromRoleInfo(roleInfo, heroId);
+  };
 
   /**
    * 批量英雄升星
@@ -130,6 +293,219 @@ export function createTasksItem(deps) {
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("批量英雄升星结束");
+  };
+
+  /**
+   * 将单个武将升级并自动进阶到目标等级。
+   */
+  const upgradeSingleHero = async (tokenId, tokenName, heroId, targetLevel) => {
+    const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
+    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+    let hero = getHeroFromRoleInfo(roleInfo, heroId);
+
+    if (!hero) {
+      throw new Error(`账号中未找到${heroName}`);
+    }
+
+    let currentLevel = Number(hero.level) || 0;
+    let currentOrder = Number(hero.order) || 0;
+
+    if (currentLevel >= targetLevel) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} ${heroName}当前${currentLevel}级，已达到目标，跳过操作`,
+        type: "info",
+      });
+      return;
+    }
+
+    while (!shouldStop.value) {
+      const nextOrder = heroLevelOrderThresholds.find(
+        (item) => item.order > currentOrder,
+      );
+
+      if (nextOrder && currentLevel >= nextOrder.level) {
+        const result = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "hero_heroupgradeorder",
+          { heroId },
+          5000,
+        );
+
+        if (!isSuccessfulHeroCommand(result)) {
+          throw new Error(`进阶失败（当前${currentLevel}级）`);
+        }
+
+        hero = await getLatestHero(tokenId, heroId, result);
+        const updatedOrder = Number(hero?.order);
+        if (!hero || !Number.isFinite(updatedOrder) || updatedOrder <= currentOrder) {
+          throw new Error("进阶后未获取到最新武将阶数");
+        }
+
+        currentOrder = updatedOrder;
+        currentLevel = Number(hero.level) || currentLevel;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} ${heroName}已自动进阶至${currentOrder}阶（${currentLevel}级）`,
+          type: "success",
+        });
+        await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+        continue;
+      }
+
+      if (currentLevel >= targetLevel) {
+        break;
+      }
+
+      const levelBoundary = Math.min(
+        targetLevel,
+        nextOrder?.level || targetLevel,
+      );
+      const upgradeNum = Math.min(50, levelBoundary - currentLevel);
+
+      if (upgradeNum <= 0) {
+        throw new Error(`无法继续升级（当前${currentLevel}级，${currentOrder}阶）`);
+      }
+
+      const result = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "hero_heroupgradelevel",
+        {
+          heroId,
+          upgradeNum,
+        },
+        5000,
+      );
+
+      if (!isSuccessfulHeroCommand(result)) {
+        throw new Error(`升级${upgradeNum}级失败（当前${currentLevel}级）`);
+      }
+
+      hero = await getLatestHero(tokenId, heroId, result);
+      const updatedLevel = Number(hero?.level);
+      if (!hero || !Number.isFinite(updatedLevel) || updatedLevel <= currentLevel) {
+        throw new Error("升级后未获取到最新武将等级");
+      }
+
+      currentLevel = updatedLevel;
+      currentOrder = Number(hero.order) || currentOrder;
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} ${heroName}升级至${currentLevel}级`,
+        type: "success",
+      });
+      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: shouldStop.value
+        ? `${tokenName} ${heroName}升级任务已停止，当前${currentLevel}级`
+        : `${tokenName} ${heroName}已完成至${currentLevel}级`,
+      type: shouldStop.value ? "warning" : "success",
+    });
+  };
+
+  /**
+   * 批量将多个指定武将升级并自动进阶到目标等级。
+   * 目标等级必须由页面限制为50的整数倍；每次升级最多发送50级，避免跨过进阶阈值。
+   */
+  const batchHeroLevelUpgrade = async (heroIdsToUpgrade, targetLevel) => {
+    if (selectedTokens.value.length === 0) return;
+
+    const normalizedHeroIds = [
+      ...new Set(
+        (Array.isArray(heroIdsToUpgrade)
+          ? heroIdsToUpgrade
+          : [heroIdsToUpgrade]
+        ).map(Number),
+      ),
+    ];
+    const normalizedTargetLevel = Number(targetLevel);
+
+    if (
+      normalizedHeroIds.length === 0 ||
+      normalizedHeroIds.some((heroId) => !HERO_DICT[heroId]) ||
+      !Number.isInteger(normalizedTargetLevel) ||
+      normalizedTargetLevel < 50 ||
+      normalizedTargetLevel > 6000 ||
+      normalizedTargetLevel % 50 !== 0
+    ) {
+      message.warning("请选择有效武将，目标等级必须是50的整数倍（50-6000）");
+      return;
+    }
+
+    const heroNames = normalizedHeroIds.map((heroId) => HERO_DICT[heroId].name);
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始批量升级武将至${normalizedTargetLevel}级: ${tokenName} ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+        let hasError = false;
+        for (const heroId of normalizedHeroIds) {
+          if (shouldStop.value) break;
+
+          try {
+            await upgradeSingleHero(
+              tokenId,
+              tokenName,
+              heroId,
+              normalizedTargetLevel,
+            );
+          } catch (error) {
+            hasError = true;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${HERO_DICT[heroId].name}升级失败: ${error.message}，继续处理其他武将`,
+              type: "error",
+            });
+          }
+        }
+
+        tokenStatus.value[tokenId] = hasError ? "failed" : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: shouldStop.value
+            ? `${tokenName} 批量武将升级任务已停止`
+            : `${tokenName} 批量武将升级完成（目标：${normalizedTargetLevel}级）`,
+          type: hasError ? "warning" : shouldStop.value ? "warning" : "success",
+        });
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 批量武将升级失败: ${error.message}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success(`批量升级${heroNames.join("、")}结束`);
   };
 
   /**
@@ -770,8 +1146,6 @@ export function createTasksItem(deps) {
     const totalCount = isScheduledTask
       ? batchSettings.boxCount
       : helperSettings.count;
-    const batches = Math.floor(totalCount / 10);
-    const remainder = totalCount % 10;
 
     selectedTokens.value.forEach((id) => {
       tokenStatus.value[id] = "waiting";
@@ -798,34 +1172,25 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
-        for (let i = 0; i < batches && !shouldStop.value; i++) {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "item_openbox",
-            { itemId: boxType, number: 10 },
-            5000,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 开箱进度: ${(i + 1) * 10}/${totalCount}`,
-            type: "info",
-          });
-          await new Promise((r) => setTimeout(r, delayConfig.action));
-        }
+        await runInventoryVerifiedGameCommand({
+          tokenStore,
+          tokenId,
+          cmd: "item_openbox",
+          itemId: boxType,
+          total: totalCount,
+          timeout: HELPER_COMMAND_TIMEOUT_MS,
+          delayMs: delayConfig.action,
+          createParams: (amount) => ({ itemId: boxType, number: amount }),
+          queryInventory: () => tokenStore.sendGetRoleInfo(tokenId),
+          onProgress: (progress) => {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 开箱进度: ${progress.completed}/${totalCount}`,
+              type: "info",
+            });
+          },
+        });
 
-        if (remainder > 0 && !shouldStop.value) {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "item_openbox",
-            { itemId: boxType, number: remainder },
-            5000,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 开箱进度: ${totalCount}/${totalCount}`,
-            type: "info",
-          });
-        }
         await tokenStore.sendMessageWithPromise(
           tokenId,
           "item_batchclaimboxpointreward",
@@ -843,7 +1208,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `开箱失败: ${error.message}`,
+          message: `开箱失败: ${getErrorMessage(error)}`,
           type: "error",
         });
       } finally {
@@ -1103,8 +1468,6 @@ export function createTasksItem(deps) {
     const totalCount = isScheduledTask
       ? batchSettings.recruitCount
       : helperSettings.count;
-    const batches = Math.floor(totalCount / 10);
-    const remainder = totalCount % 10;
 
     selectedTokens.value.forEach((id) => {
       tokenStatus.value[id] = "waiting";
@@ -1131,34 +1494,24 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
-        for (let i = 0; i < batches && !shouldStop.value; i++) {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "hero_recruit",
-            { recruitType: 1, recruitNumber: 10 },
-            5000,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `招募进度: ${(i + 1) * 10}/${totalCount}`,
-            type: "info",
-          });
-          await new Promise((r) => setTimeout(r, delayConfig.action));
-        }
-
-        if (remainder > 0 && !shouldStop.value) {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "hero_recruit",
-            { recruitType: 1, recruitNumber: remainder },
-            5000,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `招募进度: ${totalCount}/${totalCount}`,
-            type: "info",
-          });
-        }
+        await runInventoryVerifiedGameCommand({
+          tokenStore,
+          tokenId,
+          cmd: "hero_recruit",
+          itemId: 1001,
+          total: totalCount,
+          timeout: HELPER_COMMAND_TIMEOUT_MS,
+          delayMs: delayConfig.action,
+          createParams: (amount) => ({ recruitType: 1, recruitNumber: amount }),
+          queryInventory: () => tokenStore.sendGetRoleInfo(tokenId),
+          onProgress: (progress) => {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 招募进度: ${progress.completed}/${totalCount}`,
+              type: "info",
+            });
+          },
+        });
 
         await tokenStore.sendMessage(tokenId, "role_getroleinfo");
         tokenStatus.value[tokenId] = "completed";
@@ -1172,7 +1525,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `招募失败: ${error.message}`,
+          message: `招募失败: ${getErrorMessage(error)}`,
           type: "error",
         });
       } finally {
@@ -1191,6 +1544,444 @@ export function createTasksItem(deps) {
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("批量招募结束");
+  };
+
+  /**
+   * 智能招募周任务：起始招募道具达到360个后，招募360次、领取邮件，再完成40次。
+   */
+  const batchSmartRecruitWeekly = async (taskConfig = {}) => {
+    if (selectedTokens.value.length === 0) return;
+
+    const startCount = Math.max(
+      1,
+      Math.trunc(Number(taskConfig.startCount) || 360),
+    );
+    const totalCount = Math.max(
+      startCount,
+      Math.trunc(Number(taskConfig.totalCount) || 400),
+    );
+    const remainingCount = totalCount - startCount;
+    const roundCount = Math.min(
+      4,
+      Math.max(1, Math.trunc(Number(taskConfig.roundCount) || 1)),
+    );
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const runRecruitBatch = async (
+      tokenId,
+      token,
+      count,
+      progressOffset,
+      roundIndex,
+    ) => {
+      await runInventoryVerifiedGameCommand({
+        tokenStore,
+        tokenId,
+        cmd: "hero_recruit",
+        itemId: 1001,
+        total: count,
+        timeout: HELPER_COMMAND_TIMEOUT_MS,
+        delayMs: delayConfig.action,
+        createParams: (amount) => ({
+          recruitType: 1,
+          recruitNumber: amount,
+        }),
+        queryInventory: () => tokenStore.sendGetRoleInfo(tokenId),
+        onProgress: (progress) => {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 招募周第${roundIndex}/${roundCount}轮进度：${progressOffset + progress.completed}/${totalCount}`,
+            type: "info",
+          });
+        },
+      });
+    };
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      const token = tokens.value.find((item) => item.id === tokenId);
+      tokenStatus.value[tokenId] = "running";
+
+      try {
+        if (activityWeek?.value && activityWeek.value !== "招募周") {
+          tokenStatus.value[tokenId] = "skipped";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 当前为${activityWeek.value}，跳过智能招募周任务`,
+            type: "warning",
+          });
+          return;
+        }
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始智能招募周任务：${token.name}，目标${roundCount}轮，每轮${totalCount}次 ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        for (let roundIndex = 1; roundIndex <= roundCount; roundIndex += 1) {
+          if (shouldStop.value) return;
+
+          const initialRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          const initialRecruitCount = getItemQuantity(initialRoleInfo, 1001);
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 招募周第${roundIndex}/${roundCount}轮起始招募道具${initialRecruitCount}个，启动要求${startCount}个`,
+            type: "info",
+          });
+
+          if (initialRecruitCount < startCount) {
+            tokenStatus.value[tokenId] = "skipped";
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 招募周第${roundIndex}轮起始数量不足${startCount}个，跳过后续任务`,
+              type: "warning",
+            });
+            return;
+          }
+
+          await runRecruitBatch(tokenId, token, startCount, 0, roundIndex);
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 招募周第${roundIndex}轮已完成${startCount}个，开始领取邮件附件`,
+            type: "info",
+          });
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "mail_claimallattachment",
+            { category: 0 },
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, delayConfig.action),
+          );
+          await runRecruitBatch(
+            tokenId,
+            token,
+            remainingCount,
+            startCount,
+            roundIndex,
+          );
+
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 招募周第${roundIndex}/${roundCount}轮完成：${totalCount}/${totalCount}次`,
+            type: "success",
+          });
+        }
+
+        await tokenStore.sendMessage(tokenId, "role_getroleinfo");
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${token.name} 智能招募周任务完成：${roundCount}/${roundCount}轮 ===`,
+          type: "success",
+        });
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 智能招募周任务失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("智能招募周任务结束");
+  };
+
+  const batchSmartBoxWeekly = async (taskConfig = {}) => {
+    if (selectedTokens.value.length === 0) return;
+
+    const selectedTypes = Array.from(
+      new Set(
+        (Array.isArray(taskConfig.smartBoxTypes)
+          ? taskConfig.smartBoxTypes
+          : [2002, 2003, 2004]
+        )
+          .map(Number)
+          .filter((id) => smartBoxDefinitions.some((box) => box.id === id)),
+      ),
+    );
+    const groupCount = Math.min(
+      4,
+      Math.max(1, Math.trunc(Number(taskConfig.smartBoxGroupCount) || 1)),
+    );
+    // 奖励领取后可能只补回少量宝箱，需要多轮补开才能凑出8000分。
+    // 同时设置上限，避免奖励接口异常时任务无限循环。
+    const maxCyclesPerGroup = 20;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const fetchRoleInfo = (tokenId) =>
+      tokenStore.sendMessageWithPromise(
+        tokenId,
+        "role_getroleinfo",
+        {},
+        HELPER_COMMAND_TIMEOUT_MS,
+      );
+
+    const openSmartBoxes = async (tokenId, token, boxes, phase) => {
+      let openedPoints = 0;
+
+      for (const box of boxes) {
+        if (shouldStop.value) break;
+
+        const count = box.batches
+          ? box.batches * box.batchSize
+          : Math.floor((box.count || 0) / box.batchSize) * box.batchSize;
+        if (count <= 0) continue;
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} ${phase}：${box.name} ${count}个（${count * box.points}分）`,
+          type: "info",
+        });
+
+        await runInventoryVerifiedGameCommand({
+          tokenStore,
+          tokenId,
+          cmd: "item_openbox",
+          itemId: box.id,
+          total: count,
+          batchSize: box.batchSize,
+          timeout: HELPER_COMMAND_TIMEOUT_MS,
+          delayMs: delayConfig.action,
+          createParams: (amount) => ({ itemId: box.id, number: amount }),
+          queryInventory: () => fetchRoleInfo(tokenId),
+          onProgress: (progress) => {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} ${box.name}进度：${progress.completed}/${count}`,
+              type: "info",
+            });
+          },
+        });
+        openedPoints += count * box.points;
+      }
+
+      return openedPoints;
+    };
+
+    const claimPointsAndMail = async (tokenId, token) => {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${token.name} 本轮开箱完成，开始领取宝箱积分和邮件附件`,
+        type: "info",
+      });
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "item_batchclaimboxpointreward",
+        {},
+        HELPER_COMMAND_TIMEOUT_MS,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "mail_claimallattachment",
+        { category: 0 },
+        HELPER_COMMAND_TIMEOUT_MS,
+      );
+    };
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      const token = tokens.value.find((item) => item.id === tokenId);
+      tokenStatus.value[tokenId] = "running";
+
+      try {
+        if (activityWeek?.value && activityWeek.value !== "宝箱周") {
+          tokenStatus.value[tokenId] = "skipped";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 当前为${activityWeek.value}，跳过智能宝箱周任务`,
+            type: "warning",
+          });
+          return;
+        }
+
+        if (selectedTypes.length === 0) {
+          throw new Error("至少选择一种宝箱类型");
+        }
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始智能宝箱周任务：${token.name}，目标${groupCount}组 ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        let completedGroups = 0;
+        let cycle = 0;
+        let cyclesForCurrentGroup = 0;
+        let currentGroupStarted = false;
+        let accumulatedPoints = 0;
+
+        while (
+          completedGroups < groupCount &&
+          cyclesForCurrentGroup < maxCyclesPerGroup &&
+          !shouldStop.value
+        ) {
+          cycle += 1;
+          cyclesForCurrentGroup += 1;
+          const roleInfo = await fetchRoleInfo(tokenId);
+          const inventory = getSmartBoxInventory(roleInfo);
+          const selectedPoints = getSmartBoxPoints(inventory, selectedTypes);
+
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 第${completedGroups + 1}组第${cycle}轮：选中宝箱积分${selectedPoints}`,
+            type: "info",
+          });
+
+          if (!currentGroupStarted) {
+            if (selectedPoints < 4000) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 第${completedGroups + 1}组起始宝箱积分${selectedPoints}不足4000，跳过本组任务`,
+                type: "warning",
+              });
+              break;
+            }
+
+            currentGroupStarted = true;
+            accumulatedPoints = 0;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 第${completedGroups + 1}组起始积分${selectedPoints}，开始累计开箱至8000分`,
+              type: "info",
+            });
+          }
+
+          const remainingPoints = 8000 - accumulatedPoints;
+          const plan = buildSmartBoxRefillPlan(
+            inventory,
+            selectedTypes,
+            Math.min(remainingPoints, 7500),
+          );
+
+          if (!plan) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 没有满足批次要求的可开宝箱，停止任务`,
+              type: "warning",
+            });
+            break;
+          }
+
+          const beforeInventory = JSON.stringify(
+            selectedTypes.map((id) => inventory[id] || 0),
+          );
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 第${completedGroups + 1}组本轮开箱${plan.points}分，累计${accumulatedPoints + plan.points}/8000分`,
+            type: "info",
+          });
+          const openedPoints = await openSmartBoxes(
+            tokenId,
+            token,
+            plan.boxes,
+            "累计开箱",
+          );
+          if (openedPoints <= 0) break;
+
+          accumulatedPoints += openedPoints;
+          await claimPointsAndMail(tokenId, token);
+
+          const refreshedInventory = getSmartBoxInventory(
+            await fetchRoleInfo(tokenId),
+          );
+          const afterInventory = JSON.stringify(
+            selectedTypes.map((id) => refreshedInventory[id] || 0),
+          );
+
+          if (accumulatedPoints >= 8000) {
+            completedGroups += 1;
+            currentGroupStarted = false;
+            cyclesForCurrentGroup = 0;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 第${completedGroups}组完成，累计开箱${accumulatedPoints}分`,
+              type: "success",
+            });
+            continue;
+          }
+
+          if (beforeInventory === afterInventory) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 领取积分和邮件后库存没有增加，停止任务避免重复执行`,
+              type: "warning",
+            });
+            break;
+          }
+        }
+
+        if (
+          completedGroups < groupCount &&
+          cyclesForCurrentGroup >= maxCyclesPerGroup
+        ) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 累计开箱达到${maxCyclesPerGroup}轮仍未凑够8000分，停止任务`,
+            type: "warning",
+          });
+        }
+
+        tokenStatus.value[tokenId] =
+          completedGroups > 0 ? "completed" : "skipped";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${token.name} 智能宝箱周任务结束：完成${completedGroups}/${groupCount}组 ===`,
+          type: completedGroups === groupCount ? "success" : "warning",
+        });
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 智能宝箱周任务失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("智能宝箱周任务结束");
   };
 
   const batchOpenBoxByPoints = async (isScheduledTask = false) => {
@@ -1385,43 +2176,30 @@ export function createTasksItem(deps) {
           const count = boxToOpen[box.id] || 0;
           if (count <= 0) continue;
 
-          const batches = Math.floor(count / 10);
-          const remainder = count % 10;
-
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 开始开 ${box.name}: ${count} 个`,
             type: "info",
           });
 
-          for (let i = 0; i < batches && !shouldStop.value; i++) {
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "item_openbox",
-              { itemId: box.id, number: 10 },
-              5000,
-            );
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} ${box.name} 开箱进度: ${(i + 1) * 10}/${count}`,
-              type: "info",
-            });
-            await new Promise((r) => setTimeout(r, delayConfig.action));
-          }
-
-          if (remainder > 0 && !shouldStop.value) {
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "item_openbox",
-              { itemId: box.id, number: remainder },
-              5000,
-            );
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} ${box.name} 开箱进度: ${count}/${count}`,
-              type: "info",
-            });
-          }
+          await runInventoryVerifiedGameCommand({
+            tokenStore,
+            tokenId,
+            cmd: "item_openbox",
+            itemId: box.id,
+            total: count,
+            timeout: HELPER_COMMAND_TIMEOUT_MS,
+            delayMs: delayConfig.action,
+            createParams: (amount) => ({ itemId: box.id, number: amount }),
+            queryInventory: () => tokenStore.sendGetRoleInfo(tokenId),
+            onProgress: (progress) => {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} ${box.name} 开箱进度: ${progress.completed}/${count}`,
+                type: "info",
+              });
+            },
+          });
         }
 
         await tokenStore.sendMessage(tokenId, "role_getroleinfo");
@@ -1436,7 +2214,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `按积分开箱失败: ${error.message}`,
+          message: `按积分开箱失败: ${getErrorMessage(error)}`,
           type: "error",
         });
       } finally {
@@ -1461,9 +2239,12 @@ export function createTasksItem(deps) {
     batchOpenBox,
     batchOpenBoxByPoints,
     batchClaimBoxPointReward,
+    batchSmartBoxWeekly,
+    batchSmartRecruitWeekly,
     batchFish,
     batchRecruit,
     batchHeroUpgrade,
+    batchHeroLevelUpgrade,
     batchBookUpgrade,
     batchClaimStarRewards,
     batchClaimPeachTasks,
