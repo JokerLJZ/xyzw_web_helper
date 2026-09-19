@@ -18,6 +18,14 @@
           class="retry-input"
         />
         <span class="retry-label">最大重试</span>
+        <n-input-number
+          v-model:value="reconnectDelayMinutes"
+          :min="1"
+          :max="300"
+          size="small"
+          class="reconnect-delay-input"
+        />
+        <span class="retry-label">断线重启等待（分钟）</span>
       </div>
     </div>
 
@@ -244,6 +252,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useMessage } from "naive-ui";
+import { useLocalStorage } from "@vueuse/core";
 import { useTokenStore } from "@/stores/tokenStore";
 import { BOSS_NAMES } from "./boss_names.js";
 
@@ -260,6 +269,7 @@ const selectedGroupIds = ref([]);
 const searchKeyword = ref("");
 const autoContinue = ref(true);
 const maxRetries = ref(999999);
+const reconnectDelayMinutes = useLocalStorage("pushingLevelsReconnectDelayMinutes", 30);
 const autoScroll = ref(true);
 const onlyErrors = ref(false);
 const logsContainer = ref(null);
@@ -677,6 +687,24 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForReconnectRestart(tokenId, tokenName) {
+  const delayMinutes = Math.min(300, Math.max(1, Number(reconnectDelayMinutes.value) || 30));
+  const state = runningStates[tokenId];
+  const deadline = Date.now() + delayMinutes * 60 * 1000;
+
+  addLog(tokenId, tokenName, `连接已断开，${delayMinutes} 分钟后重新启动推关`, "warning");
+
+  while (Date.now() < deadline) {
+    if (state?.stopFlag) {
+      addLog(tokenId, tokenName, "已取消断线重启", "info");
+      return false;
+    }
+    await sleep(Math.min(1000, deadline - Date.now()));
+  }
+
+  return !state?.stopFlag;
+}
+
 async function waitConnected(tokenId, timeoutMs = 3000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -686,9 +714,11 @@ async function waitConnected(tokenId, timeoutMs = 3000) {
   return isConnected(tokenId);
 }
 
-async function ensureConnected(tokenId, retryCount = 2) {
-  if (isConnected(tokenId)) return true;
-
+async function ensureConnected(
+  tokenId,
+  retryCount = 2,
+  { delayBeforeFirstAttempt = false } = {},
+) {
   const token = getToken(tokenId);
   const tokenName = token?.name || tokenId;
   if (!token) {
@@ -696,12 +726,23 @@ async function ensureConnected(tokenId, retryCount = 2) {
     return false;
   }
 
+  if (delayBeforeFirstAttempt) {
+    const shouldRestart = await waitForReconnectRestart(tokenId, tokenName);
+    if (!shouldRestart) return false;
+    if (isConnected(tokenId)) {
+      addLog(tokenId, tokenName, "连接已恢复，重新启动推关", "success");
+      return true;
+    }
+  }
+
+  if (isConnected(tokenId)) return true;
+
   for (let attempt = 0; attempt < retryCount; attempt++) {
     if (attempt > 0) {
       addLog(tokenId, tokenName, `重连尝试 ${attempt}/${retryCount}，等待 3 秒...`, "warning");
       await sleep(3000);
     } else {
-      addLog(tokenId, tokenName, "WebSocket 断开，尝试连接...", "info");
+      addLog(tokenId, tokenName, "开始重新连接 WebSocket...", "info");
     }
 
     try {
@@ -854,8 +895,10 @@ async function runOneBattle(tokenId, tokenName) {
       state.lastError = "服务器未返回战斗时间";
       addLog(tokenId, tokenName, `服务器未返回有效战斗时间，重试 ${state.retries}`, "warning");
     } catch (error) {
-      if (String(error?.message || "").includes("WebSocket") && attempt === 0) {
-        if (await ensureConnected(tokenId)) continue;
+      const connectionFailed = !isConnected(tokenId)
+        || String(error?.message || "").includes("WebSocket");
+      if (connectionFailed && attempt === 0) {
+        if (await ensureConnected(tokenId, 2, { delayBeforeFirstAttempt: true })) continue;
       }
 
       state.losses += 1;
@@ -935,8 +978,10 @@ async function runOneBattle(tokenId, tokenName) {
       return { success: false, error: state.lastError };
     } catch (error) {
       const errorMessage = sanitizeError(error);
-      if (String(error?.message || "").includes("WebSocket") && attempt === 0) {
-        if (await ensureConnected(tokenId)) continue;
+      const connectionFailed = !isConnected(tokenId)
+        || String(error?.message || "").includes("WebSocket");
+      if (connectionFailed && attempt === 0) {
+        if (await ensureConnected(tokenId, 2, { delayBeforeFirstAttempt: true })) continue;
       }
 
       state.losses += 1;
@@ -1214,6 +1259,10 @@ onBeforeUnmount(() => {
 
 .retry-input {
   width: 110px;
+}
+
+.reconnect-delay-input {
+  width: 100px;
 }
 
 .retry-label {
