@@ -1,6 +1,6 @@
 import { useTokenStore } from "@/stores/tokenStore";
 import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
-import { isDreamEnabled, runDreamAutoPush } from "@/utils/dreamTaskRunner.js";
+import { isDreamEnabled, runAutomaticDream } from "@/utils/dreamTaskRunner.js";
 import { goldItemsConfig, merchantConfig } from "@/utils/dreamConstants";
 
 // 辅助函数
@@ -718,6 +718,7 @@ export class DailyTaskRunner {
     });
 
     for (const op of operations) {
+      if (this.callbacks?.shouldStop?.()) return;
       try {
         const response = await this.executeGameCommand(
           tokenId,
@@ -751,16 +752,16 @@ export class DailyTaskRunner {
   }
 
   async runDreamTask(tokenId) {
-    const result = await runDreamAutoPush({
+    const result = await runAutomaticDream({
+      purchase: () => this.runDreamPurchaseForToken(tokenId, this.loadDreamPurchaseList()),
       enabled: isDreamEnabled(tokenId),
       send: (cmd, params) => this.tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
       stopped: () => this.callbacks?.shouldStop?.() === true,
       pause: () => sleep(Math.max(500, Number(this.delaySettings.commandDelay) || 500)),
       log: (text) => this.log(text),
     });
-    this.log(`梦境自动推层：${result.reason}，当前层数 ${result.floor ?? "未知"}`);
-    if (result.status === "skipped" || this.callbacks?.shouldStop?.()) return;
-    await this.runDreamPurchaseForToken(tokenId, this.loadDreamPurchaseList());
+    this.log(`自动梦境：${result.reason}，当前层数 ${result.floor ?? "未知"}`);
+    return result;
   }
 
   loadSettings(roleId) {

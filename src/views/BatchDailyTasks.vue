@@ -460,7 +460,7 @@
                     !ismengjingActivityOpen
                   "
                 >
-                  梦境自动推层
+                  自动梦境
                 </n-button>
                 <n-button
                   size="small"
@@ -868,7 +868,7 @@
               ><n-switch v-model:value="currentSettings.studyEnable" />
             </div>
             <div class="switch-row">
-              <span class="switch-label" title="启用后自动推层；关闭时日常、批量及定时梦境任务均跳过">梦境自动推层</span
+              <span class="switch-label" title="仅吕布推层，超过195层跳过战斗，随后按清单采购；关闭时跳过梦境任务">自动梦境</span
               ><n-switch v-model:value="currentSettings.dreamEnable" />
             </div>
             <div class="switch-row">
@@ -984,7 +984,7 @@
               ><n-switch v-model:value="currentTemplate.studyEnable" />
             </div>
             <div class="switch-row">
-              <span class="switch-label" title="启用后自动推层；关闭时日常、批量及定时梦境任务均跳过">梦境自动推层</span
+              <span class="switch-label" title="仅吕布推层，超过195层跳过战斗，随后按清单采购；关闭时跳过梦境任务">自动梦境</span
               ><n-switch v-model:value="currentTemplate.dreamEnable" />
             </div>
             <div class="switch-row">

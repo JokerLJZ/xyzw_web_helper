@@ -48,7 +48,7 @@ export const availableTasks = [
   { label: "批量招募", value: "batchRecruit" },
   { label: "一键宝库前3层", value: "batchbaoku13" },
   { label: "一键宝库4,5层", value: "batchbaoku45" },
-  { label: "梦境自动推层", value: "batchmengjing" },
+  { label: "自动梦境", value: "batchmengjing" },
   { label: "一键俱乐部签到", value: "batchclubsign" },
   { label: "一键盐场报名", value: "batchSaltSignup" },
   { label: "自动营地挑战（周二至周四）", value: "batchCampChallenge" },

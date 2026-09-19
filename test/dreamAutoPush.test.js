@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isDungeonOpen } from "../src/utils/dreamConstants.js";
-import { getDreamPeriod, isDreamEnabled, runDreamAutoPush } from "../src/utils/dreamTaskRunner.js";
+import { getDreamPeriod, isDreamEnabled, runDreamAutoPush, runAutomaticDream } from "../src/utils/dreamTaskRunner.js";
 import { createTasksDungeon } from "../src/utils/batch/tasksDungeon.js";
 
 const now = () => new Date("2026-09-23T10:00:00+08:00");
@@ -58,13 +58,13 @@ test("梦境使用北京时间日/一/三/四及正确的本期开始时间", as
   assert.equal(result.status, "skipped");
 });
 
-test("新期梦境使用当前完整阵容初始化并逐层推进", async () => {
+test("新期梦境只选择吕布并逐层推进", async () => {
   const f = fixture({ fresh: true });
   const result = await runDreamAutoPush({ ...f, maxBattles: 3 });
   assert.equal(result.initialFloor, 41);
   assert.equal(result.floor, 44);
   assert.equal(result.battles, 3);
-  assert.deepEqual(f.calls.find((c) => c.cmd === "dungeon_selecthero").params, { battleTeam: { 0: 107, 1: 106 } });
+  assert.deepEqual(f.calls.find((c) => c.cmd === "dungeon_selecthero").params, { battleTeam: { 0: 107 } });
   assert.deepEqual(f.calls.filter((c) => c.cmd === "fight_startdungeon").map((c) => c.params.heroId), [107, 107, 107]);
 });
 
@@ -75,17 +75,69 @@ test("本期已选阵容不会被覆盖，增量战报不丢失英雄身份", as
   assert.equal(f.calls.some((c) => c.cmd === "dungeon_selecthero"), false);
 });
 
-test("英雄阵亡后切换存活英雄，全员阵亡停止", async () => {
-  const f = fixture({ win: false, kill: true });
-  const result = await runDreamAutoPush(f);
-  assert.equal(result.battles, 2);
-  assert.deepEqual(f.calls.filter((c) => c.cmd === "fight_startdungeon").map((c) => c.params.heroId), [107, 106]);
+test("已经超过195层时不选阵、不战斗，直接自动采购", async () => {
+  const f = fixture();
+  f.role.dungeon.id = 196;
+  f.role.dungeon.battleTeam = {};
+  let purchased = 0;
+  const result = await runAutomaticDream({ ...f, purchase: async () => { purchased++; } });
+  assert.equal(result.floor, 196);
+  assert.equal(result.battles, 0);
+  assert.equal(purchased, 1);
+  assert.deepEqual(f.calls.map((c) => c.cmd), ["role_getroleinfo"]);
 });
 
-test("同一英雄连续3次未推进后换人，不无限重试", async () => {
+test("195层仍可挑战，推进至196层后停止并采购，采购严格晚于战斗", async () => {
+  const f = fixture();
+  f.role.dungeon.id = 195;
+  const result = await runAutomaticDream({ ...f, purchase: async () => {
+    assert.equal(f.role.dungeon.id, 196);
+    f.calls.push({ cmd: "purchase" });
+  } });
+  assert.equal(result.battles, 1);
+  assert.equal(f.calls.filter((c) => c.cmd === "fight_startdungeon").length, 1);
+  assert.equal(f.calls.at(-1).cmd, "purchase");
+});
+
+test("已选阵容没有吕布时不使用其他武将，仍按清单采购", async () => {
+  const f = fixture();
+  delete f.role.dungeon.battleTeam[0];
+  let purchased = false;
+  const result = await runAutomaticDream({ ...f, purchase: async () => { purchased = true; } });
+  assert.equal(result.battles, 0);
+  assert.equal(purchased, true);
+  assert.equal(f.calls.some((c) => c.cmd === "fight_startdungeon" || c.cmd === "dungeon_selecthero"), false);
+});
+
+test("当前激活武将不是吕布时仍仅用吕布战斗", async () => {
+  const f = fixture();
+  f.role.dungeon.activeHeroId = 106;
+  await runDreamAutoPush({ ...f, maxBattles: 1 });
+  assert.equal(f.calls.find((c) => c.cmd === "fight_startdungeon").params.heroId, 107);
+});
+
+test("关闭、战斗异常或用户停止时不自动采购", async () => {
+  const purchase = () => assert.fail("不应采购");
+  await runAutomaticDream({ ...fixture(), enabled: false, purchase });
+  await assert.rejects(runAutomaticDream({ ...fixture({ fail: "timeout" }), purchase }), /无法确认/);
+  const f = fixture();
+  f.role.dungeon.id = 196;
+  // 推层结果已经返回，但用户在采购开始前停止。
+  let checks = 0;
+  await runAutomaticDream({ ...f, purchase, stopped: () => ++checks > 2 });
+});
+
+test("吕布阵亡后停止，不切换其他存活英雄", async () => {
+  const f = fixture({ win: false, kill: true });
+  const result = await runDreamAutoPush(f);
+  assert.equal(result.battles, 1);
+  assert.deepEqual(f.calls.filter((c) => c.cmd === "fight_startdungeon").map((c) => c.params.heroId), [107]);
+});
+
+test("吕布连续3次未推进后停止，不换人或无限重试", async () => {
   const f = fixture({ win: false });
   const result = await runDreamAutoPush(f);
-  assert.equal(result.battles, 6);
+  assert.equal(result.battles, 3);
   assert.equal(result.floor, 41);
 });
 

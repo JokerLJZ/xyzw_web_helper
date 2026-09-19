@@ -1,5 +1,5 @@
 import { isDungeonOpen, merchantConfig } from "@/utils/dreamConstants";
-import { isDreamEnabled, runDreamAutoPush } from "@/utils/dreamTaskRunner.js";
+import { isDreamEnabled, runAutomaticDream } from "@/utils/dreamTaskRunner.js";
 
 /**
  * 宝库、梦境类任务
@@ -343,7 +343,8 @@ export function createTasksDungeon(deps) {
         await ensureConnection(tokenId);
         connected = true;
         if (shouldStop.value) return;
-        const result = await runDreamAutoPush({
+        const result = await runAutomaticDream({
+          purchase: () => runDreamPurchaseForToken(tokenId, token, purchaseList),
           send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
           stopped: () => shouldStop.value,
           pause: () => sleep(Math.max(500, Number(batchSettings.commandDelay) || 500)),
@@ -351,12 +352,10 @@ export function createTasksDungeon(deps) {
         });
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 梦境自动推层：${result.reason}，当前层数 ${result.floor ?? "未知"}`,
+          message: `${token.name} 自动梦境：${result.reason}，当前层数 ${result.floor ?? "未知"}`,
           type: "info",
         });
         if (shouldStop.value || result.status === "skipped") return;
-
-        await runDreamPurchaseForToken(tokenId, token, purchaseList);
 
         tokenStatus.value[tokenId] = "completed";
         addLog({
@@ -388,7 +387,7 @@ export function createTasksDungeon(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    if (shouldStop.value) message.warning("梦境自动推层已停止");
+    if (shouldStop.value) message.warning("自动梦境已停止");
     else message.info("批量梦境结束，请查看各账号推层结果");
   };
 

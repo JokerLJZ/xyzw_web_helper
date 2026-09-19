@@ -202,7 +202,7 @@
             </div>
 
             <div class="switch-row">
-              <span class="switch-label" title="启用后自动推层；关闭时日常、批量及定时梦境任务均跳过">梦境自动推层</span>
+              <span class="switch-label" title="仅吕布推层，超过195层跳过战斗，随后按清单采购；关闭时跳过梦境任务">自动梦境</span>
               <n-switch v-model:value="settings.dreamEnable" />
             </div>
 

@@ -114,9 +114,9 @@
         block
         @click="startDreamHelper"
       >
-        {{ isRunning ? "运行中" : "梦境自动推层" }}
+        {{ isRunning ? "运行中" : "自动梦境" }}
       </a-button>
-      <a-button v-if="dreamPushRunning" size="small" block @click="stopAllBattles">停止推层</a-button>
+      <a-button v-if="dreamPushRunning" size="small" block @click="stopAllBattles">停止自动梦境</a-button>
     </template>
   </MyCard>
 </template>
@@ -125,7 +125,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, watchEffect } from "vue";
 import { useMessage } from "naive-ui";
 import { useTokenStore } from "@/stores/tokenStore";
-import { isDreamEnabled, runDreamAutoPush } from "@/utils/dreamTaskRunner.js";
+import { DailyTaskRunner } from "@/utils/dailyTaskRunner.js";
 import MyCard from "../Common/MyCard.vue";
 import {
   merchantConfig,
@@ -727,12 +727,12 @@ const startDreamHelper = async () => {
   dreamPushRunning.value = true;
   dreamPushStopped.value = false;
   try {
-    const result = await runDreamAutoPush({
-      enabled: isDreamEnabled(tokenId),
-      send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
-      stopped: () => dreamPushStopped.value || tokenStore.selectedToken?.id !== tokenId,
-      log: (text) => { dreamProgress.value = text; },
-    });
+    const runner = new DailyTaskRunner(tokenStore, { commandDelay: 500, taskDelay: 500 });
+    runner.callbacks = {
+      shouldStop: () => dreamPushStopped.value || tokenStore.selectedToken?.id !== tokenId,
+      onLog: (entry) => { dreamProgress.value = entry.message; },
+    };
+    const result = await runner.runDreamTask(tokenId);
     dreamProgress.value = `${result.reason}${result.floor === undefined ? "" : `，当前第 ${result.floor} 层`}`;
     message.info(dreamProgress.value);
   } catch (error) {

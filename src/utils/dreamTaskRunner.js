@@ -1,5 +1,8 @@
 import { isDungeonOpen } from "./dreamConstants.js";
 
+export const DREAM_HERO_ID = 107;
+export const DREAM_PUSH_LIMIT = 195;
+
 /** 与 Token 日常配置共用同一开关及存储键，旧配置保持默认启用。 */
 export function isDreamEnabled(tokenId, storage = globalThis.localStorage) {
   const raw = storage?.getItem(`daily-settings:${tokenId}`);
@@ -18,11 +21,11 @@ const errorCode = (error) => Number(String(error?.message || "").match(/(?:服�
 
 export function getDreamHeroes(dungeon) {
   return Object.values(dungeon?.battleTeam || {})
-    .filter((hero) => hero && Number(hero.heroId) > 0 && Number(hero.hp) > 0)
+    .filter((hero) => hero && Number(hero.heroId) === DREAM_HERO_ID && Number(hero.hp) > 0)
     .sort((a, b) => Number(b.attack || 0) - Number(a.attack || 0));
 }
 
-/** 自动推层：完整角色状态确认进度，保留本期阵容，不消耗复活道具。 */
+/** 自动推层：只使用吕布，超过195层停止，不消耗复活道具。 */
 export async function runDreamAutoPush({
   send, enabled = true, stopped = () => false, log = () => {},
   now = () => new Date(),
@@ -33,7 +36,7 @@ export async function runDreamAutoPush({
   if (!isDungeonOpen(now())) return { status: "skipped", reason: "不在梦境开放时间（周日/周一/周三/周四）" };
   const period = getDreamPeriod(now());
   const check = () => {
-    if (stopped()) throw new Error("梦境自动推层已停止");
+    if (stopped()) throw new Error("自动梦境已停止");
     if (!isDungeonOpen(now()) || getDreamPeriod(now()) !== period) {
       throw new Error("梦境开放周期已变化，停止本次推层");
     }
@@ -52,13 +55,11 @@ export async function runDreamAutoPush({
   };
   let role = await fetchRole();
   let dungeon = role.dungeon;
+  if (Number(dungeon.beginTime) === period && Number(dungeon.id) > DREAM_PUSH_LIMIT) {
+    return { status: "stopped", reason: "已超过195层，跳过推层，继续采购", initialFloor: Number(dungeon.id), floor: Number(dungeon.id), battles: 0 };
+  }
   if (Number(dungeon.beginTime) !== period || !Object.values(dungeon.battleTeam || {}).some((h) => h?.heroId)) {
-    const battleTeam = {};
-    for (const [slot, hero] of Object.entries(role.battleTeam || {})) {
-      const id = Number(typeof hero === "object" ? hero?.heroId : hero);
-      if (/^[0-4]$/.test(slot) && Number.isInteger(id) && id > 0) battleTeam[slot] = id;
-    }
-    if (!Object.keys(battleTeam).length) throw new Error("没有可用于梦境的当前阵容");
+    const battleTeam = { 0: DREAM_HERO_ID };
     try {
       await request("dungeon_selecthero", { battleTeam });
     } catch (error) {
@@ -75,12 +76,13 @@ export async function runDreamAutoPush({
   const failures = new Map();
   let battles = 0;
   const result = (reason) => ({ status: "stopped", reason, initialFloor, floor: Number(dungeon.id), battles });
-  log(`开始梦境自动推层，当前第 ${initialFloor} 层`);
+  log(`开始自动梦境，当前第 ${initialFloor} 层`);
   while (battles < maxBattles) {
     check();
+    if (Number(dungeon.id) > DREAM_PUSH_LIMIT) return result("已超过195层，结束推层，继续采购");
     const heroes = getDreamHeroes(dungeon).filter((h) => (failures.get(h.heroId) || 0) < 3);
     const hero = heroes.find((h) => h.heroId === dungeon.activeHeroId) || heroes[0];
-    if (!hero) return result("没有可继续战斗的英雄，或英雄连续3次未推进");
+    if (!hero) return result("吕布未在本期阵容中、已阵亡或连续3次未推进，结束推层");
     const before = { floor: Number(dungeon.id), monster: dungeon.currMonsterId };
     let fightError;
     let fightResult;
@@ -113,4 +115,14 @@ export async function runDreamAutoPush({
     }
   }
   return result(`已达到单次 ${maxBattles} 场上限`);
+}
+
+/** 跳过战斗上限仍需采购；关闭功能、非开放日或主动停止则不采购。 */
+export async function runAutomaticDream({ purchase, ...options }) {
+  const result = await runDreamAutoPush(options);
+  if (result.status !== "skipped" && !options.stopped?.()) {
+    options.log?.(`推层阶段结束：${result.reason}；开始自动采购`);
+    await purchase();
+  }
+  return result;
 }
