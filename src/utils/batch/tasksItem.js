@@ -2148,16 +2148,29 @@ export function createTasksItem(deps) {
   };
 
   /** 小号任务：按规则消耗仓库内可使用物品。 */
-  const batchUseWarehouseItems = async () => {
+  const batchUseWarehouseItems = async (taskConfig = {}) => {
     if (selectedTokens.value.length === 0) return;
 
     const MAX_USE_PER_REQUEST = 999;
-    const GOLD_BAG_ITEM_ID = 3002;
+    const MIN_ACTION_DELAY_MS = 800;
+    const RATE_LIMIT_RETRY_DELAY_MS = 2500;
+    const MAX_RATE_LIMIT_RETRIES = 3;
+    const COIN_BAG_ITEM_ID = 3001;
     const UNIVERSAL_RED_ITEM_ID = 3201;
     const UNIVERSAL_ORANGE_ITEM_ID = 3302;
+    const OPEN_PACK_ITEM_IDS = [
+      3001, 3002, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 35011,
+    ];
+    const CONSUME_ITEM_IDS = [1008];
     const LVBU_ID = 107;
     const TAISHICI_ID = 106;
     const DIAOCHAN_ID = 210;
+    const useUniversalRed = taskConfig.useUniversalRed !== false;
+    const useUniversalOrange = taskConfig.useUniversalOrange !== false;
+    const actionDelayMs = Math.max(
+      MIN_ACTION_DELAY_MS,
+      Number(delayConfig.action) || 0,
+    );
     const getRole = (result) =>
       result?.role || result?.data?.role || result?.body?.role || result?.data?.body?.role || {};
     const getItems = (result) => getRole(result).items || {};
@@ -2172,12 +2185,19 @@ export function createTasksItem(deps) {
       const hero = heroes[heroId] ?? heroes[String(heroId)];
       return Number(hero?.star ?? 0) || 0;
     };
-    const getItemIds = (items) =>
-      Object.keys(items)
-        .map(Number)
-        .filter((itemId) => Number.isFinite(itemId) && getQuantity(items, itemId) > 0)
-        .sort((a, b) => a - b);
-    const useInBatches = async (tokenId, itemId, quantity, index, tokenName) => {
+    const sleep = (delayMs) =>
+      new Promise((resolve) => setTimeout(resolve, delayMs));
+    const isRateLimitError = (error) =>
+      getErrorMessage(error).includes("200400") ||
+      getErrorMessage(error).includes("操作太快");
+    const useInBatches = async ({
+      tokenId,
+      itemId,
+      quantity,
+      index = 0,
+      tokenName,
+      command = "item_openpack",
+    }) => {
       let remaining = Math.max(0, Math.trunc(quantity));
       let used = 0;
       while (remaining > 0 && !shouldStop.value) {
@@ -2185,38 +2205,42 @@ export function createTasksItem(deps) {
         const beforeInfo = await tokenStore.sendGetRoleInfo(tokenId);
         const beforeQuantity = getQuantity(getItems(beforeInfo), itemId);
         let consumedAmount = 0;
-        try {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "item_openpack",
-            { itemId, number: amount, index },
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
-        } catch (openError) {
-          // 超时/异常时先对账，避免服务端已成功却再次消耗。
-          const afterOpenInfo = await tokenStore.sendGetRoleInfo(tokenId);
-          const afterOpenQuantity = getQuantity(getItems(afterOpenInfo), itemId);
-          consumedAmount = Math.max(0, beforeQuantity - afterOpenQuantity);
-          if (consumedAmount <= 0) {
+
+        for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+          try {
             await tokenStore.sendMessageWithPromise(
               tokenId,
-              "item_consume",
-              { itemId, quantity: amount },
+              command,
+              command === "item_consume"
+                ? { itemId, quantity: amount }
+                : { itemId, number: amount, index },
               HELPER_COMMAND_TIMEOUT_MS,
             );
+            consumedAmount = amount;
+            break;
+          } catch (error) {
+            if (isRateLimitError(error)) {
+              if (attempt >= MAX_RATE_LIMIT_RETRIES) throw error;
+              await sleep(RATE_LIMIT_RETRY_DELAY_MS * (attempt + 1));
+              continue;
+            }
+            // 请求超时或异常时先对账，防止服务器已成功却重复使用。
+            const afterInfo = await tokenStore.sendGetRoleInfo(tokenId);
+            const afterQuantity = getQuantity(getItems(afterInfo), itemId);
+            consumedAmount = Math.max(0, beforeQuantity - afterQuantity);
+            if (consumedAmount > 0) break;
+            throw error;
           }
         }
-        const actualUsed = consumedAmount > 0 ? consumedAmount : amount;
-        used += actualUsed;
-        remaining -= actualUsed;
-        if (delayConfig.action > 0 && remaining > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
-        }
+
+        used += consumedAmount;
+        remaining -= consumedAmount;
+        await sleep(actionDelayMs);
       }
       if (used > 0) {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 使用物品${itemId}：${used}个${index == null ? "" : `，目标序号${index}`}`,
+          message: `${tokenName} 使用物品${itemId}：${used}个${command === "item_openpack" ? `，目标序号${index}` : ""}`,
           type: "success",
         });
       }
@@ -2247,40 +2271,88 @@ export function createTasksItem(deps) {
         const lvbuStar = getHeroStar(heroes, LVBU_ID);
         const redTarget = lvbuStar < 30 ? LVBU_ID : TAISHICI_ID;
         const redTargetIndex = redTarget - 101;
-        if (redQuantity > 0 && lvbuStar < 30) {
-          await useInBatches(tokenId, UNIVERSAL_RED_ITEM_ID, redQuantity, redTargetIndex, tokenName);
-        } else if (redQuantity > 0) {
-          await useInBatches(tokenId, UNIVERSAL_RED_ITEM_ID, redQuantity, TAISHICI_ID - 101, tokenName);
+        if (useUniversalRed && redQuantity > 0) {
+          await useInBatches({
+            tokenId,
+            itemId: UNIVERSAL_RED_ITEM_ID,
+            quantity: redQuantity,
+            index: redTargetIndex,
+            tokenName,
+          });
+        } else if (!useUniversalRed && redQuantity > 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 已关闭自动使用万能红碎，跳过${redQuantity}个`,
+            type: "info",
+          });
         }
 
         const orangeQuantity = getQuantity(items, UNIVERSAL_ORANGE_ITEM_ID);
-        if (orangeQuantity > 0) {
-          await useInBatches(tokenId, UNIVERSAL_ORANGE_ITEM_ID, orangeQuantity, DIAOCHAN_ID - 201, tokenName);
+        if (useUniversalOrange && orangeQuantity > 0) {
+          await useInBatches({
+            tokenId,
+            itemId: UNIVERSAL_ORANGE_ITEM_ID,
+            quantity: orangeQuantity,
+            index: DIAOCHAN_ID - 201,
+            tokenName,
+          });
+        } else if (!useUniversalOrange && orangeQuantity > 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 已关闭自动使用万能橙碎，跳过${orangeQuantity}个`,
+            type: "info",
+          });
         }
 
         if (mainLevel >= 7200) {
-          const goldBagQuantity = getQuantity(items, GOLD_BAG_ITEM_ID);
-          if (goldBagQuantity > 0) {
-            await useInBatches(tokenId, GOLD_BAG_ITEM_ID, goldBagQuantity, 0, tokenName);
+          const coinBagQuantity = getQuantity(items, COIN_BAG_ITEM_ID);
+          if (coinBagQuantity > 0) {
+            await useInBatches({
+              tokenId,
+              itemId: COIN_BAG_ITEM_ID,
+              quantity: coinBagQuantity,
+              tokenName,
+            });
           }
-        } else if (getQuantity(items, GOLD_BAG_ITEM_ID) > 0) {
+        } else if (getQuantity(items, COIN_BAG_ITEM_ID) > 0) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 主线未达到7200，跳过金砖袋使用`,
+            message: `${tokenName} 主线未达到7200，跳过金币袋使用`,
             type: "warning",
           });
         }
 
-        const handled = new Set([UNIVERSAL_RED_ITEM_ID, UNIVERSAL_ORANGE_ITEM_ID, GOLD_BAG_ITEM_ID]);
-        for (const itemId of getItemIds(items)) {
-          if (handled.has(itemId) || shouldStop.value) continue;
+        for (const itemId of OPEN_PACK_ITEM_IDS) {
+          if (itemId === COIN_BAG_ITEM_ID || shouldStop.value) continue;
           const quantity = getQuantity(items, itemId);
+          if (quantity <= 0) continue;
           try {
-            await useInBatches(tokenId, itemId, quantity, 0, tokenName);
+            await useInBatches({ tokenId, itemId, quantity, tokenName });
           } catch (error) {
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${tokenName} 物品${itemId}无法直接使用，已跳过：${getErrorMessage(error)}`,
+              type: "warning",
+            });
+          }
+        }
+
+        for (const itemId of CONSUME_ITEM_IDS) {
+          if (shouldStop.value) break;
+          const quantity = getQuantity(items, itemId);
+          if (quantity <= 0) continue;
+          try {
+            await useInBatches({
+              tokenId,
+              itemId,
+              quantity,
+              tokenName,
+              command: "item_consume",
+            });
+          } catch (error) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 物品${itemId}使用失败，已跳过：${getErrorMessage(error)}`,
               type: "warning",
             });
           }

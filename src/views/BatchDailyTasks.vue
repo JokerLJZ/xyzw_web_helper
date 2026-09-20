@@ -748,11 +748,23 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="batchUseWarehouseItems"
+                  @click="batchUseWarehouseItems(warehouseItemSettings)"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   使用仓库物品
                 </n-button>
+                <n-checkbox
+                  v-model:checked="warehouseItemSettings.useUniversalRed"
+                  size="small"
+                >
+                  使用万能红碎
+                </n-checkbox>
+                <n-checkbox
+                  v-model:checked="warehouseItemSettings.useUniversalOrange"
+                  size="small"
+                >
+                  使用万能橙碎
+                </n-checkbox>
                 <n-button
                   size="small"
                   @click="batchRedeemCodes"
@@ -2215,10 +2227,14 @@
             </n-checkbox-group>
           </div>
           <div
-            v-if="hasSmartBoxWeeklySelected || hasSmartRecruitWeeklySelected"
+            v-if="
+              hasSmartBoxWeeklySelected ||
+              hasSmartRecruitWeeklySelected ||
+              taskForm.selectedTasks.includes('batchUseWarehouseItems')
+            "
             class="setting-item"
           >
-            <label class="setting-label">智能周任务配置</label>
+            <label class="setting-label">任务配置</label>
             <div
               v-if="hasSmartBoxWeeklySelected"
               style="margin-top: 8px"
@@ -2273,6 +2289,31 @@
                   size="small"
                   style="width: 90px"
                 />
+              </n-space>
+            </div>
+            <div
+              v-if="taskForm.selectedTasks.includes('batchUseWarehouseItems')"
+              style="margin-top: 12px"
+            >
+              <div style="margin-bottom: 6px; color: #4b5563">
+                仓库物品使用
+              </div>
+              <n-space>
+                <n-checkbox
+                  v-model:checked="
+                    taskForm.taskConfig.batchUseWarehouseItems.useUniversalRed
+                  "
+                >
+                  自动使用万能红碎
+                </n-checkbox>
+                <n-checkbox
+                  v-model:checked="
+                    taskForm.taskConfig.batchUseWarehouseItems
+                      .useUniversalOrange
+                  "
+                >
+                  自动使用万能橙碎
+                </n-checkbox>
               </n-space>
             </div>
           </div>
@@ -4109,6 +4150,10 @@ const smartBoxWeeklySettings = reactive({
   smartBoxTypes: [2002, 2003, 2004],
   smartBoxGroupCount: 1,
 });
+const warehouseItemSettings = reactive({
+  useUniversalRed: true,
+  useUniversalOrange: true,
+});
 
 const showHeroLevelUpgradeModal = ref(false);
 const heroLevelUpgradeForm = reactive({
@@ -4372,6 +4417,11 @@ const createScheduledTaskConfig = (config = {}) => ({
         ),
       ),
     ),
+  },
+  batchUseWarehouseItems: {
+    useUniversalRed: config.batchUseWarehouseItems?.useUniversalRed !== false,
+    useUniversalOrange:
+      config.batchUseWarehouseItems?.useUniversalOrange !== false,
   },
 });
 
@@ -6048,9 +6098,11 @@ const executeScheduledTask = async (task) => {
       ) {
         await taskFunction(true);
       } else if (
-        ["batchSmartBoxWeekly", "batchSmartRecruitWeekly"].includes(
-          taskName,
-        )
+        [
+          "batchSmartBoxWeekly",
+          "batchSmartRecruitWeekly",
+          "batchUseWarehouseItems",
+        ].includes(taskName)
       ) {
         await taskFunction(task.taskConfig?.[taskName] || {});
       } else {
