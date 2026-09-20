@@ -322,8 +322,8 @@
               />
               <n-space v-else vertical size="small">
                 <div
-                  v-for="(b, bi) in grp.matches"
-                  :key="`cb${gi}-${bi}`"
+                  v-for="(b, bi) in visibleBets(grp)"
+                  :key="`cb${grp.scheduleId}-${betPage(grp)}-${bi}`"
                   class="match-card-inner"
                 >
                   <div class="match-row">
@@ -374,11 +374,27 @@
                 </div>
               </n-space>
 
-              <div v-if="grp.state !== ApexScheduleStatus.None" style="margin-top: 8px; text-align: center">
-                <n-button v-if="grp.hasMore" size="tiny" :loading="grp.loading" @click="fetchMatchesPage(grp)">
-                  加载更多对阵
+              <div
+                v-if="grp.state !== ApexScheduleStatus.None && betTotalPages(grp) > 1"
+                class="guess-pager"
+              >
+                <n-button size="tiny" :disabled="betPage(grp) <= 0" @click="goBetPage(grp, -1)">
+                  上一页
                 </n-button>
-                <span v-else class="stage-date">共 {{ grp.matches.length }} 场对阵</span>
+                <span class="stage-date">
+                  第 {{ betPage(grp) + 1 }}/{{ betTotalPages(grp) }} 页 · 已加载 {{ grp.matches.length }} 场
+                </span>
+                <n-button
+                  size="tiny"
+                  :loading="grp.loading"
+                  :disabled="betPage(grp) + 1 >= betTotalPages(grp)"
+                  @click="goBetPage(grp, 1)"
+                >
+                  下一页
+                </n-button>
+              </div>
+              <div v-else-if="grp.state !== ApexScheduleStatus.None" class="guess-pager">
+                <span class="stage-date">共 {{ grp.matches.length }} 场对阵</span>
               </div>
             </n-card>
           </n-space>
@@ -565,6 +581,9 @@ const FIRST_PAGES = 2;
 
 /** 单次分页拉取的最大页数（防御服务端 last 异常导致死循环） */
 const MAX_PAGES = 12;
+
+/** 竞猜对阵每页展示条数（服务端每页实际返回条数不固定，这里统一按 10 条分页展示） */
+const GUESS_PAGE_SIZE = 10;
 
 /** WebSocket 请求超时（ms） */
 const TIMEOUT_READ = 5000;
@@ -1111,12 +1130,76 @@ const fetchMatchesPage = async (grp) => {
     });
     grp.matches.push(...rows.map(toMatchRow));
     grp.hasMore = !last && rows.length > 0;
+    // 服务端可能在仍有数据时就返回 last=true，因此另用 exhausted 标记「确实拉不到新行」
+    if (!rows.length) grp.exhausted = true;
   } catch {
     grp.hasMore = false; // 该阶段未开放或参数错误：停止分页
+    grp.exhausted = true;
   } finally {
     grp.loading = false;
     fetchingStages.delete(grp.scheduleId);
   }
+};
+
+/**
+ * 竞猜分组的总页数。
+ *
+ * 未拉完时以该阶段可押名额 advanceNum 作为总条数（与真实场次数一致，如 64 强 = 32 场），
+ * 已确认拉不到更多数据时按实际已加载条数收敛，避免末页出现空白页。
+ * @param {object} grp 竞猜分组对象
+ * @returns {number} 总页数，至少 1
+ */
+const betTotalPages = (grp) => {
+  const known = grp.advanceNum > 0 && !grp.exhausted ? grp.advanceNum : grp.matches.length;
+  return Math.max(1, Math.ceil(known / GUESS_PAGE_SIZE));
+};
+
+/**
+ * 竞猜分组当前页码（已按总页数收敛，防止数据变少后越界）。
+ * @param {object} grp 竞猜分组对象
+ * @returns {number} 0 起的页码
+ */
+const betPage = (grp) => Math.min(grp.page || 0, betTotalPages(grp) - 1);
+
+/**
+ * 当前页应展示的对阵（每页 GUESS_PAGE_SIZE 条）。
+ * @param {object} grp 竞猜分组对象
+ * @returns {Array} 当前页对阵行
+ */
+const visibleBets = (grp) => {
+  const start = betPage(grp) * GUESS_PAGE_SIZE;
+  return grp.matches.slice(start, start + GUESS_PAGE_SIZE);
+};
+
+/**
+ * 确保某分组已加载到至少 need 条对阵；拉不到新数据时停止并记录 exhausted。
+ * @param {object} grp 竞猜分组对象
+ * @param {number} need 需要的条数
+ * @returns {Promise<void>} 无返回值
+ */
+const ensureBetRows = async (grp, need) => {
+  let guard = 0;
+  while (grp.matches.length < need && !grp.exhausted && guard < MAX_PAGES) {
+    const before = grp.matches.length;
+    await fetchMatchesPage(grp);
+    if (grp.matches.length === before) {
+      grp.exhausted = true;
+      break;
+    }
+    guard += 1;
+  }
+};
+
+/**
+ * 竞猜分组翻页：先补齐目标页需要的对阵，再切换页码。
+ * @param {object} grp 竞猜分组对象
+ * @param {number} delta 页码增量（-1 上一页 / 1 下一页）
+ * @returns {Promise<void>} 无返回值
+ */
+const goBetPage = async (grp, delta) => {
+  const next = Math.min(Math.max(betPage(grp) + delta, 0), betTotalPages(grp) - 1);
+  await ensureBetRows(grp, (next + 1) * GUESS_PAGE_SIZE);
+  grp.page = Math.min(next, betTotalPages(grp) - 1);
 };
 
 /**
@@ -1158,6 +1241,10 @@ const refreshCurrentBets = () => {
       // 复用已加载的对阵，避免轮询时清空导致闪烁
       matches: prev?.matches || [],
       hasMore: prev?.hasMore ?? true,
+      // 已确认拉不到更多数据（区别于服务端 last 标记）
+      exhausted: prev?.exhausted ?? false,
+      // 当前查看的页码（0 起），切换期/阶段时随分组重建归零
+      page: prev?.page ?? 0,
       loading: false,
     };
     if (grp.state === ApexScheduleStatus.None) {
@@ -1895,6 +1982,18 @@ watch(
   font-size: 11px;
   color: var(--n-text-color-3, #aaa);
   margin-top: 2px;
+}
+
+/* 竞猜对阵翻页条 */
+.guess-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.guess-pager .stage-date {
+  margin-top: 0;
 }
 
 /* 当前助威卡片网格 */
