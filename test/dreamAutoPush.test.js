@@ -269,6 +269,61 @@ test("梦境触发200400时冷却核对状态并只重试当前层一次", async
   assert.equal(cooldowns, 1);
 });
 
+test("战斗成功后的状态查询触发200400时冷却重查而不中断任务", async () => {
+  const f = fixture();
+  let roleQueries = 0;
+  let cooldowns = 0;
+  const send = async (cmd, params) => {
+    if (cmd === "role_getroleinfo" && roleQueries++ === 1) {
+      f.calls.push({ cmd, params });
+      throw new Error("服务器错误: 200400 - 操作太快，请稍后再试");
+    }
+    return f.send(cmd, params);
+  };
+
+  const result = await runDreamAutoPush({
+    ...f,
+    send,
+    maxBattles: 1,
+    rateLimitPause: async () => {
+      cooldowns++;
+    },
+  });
+
+  assert.equal(result.floor, 42);
+  assert.equal(result.battles, 1);
+  assert.equal(roleQueries, 3);
+  assert.equal(cooldowns, 1);
+});
+
+test("战斗后的状态查询持续限频时仍转入采购", async () => {
+  const f = fixture();
+  let roleQueries = 0;
+  let purchased = 0;
+  const send = async (cmd, params) => {
+    if (cmd === "role_getroleinfo" && roleQueries++ > 0) {
+      f.calls.push({ cmd, params });
+      throw new Error("服务器错误: 200400 - 操作太快，请稍后再试");
+    }
+    return f.send(cmd, params);
+  };
+
+  const result = await runAutomaticDream({
+    ...f,
+    send,
+    maxBattles: 1,
+    rateLimitPause: async () => {},
+    purchase: async () => {
+      purchased++;
+    },
+  });
+
+  assert.match(result.reason, /持续限频/);
+  assert.equal(result.battles, 1);
+  assert.equal(roleQueries, 3);
+  assert.equal(purchased, 1);
+});
+
 test("梦境限频重试仍失败时停止推层并继续采购", async () => {
   const f = fixture();
   let purchased = 0;

@@ -150,7 +150,7 @@ export async function runDreamAutoPush({
       }
 
       // 战斗响应是增量数据，不能用它覆盖带有 heroId/hp 的完整阵容。
-      role = limited ? await fetchRoleAfterRateLimit() : await fetchRole();
+      role = await fetchRoleAfterRateLimit();
       if (!role) {
         return result("服务器持续限频，无法核对战斗结果，停止推层并继续采购");
       }
