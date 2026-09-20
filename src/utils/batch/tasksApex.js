@@ -52,8 +52,8 @@ const resolveOpenGuesses = (nowMs) => {
 
 /**
  * 创建逐鹿盐山竞猜任务执行器
- * @param {Object} deps - 依赖项
- * @returns {Object} 任务函数集合
+ * @param {object} deps - 依赖项
+ * @returns {object} 任务函数集合
  */
 export function createTasksApex(deps) {
   const {

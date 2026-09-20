@@ -131,7 +131,7 @@
           </div>
         </div>
 
-        <n-card :title="'⏱ 第' + (selectedRound || '-') + '期阶段进度'" size="small" style="margin-top: 12px">
+        <n-card :title="`⏱ 第${selectedRound || '-'}期阶段进度`" size="small" style="margin-top: 12px">
           <div class="stage-timeline">
             <div
               v-for="st in stageTimeline"
@@ -213,12 +213,12 @@
 
       <!-- ==================== 赛程（当前 + 历史） ==================== -->
       <div v-show="activeSubTab === 'schedule'" class="tab-content">
-        <n-card :title="'🗓 第' + (selectedRound || '-') + '期赛程'" size="small" style="margin-bottom: 12px">
+        <n-card :title="`🗓 第${selectedRound || '-'}期赛程`" size="small" style="margin-bottom: 12px">
           <n-empty v-if="currentSchedule.length === 0" description="当前暂无进行中的赛程" style="padding: 30px 0" />
           <div v-else class="stage-timeline">
             <div
               v-for="(st, si) in currentSchedule"
-              :key="'cs' + si"
+              :key="`cs${si}`"
               class="stage-node"
               :class="{ active: st.isToday, done: st.isPast }"
             >
@@ -246,19 +246,19 @@
             <n-collapse v-if="scheduleGroups.length > 0">
               <n-collapse-item
                 v-for="grp in scheduleGroups"
-                :key="'r' + grp.round"
-                :title="'第' + grp.round + '期 — ' + grp.total + ' 场对阵'"
+                :key="`r${grp.round}`"
+                :title="`第${grp.round}期 — ${grp.total} 场对阵`"
               >
                 <n-collapse v-if="grp.stages.length" default-expanded>
                   <n-collapse-item
                     v-for="stg in grp.stages"
-                    :key="'s' + grp.round + '-' + stg.stage"
-                    :title="stg.stageName + ' (' + stg.matches.length + ' 场)'"
+                    :key="`s${grp.round}-${stg.stage}`"
+                    :title="`${stg.stageName} (${stg.matches.length} 场)`"
                   >
                     <n-space vertical size="small">
                       <n-card
                         v-for="(m, mi) in stg.matches"
-                        :key="'m' + grp.round + '-' + stg.stage + '-' + mi"
+                        :key="`m${grp.round}-${stg.stage}-${mi}`"
                         size="small"
                         class="match-card"
                       >
@@ -292,7 +292,7 @@
 
       <!-- ==================== 竞猜（当前 + 历史） ==================== -->
       <div v-show="activeSubTab === 'bet'" class="tab-content">
-        <n-card :title="'🎯 ' + currentBetTitle" size="small" style="margin-bottom: 12px">
+        <n-card :title="`🎯 ${currentBetTitle}`" size="small" style="margin-bottom: 12px">
           <n-empty
             v-if="currentBets.length === 0"
             description="当前期暂无淘汰赛竞猜阶段"
@@ -301,7 +301,7 @@
           <n-space v-else vertical size="small">
             <n-card
               v-for="(grp, gi) in currentBets"
-              :key="'cbg' + grp.scheduleId"
+              :key="`cbg${grp.scheduleId}`"
               size="small"
               class="stage-group-card"
             >
@@ -323,7 +323,7 @@
               <n-space v-else vertical size="small">
                 <div
                   v-for="(b, bi) in grp.matches"
-                  :key="'cb' + gi + '-' + bi"
+                  :key="`cb${gi}-${bi}`"
                   class="match-card-inner"
                 >
                   <div class="match-row">
@@ -399,7 +399,7 @@
 
       <!-- ==================== 助威（当前） ==================== -->
       <div v-show="activeSubTab === 'vote'" class="tab-content">
-        <n-card :title="'📣 ' + currentRoundTitle" size="small" style="margin-bottom: 12px">
+        <n-card :title="`📣 ${currentRoundTitle}`" size="small" style="margin-bottom: 12px">
           <n-alert v-if="!supportOpen" type="warning" size="small" style="margin-bottom: 12px">
             当前不在助威时间内（仅正式赛段 / 淘汰赛段可助威，且该期不能有已锁定或进行中的场次）。
           </n-alert>
@@ -411,7 +411,7 @@
           <div v-else class="vote-grid">
             <div
               v-for="(t, ti) in currentVoteBoard"
-              :key="'cv' + ti"
+              :key="`cv${ti}`"
               class="vote-team-card"
               :style="{ '--rank-color': rankColor(t.rank) }"
             >
@@ -451,7 +451,7 @@
     <n-modal
       v-model:show="voteDialogVisible"
       preset="card"
-      :title="'助威 ' + (voteTargetName || '')"
+      :title="`助威 ${voteTargetName || ''}`"
       style="width: 380px"
       :bordered="false"
     >
@@ -924,7 +924,7 @@ const formatSeason = (val) => (val > 0 ? `第${val}赛季` : "-");
 
 const formatNumber = (n) => {
   if (n === null || n === undefined) return "0";
-  return n >= 10000 ? (n / 10000).toFixed(1) + "万" : String(n);
+  return n >= 10000 ? `${(n / 10000).toFixed(1)}万` : String(n);
 };
 
 /** 受限并发遍历 */
@@ -981,7 +981,7 @@ const rankColor = (rank) => {
 };
 
 const cheerPercent = (cnt, max) =>
-  max ? Math.max(4, Math.round((cnt / max) * 100)) + "%" : "0%";
+  max ? `${Math.max(4, Math.round((cnt / max) * 100))}%` : "0%";
 
 const currentMaxCheer = computed(() =>
   currentVoteBoard.value.reduce((m, t) => Math.max(m, t.cheerCnt || 0), 0),
@@ -1000,7 +1000,7 @@ const currentMaxCheer = computed(() =>
  * @param {number} [opt.startIdx] 起始 idx
  * @param {number} [opt.maxPages] 最大页数
  * @param {number} [opt.maxRows] 最大行数
- * @returns {Promise<{rows: Array, last: boolean}>}
+ * @returns {Promise<{rows: Array, last: boolean}>} 分页结果；请求失败时为空列表
  */
 const fetchPagedList = async ({
   cmd,
@@ -1032,7 +1032,7 @@ const fetchPagedList = async ({
 
 /**
  * 获取逐鹿盐山角色信息（apex_getroleinfo）。
- * @returns {Promise<object|null>}
+ * @returns {Promise<object|null>} 角色信息；未开放或请求失败时为 null
  */
 const fetchRoleInfo = async () => {
   const token = tokenStore.selectedToken;
@@ -1111,7 +1111,7 @@ const fetchMatchesPage = async (grp) => {
     });
     grp.matches.push(...rows.map(toMatchRow));
     grp.hasMore = !last && rows.length > 0;
-  } catch (e) {
+  } catch {
     grp.hasMore = false; // 该阶段未开放或参数错误：停止分页
   } finally {
     grp.loading = false;
@@ -1217,10 +1217,10 @@ const fetchGuessHistory = async () => {
           myWin: myIsT1 ? t1.isWin === true : t2.isWin === true,
           claimed:
             !!claimMap[sid] &&
-            Object.values(claimMap[sid] || {}).some((v) => v === true),
+            Object.values(claimMap[sid] || {}).includes(true),
         });
       });
-    } catch (e) {
+    } catch {
       // 该期未开放或参数错误：跳过
     }
   });
@@ -1281,7 +1281,7 @@ const fetchScheduleHistory = async () => {
               team2Win: BATTLE_WIN_2.includes(bi.state),
             };
           });
-        } catch (e) {
+        } catch {
           return []; // 该期无记录或未开放
         }
       })
@@ -1340,7 +1340,7 @@ const fetchVoteBoard = async () => {
       myCnt: getMyVoteCnt(t.teamId),
       round,
     }));
-  } catch (e) {
+  } catch {
     // 当前轮无助威榜：保持空列表
   }
 };
@@ -1381,7 +1381,7 @@ const doGuess = async (teamId, row, grp) => {
     refreshCurrentBets();
     fetchGuessHistory();
   } catch (e) {
-    message.error("竞猜请求失败: " + e.message);
+    message.error(`竞猜请求失败: ${e.message}`);
   } finally {
     pendingGuessTeamId.value = "";
   }
@@ -1436,7 +1436,7 @@ const doVote = async () => {
     await fetchRoleInfo();
     fetchVoteBoard();
   } catch (e) {
-    message.error("助威请求失败: " + e.message);
+    message.error(`助威请求失败: ${e.message}`);
   } finally {
     voteLoading.value = false;
   }
@@ -1560,18 +1560,14 @@ const betColumns = [
     key: "myWin",
     width: 80,
     render: (row) =>
-      h(NTag, { size: "small", type: row.myWin ? "success" : "error", round: true }, () =>
-        row.myWin ? "猜中" : "猜错",
-      ),
+      h(NTag, { size: "small", type: row.myWin ? "success" : "error", round: true }, () => (row.myWin ? "猜中" : "猜错")),
   },
   {
     title: "结算",
     key: "claimed",
     width: 70,
     render: (row) =>
-      h(NTag, { size: "small", type: row.claimed ? "success" : "warning", round: true }, () =>
-        row.claimed ? "已领" : "未领",
-      ),
+      h(NTag, { size: "small", type: row.claimed ? "success" : "warning", round: true }, () => (row.claimed ? "已领" : "未领")),
   },
 ];
 

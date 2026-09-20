@@ -95,7 +95,7 @@ const ApexStage = {
  */
 export function getDateZeroTime(dateText) {
   const m = DATE_RE.exec(String(dateText || "").trim());
-  if (!m) return NaN;
+  if (!m) return Number.NaN;
   return new Date(
     Number(m[1]),
     Number(m[2]) - 1,
@@ -122,7 +122,7 @@ const formatMonthDay = (ms) => {
  *
  * @param {number} localNowMs 本地当前时间（毫秒）
  * @param {string} dayStr 服务端 resetTime.day，形如 "260915"
- * @returns {number}
+ * @returns {number} 校准后的服务端当前时间（毫秒）
  */
 export function calibrateServerTime(localNowMs, dayStr) {
   const day = String(dayStr || "");
@@ -181,7 +181,7 @@ export const getStageName = (stage) =>
  * 取某赛季某期的全部赛程配置。
  * @param {number} round
  * @param {number} season
- * @returns {Array<object>}
+ * @returns {Array<object>} 该期全部赛程配置，按 id 升序
  */
 export function getRoundSchedules(round, season) {
   return seasonRoundMap.get(season)?.get(round) || [];
@@ -200,7 +200,7 @@ export function getScheduleConf(scheduleId) {
 /**
  * 当前赛季配置（起止日期 / 报名门槛），供界面提示与赛季更新检测使用。
  * @param {number} season
- * @returns {object|null}
+ * @returns {object|null} 赛季配置；赛季不存在时为 null
  */
 export const getSeasonConf = (season) => apexSeasonConf[season] || null;
 
@@ -280,7 +280,7 @@ const createScheduleInfo = (type, nowMs, enableBase, start, end, extra) => {
  * @param {number} round
  * @param {number} season
  * @param {number} nowMs
- * @returns {Object<number, object>} key 为 ApexStageType
+ * @returns {Record<number, object>} key 为 ApexStageType
  */
 export function getStageInfoByRound(round, season, nowMs) {
   const info = {
@@ -362,7 +362,7 @@ export function getStageInfoByRound(round, season, nowMs) {
  * 赛季窗口 = [min(serverDate + signStartTime), max(endDate 或 serverDate + endTime)]，
  * 命中即返回赛季号；无命中返回 -1。
  * @param {number} nowMs
- * @returns {number}
+ * @returns {number} 命中窗口的赛季号；无命中时返回 -1
  */
 export function getCurrentSeason(nowMs) {
   const windows = new Map();
@@ -397,7 +397,7 @@ export function getCurrentSeason(nowMs) {
 /**
  * 是否处于赛季内（等价客户端 checkNowInSeason）。用于识别「配置快照未覆盖当前赛季」。
  * @param {number} nowMs
- * @returns {{inSeason: boolean, timeLeft: number}}
+ * @returns {{inSeason: boolean, timeLeft: number}} inSeason 表示是否落在赛季窗口内，timeLeft 为窗口内剩余毫秒
  */
 export function checkNowInSeason(nowMs) {
   // 客户端默认余量为 31536e6 ms（= 365 天）
@@ -428,7 +428,7 @@ export function getRoundSignStartTime(round, season) {
     min = Math.min(min, zero + conf.signStartTime * 1000);
   }
   if (Number.isFinite(min)) return min;
-  return list.length ? getDateZeroTime(list[0].date) : NaN;
+  return list.length ? getDateZeroTime(list[0].date) : Number.NaN;
 }
 
 /**
@@ -457,7 +457,7 @@ export function getRoundEndTime(round, season) {
     if (!Number.isFinite(zero)) continue;
     fallback = Math.max(fallback, zero + (conf.endTime || 0) * 1000);
   }
-  return Number.isFinite(fallback) ? fallback : NaN;
+  return Number.isFinite(fallback) ? fallback : Number.NaN;
 }
 
 /**
@@ -465,7 +465,7 @@ export function getRoundEndTime(round, season) {
  * @param {number} round
  * @param {number} season
  * @param {number} nowMs
- * @returns {boolean}
+ * @returns {boolean} 该期末场已结束为 true
  */
 export function isRoundEnded(round, season, nowMs) {
   const end = getRoundEndTime(round, season);
@@ -495,7 +495,7 @@ export function getRoundPhase(round, season, nowMs) {
  * 再做划分，以便界面对历史期与当前期分开呈现。
  * @param {number} season
  * @param {number} nowMs
- * @returns {number[]}
+ * @returns {number[]} 已开期的期号列表（升序，含历史期）
  */
 export function getAvailableRounds(season, nowMs) {
   const roundMap = seasonRoundMap.get(season);
@@ -514,7 +514,7 @@ export function getAvailableRounds(season, nowMs) {
  * 当前进行中的期（已开始且末场未结束），升序。
  * @param {number} season
  * @param {number} nowMs
- * @returns {number[]}
+ * @returns {number[]} 进行中的期号列表（升序）
  */
 export function getCurrentRounds(season, nowMs) {
   return getAvailableRounds(season, nowMs).filter(
@@ -526,7 +526,7 @@ export function getCurrentRounds(season, nowMs) {
  * 历史期（已开过且末场已结束），升序。
  * @param {number} season
  * @param {number} nowMs
- * @returns {number[]}
+ * @returns {number[]} 已结束的历史期号列表（升序）
  */
 export function getHistoryRounds(season, nowMs) {
   return getAvailableRounds(season, nowMs).filter((round) =>
@@ -558,7 +558,7 @@ const checkDuringSignUp = (round, season, nowMs) => {
  * @param {number[]} availableRounds
  * @param {number} season
  * @param {number} nowMs
- * @returns {number|null}
+ * @returns {number|null} 默认展示的期号；无可用期时为 null
  */
 export function getInitialRound(availableRounds, season, nowMs) {
   if (!availableRounds.length) return null;
@@ -595,7 +595,7 @@ export function getInitialRound(availableRounds, season, nowMs) {
  * @param {number} round
  * @param {number} season
  * @param {number} nowMs
- * @returns {boolean}
+ * @returns {boolean} 助威开放为 true
  */
 export function checkSupportInTime(round, season, nowMs) {
   const list = getRoundSchedules(round, season);
@@ -643,7 +643,7 @@ export function checkSupportInTime(round, season, nowMs) {
  * @param {number} round
  * @param {number} season
  * @param {number} nowMs
- * @returns {Array<{stage:number, scheduleId:number, title:string, state:number}>}
+ * @returns {Array<{stage:number, scheduleId:number, title:string, state:number}>} 竞猜页签列表，按阶段升序；阶段缺配置时不出页签
  */
 export function getGuessTabs(round, season, nowMs) {
   const list = getRoundSchedules(round, season);
@@ -666,7 +666,7 @@ export function getGuessTabs(round, season, nowMs) {
  * 仅 None / Fighting / Completed 拦截，Unlocked 与 Locked（阵容已锁定、开赛前）
  * 均可押，押注截止于 fightTime。
  * @param {number} state
- * @returns {boolean}
+ * @returns {boolean} 该场次当前可以押注为 true
  */
 export const canGuessNow = (state) =>
   state === ApexScheduleStatus.Unlocked || state === ApexScheduleStatus.Locked;
@@ -677,7 +677,7 @@ export const canGuessNow = (state) =>
  * @param {number} state 单场状态
  * @param {number} stage ApexStage
  * @param {{team1Win?:boolean, team2Win?:boolean}} row 对阵行
- * @returns {boolean}
+ * @returns {boolean} 该场次仍可押注为 true
  */
 export const canGuessRow = (state, stage, row) =>
   canGuessNow(state) &&
@@ -704,7 +704,7 @@ export function getAdvanceNum(round, season, stage) {
  * 助威等级（等价客户端 ApexUIUtil.setSupportLevelIcon）：
  * 从最高等级向下取第一个满足 cheerCnt >= supportNum 的等级；都不满足为 0。
  * @param {number} cheerCnt
- * @returns {number}
+ * @returns {number} 助威等级；未达到最低档时为 0
  */
 export function getSupportLevel(cheerCnt) {
   for (let i = apexSupportLevels.length - 1; i >= 0; i--) {
@@ -717,6 +717,6 @@ export function getSupportLevel(cheerCnt) {
  * 助威榜分组号（等价客户端 ApexSupportDialog._getCommonSupportTab）：
  * 淘汰赛段开启时用 groupId 0（淘汰赛榜），否则用常规组号。
  * @param {boolean} taotaiStageEnabled
- * @returns {number}
+ * @returns {number} 助威榜分组号（淘汰赛段开启为 0，否则为 1）
  */
 export const getSupportGroupId = (taotaiStageEnabled) => (taotaiStageEnabled ? 0 : 1);
