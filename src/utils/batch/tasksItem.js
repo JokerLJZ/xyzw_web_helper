@@ -2152,9 +2152,10 @@ export function createTasksItem(deps) {
     if (selectedTokens.value.length === 0) return;
 
     const MAX_USE_PER_REQUEST = 999;
-    const MIN_ACTION_DELAY_MS = 800;
-    const RATE_LIMIT_RETRY_DELAY_MS = 2500;
-    const MAX_RATE_LIMIT_RETRIES = 3;
+    const MIN_ACTION_DELAY_MS = 2000;
+    const ITEM_COOLDOWN_MS = 5000;
+    const RATE_LIMIT_RETRY_DELAY_MS = 5000;
+    const MAX_RATE_LIMIT_RETRIES = 4;
     const COIN_BAG_ITEM_ID = 3001;
     const UNIVERSAL_RED_ITEM_ID = 3201;
     const UNIVERSAL_ORANGE_ITEM_ID = 3302;
@@ -2186,6 +2187,21 @@ export function createTasksItem(deps) {
       const item = items[itemId] ?? items[String(itemId)];
       return Math.max(0, Number(item?.quantity ?? item?.count ?? item ?? 0) || 0);
     };
+    const getActivityPackItemIds = (items) =>
+      Object.entries(items)
+        .map(([key, item]) => ({ itemId: Number(key), item }))
+        .filter(({ itemId, item }) => {
+          if (!Number.isFinite(itemId) || getQuantity(items, itemId) <= 0) {
+            return false;
+          }
+          const hasActivityExpiry = Boolean(
+            item?.ext?.expireTime || item?.ext?.claimTime,
+          );
+          return (itemId >= 5000 && itemId < 10000) || hasActivityExpiry;
+        })
+        .map(({ itemId }) => itemId)
+        .filter((itemId) => !OPEN_PACK_ITEM_IDS.includes(itemId))
+        .sort((left, right) => left - right);
     const getMainLevel = (result) =>
       Number(getRole(result).levelId ?? result?.levelId ?? 0) || 0;
     const getHeroStar = (heroes, heroId) => {
@@ -2253,15 +2269,28 @@ export function createTasksItem(deps) {
       }
       return used;
     };
-    const getFragmentsNeededToMaxStar = (roleInfo, heroId) => {
+    const getUniversalAmountForImmediateUpgrades = (
+      roleInfo,
+      heroId,
+      universalQuantity,
+    ) => {
       const heroes = getHeroes(roleInfo);
       const items = getItems(roleInfo);
       const currentStar = getHeroStar(heroes, heroId);
-      let totalNeeded = 0;
+      let fragments = getQuantity(items, heroId);
+      let amount = 0;
+      const limit = Math.min(MAX_USE_PER_REQUEST, universalQuantity);
+
       for (let star = currentStar; star < 30; star += 1) {
-        totalNeeded += Number(STAR_FRAGMENT_COSTS[star]) || 0;
+        const cost = Number(STAR_FRAGMENT_COSTS[star]) || 0;
+        if (cost <= 0) break;
+        const missing = Math.max(0, cost - fragments);
+        if (amount + missing > limit) break;
+        amount += missing;
+        fragments = fragments + missing - cost;
       }
-      return Math.max(0, totalNeeded - getQuantity(items, heroId));
+
+      return amount;
     };
     const upgradeHeroStars = async (tokenId, heroId, tokenName) => {
       const heroName = HERO_DICT[heroId]?.name || `武将${heroId}`;
@@ -2330,10 +2359,24 @@ export function createTasksItem(deps) {
           getItems(roleInfo),
           universalItemId,
         );
-        const needed = getFragmentsNeededToMaxStar(roleInfo, targetHeroId);
-        if (universalQuantity <= 0 || needed <= 0) break;
-
-        const amount = Math.min(MAX_USE_PER_REQUEST, universalQuantity, needed);
+        if (universalQuantity <= 0) break;
+        const amount = getUniversalAmountForImmediateUpgrades(
+          roleInfo,
+          targetHeroId,
+          universalQuantity,
+        );
+        if (amount <= 0) {
+          const heroName = HERO_DICT[targetHeroId]?.name || targetHeroId;
+          const currentStar = getHeroStar(getHeroes(roleInfo), targetHeroId);
+          const fragmentCount = getQuantity(getItems(roleInfo), targetHeroId);
+          const nextCost = Number(STAR_FRAGMENT_COSTS[currentStar]) || 0;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${heroName}升星还需${Math.max(0, nextCost - fragmentCount)}个碎片，当前万能碎片${universalQuantity}个，不转换以避免碎片闲置`,
+            type: "info",
+          });
+          break;
+        }
         const index =
           universalItemId === UNIVERSAL_RED_ITEM_ID
             ? targetHeroId - 101
@@ -2345,7 +2388,16 @@ export function createTasksItem(deps) {
           index,
           tokenName,
         });
-        await upgradeHeroStars(tokenId, targetHeroId, tokenName);
+        const upgraded = await upgradeHeroStars(
+          tokenId,
+          targetHeroId,
+          tokenName,
+        );
+        if (upgraded <= 0) {
+          throw new Error(
+            `${HERO_DICT[targetHeroId]?.name || targetHeroId}使用万能碎片后未能升星`,
+          );
+        }
       }
     };
 
@@ -2434,6 +2486,32 @@ export function createTasksItem(deps) {
               type: "warning",
             });
           }
+          await sleep(ITEM_COOLDOWN_MS);
+        }
+
+        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const latestItems = getItems(roleInfo);
+        const activityItemIds = getActivityPackItemIds(latestItems);
+        if (activityItemIds.length > 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 检测到活动道具：${activityItemIds.join(", ")}`,
+            type: "info",
+          });
+        }
+        for (const itemId of activityItemIds) {
+          if (shouldStop.value) break;
+          const quantity = getQuantity(latestItems, itemId);
+          try {
+            await useInBatches({ tokenId, itemId, quantity, tokenName });
+          } catch (error) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 活动道具${itemId}不支持直接开启或使用失败，已跳过：${getErrorMessage(error)}`,
+              type: "warning",
+            });
+          }
+          await sleep(ITEM_COOLDOWN_MS);
         }
 
         roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
