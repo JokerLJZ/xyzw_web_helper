@@ -216,6 +216,18 @@ export function createTasksItem(deps) {
     return heroes[heroId] || heroes[String(heroId)] || null;
   };
 
+  const getUpgradeableHeroIds = (roleInfo) =>
+    heroIds.filter((heroId) => {
+      const currentStar =
+        Number(getHeroFromRoleInfo(roleInfo, heroId)?.star) || 0;
+      const fragmentCost = Number(starFragmentCosts[currentStar]) || 0;
+      return (
+        currentStar < 30 &&
+        fragmentCost > 0 &&
+        getItemQuantity(roleInfo, heroId) >= fragmentCost
+      );
+    });
+
   const isSuccessfulHeroCommand = (result) =>
     Boolean(
       result &&
@@ -261,8 +273,17 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
         let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const upgradeableHeroIds = getUpgradeableHeroIds(roleInfo);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message:
+            upgradeableHeroIds.length > 0
+              ? `${token.name} 检测到${upgradeableHeroIds.length}名可升星武将：${upgradeableHeroIds.map((heroId) => HERO_DICT[heroId]?.name || heroId).join("、")}`
+              : `${token.name} 当前没有可升星武将`,
+          type: "info",
+        });
 
-        for (const heroId of heroIds) {
+        for (const heroId of upgradeableHeroIds) {
           if (shouldStop.value) break;
           const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
           const initialStar = Number(getHeroFromRoleInfo(roleInfo, heroId)?.star) || 0;
@@ -2634,14 +2655,19 @@ export function createTasksItem(deps) {
           await sleep(ITEM_COOLDOWN_MS);
         }
 
+        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const upgradeableHeroIds = getUpgradeableHeroIds(roleInfo);
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 仓库物品处理完成，开始执行全武将升星`,
+          message:
+            upgradeableHeroIds.length > 0
+              ? `${tokenName} 仓库物品处理完成，检测到${upgradeableHeroIds.length}名可升星武将：${upgradeableHeroIds.map((heroId) => HERO_DICT[heroId]?.name || heroId).join("、")}`
+              : `${tokenName} 仓库物品处理完成，当前没有可升星武将`,
           type: "info",
         });
         let upgradedHeroCount = 0;
         let upgradedStarCount = 0;
-        for (const heroId of heroIds) {
+        for (const heroId of upgradeableHeroIds) {
           if (shouldStop.value) break;
           try {
             const upgraded = await upgradeHeroStars(
