@@ -2165,6 +2165,14 @@ export function createTasksItem(deps) {
     const LVBU_ID = 107;
     const TAISHICI_ID = 106;
     const DIAOCHAN_ID = 210;
+    const STAR_FRAGMENT_COSTS = [
+      8, 8, 8, 8, 8,
+      40, 40, 40, 40, 40,
+      80, 80, 80, 80, 80,
+      200, 200, 200, 200, 200,
+      400, 400, 400, 400, 400,
+      400, 400, 400, 400, 400,
+    ];
     const useUniversalRed = taskConfig.useUniversalRed !== false;
     const useUniversalOrange = taskConfig.useUniversalOrange !== false;
     const actionDelayMs = Math.max(
@@ -2246,6 +2254,101 @@ export function createTasksItem(deps) {
       }
       return used;
     };
+    const getFragmentsNeededToMaxStar = (roleInfo, heroId) => {
+      const heroes = getHeroes(roleInfo);
+      const items = getItems(roleInfo);
+      const currentStar = getHeroStar(heroes, heroId);
+      let totalNeeded = 0;
+      for (let star = currentStar; star < 30; star += 1) {
+        totalNeeded += Number(STAR_FRAGMENT_COSTS[star]) || 0;
+      }
+      return Math.max(0, totalNeeded - getQuantity(items, heroId));
+    };
+    const upgradeHeroStars = async (tokenId, heroId, tokenName) => {
+      const heroName = HERO_DICT[heroId]?.name || `武将${heroId}`;
+      let upgraded = 0;
+
+      while (!shouldStop.value) {
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const currentStar = getHeroStar(getHeroes(roleInfo), heroId);
+        const fragmentCost = Number(STAR_FRAGMENT_COSTS[currentStar]) || 0;
+        const fragmentCount = getQuantity(getItems(roleInfo), heroId);
+        if (currentStar >= 30 || fragmentCost <= 0 || fragmentCount < fragmentCost) {
+          break;
+        }
+
+        for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+          try {
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "hero_heroupgradestar",
+              { heroId },
+              HELPER_COMMAND_TIMEOUT_MS,
+            );
+            break;
+          } catch (error) {
+            if (!isRateLimitError(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
+              throw error;
+            }
+            await sleep(RATE_LIMIT_RETRY_DELAY_MS * (attempt + 1));
+          }
+        }
+
+        await sleep(actionDelayMs);
+        const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const latestStar = getHeroStar(getHeroes(latestRoleInfo), heroId);
+        if (latestStar <= currentStar) {
+          throw new Error(`${heroName}升星后星级未变化`);
+        }
+
+        upgraded += latestStar - currentStar;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} ${heroName}已升至${latestStar}星`,
+          type: "success",
+        });
+      }
+
+      return upgraded;
+    };
+    const useUniversalFragments = async ({
+      tokenId,
+      universalItemId,
+      resolveTargetHeroId,
+      tokenName,
+    }) => {
+      while (!shouldStop.value) {
+        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let targetHeroId = resolveTargetHeroId(roleInfo);
+
+        // 先把已有的目标武将碎片用掉，再计算还需要转换多少万能碎片。
+        await upgradeHeroStars(tokenId, targetHeroId, tokenName);
+        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        targetHeroId = resolveTargetHeroId(roleInfo);
+        if (getHeroStar(getHeroes(roleInfo), targetHeroId) >= 30) break;
+
+        const universalQuantity = getQuantity(
+          getItems(roleInfo),
+          universalItemId,
+        );
+        const needed = getFragmentsNeededToMaxStar(roleInfo, targetHeroId);
+        if (universalQuantity <= 0 || needed <= 0) break;
+
+        const amount = Math.min(MAX_USE_PER_REQUEST, universalQuantity, needed);
+        const index =
+          universalItemId === UNIVERSAL_RED_ITEM_ID
+            ? targetHeroId - 101
+            : targetHeroId - 201;
+        await useInBatches({
+          tokenId,
+          itemId: universalItemId,
+          quantity: amount,
+          index,
+          tokenName,
+        });
+        await upgradeHeroStars(tokenId, targetHeroId, tokenName);
+      }
+    };
 
     isRunning.value = true;
     shouldStop.value = false;
@@ -2259,7 +2362,6 @@ export function createTasksItem(deps) {
         await ensureConnection(tokenId);
         let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         const mainLevel = getMainLevel(roleInfo);
-        const heroes = getHeroes(roleInfo);
         const items = getItems(roleInfo);
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -2268,15 +2370,14 @@ export function createTasksItem(deps) {
         });
 
         const redQuantity = getQuantity(items, UNIVERSAL_RED_ITEM_ID);
-        const lvbuStar = getHeroStar(heroes, LVBU_ID);
-        const redTarget = lvbuStar < 30 ? LVBU_ID : TAISHICI_ID;
-        const redTargetIndex = redTarget - 101;
         if (useUniversalRed && redQuantity > 0) {
-          await useInBatches({
+          await useUniversalFragments({
             tokenId,
-            itemId: UNIVERSAL_RED_ITEM_ID,
-            quantity: redQuantity,
-            index: redTargetIndex,
+            universalItemId: UNIVERSAL_RED_ITEM_ID,
+            resolveTargetHeroId: (latestRoleInfo) =>
+              getHeroStar(getHeroes(latestRoleInfo), LVBU_ID) < 30
+                ? LVBU_ID
+                : TAISHICI_ID,
             tokenName,
           });
         } else if (!useUniversalRed && redQuantity > 0) {
@@ -2289,11 +2390,10 @@ export function createTasksItem(deps) {
 
         const orangeQuantity = getQuantity(items, UNIVERSAL_ORANGE_ITEM_ID);
         if (useUniversalOrange && orangeQuantity > 0) {
-          await useInBatches({
+          await useUniversalFragments({
             tokenId,
-            itemId: UNIVERSAL_ORANGE_ITEM_ID,
-            quantity: orangeQuantity,
-            index: DIAOCHAN_ID - 201,
+            universalItemId: UNIVERSAL_ORANGE_ITEM_ID,
+            resolveTargetHeroId: () => DIAOCHAN_ID,
             tokenName,
           });
         } else if (!useUniversalOrange && orangeQuantity > 0) {
