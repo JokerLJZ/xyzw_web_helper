@@ -2,6 +2,7 @@ import { isDungeonOpen } from "./dreamConstants.js";
 
 export const DREAM_HERO_ID = 107;
 export const DREAM_PUSH_INTERVAL_MS = 2000;
+export const DREAM_FINAL_FLOOR = 200;
 
 /** 与 Token 日常配置共用同一开关及存储键，旧配置保持默认启用。 */
 export function isDreamEnabled(tokenId, storage = globalThis.localStorage) {
@@ -23,6 +24,22 @@ export function getDreamHeroes(dungeon) {
   return Object.values(dungeon?.battleTeam || {})
     .filter((hero) => hero && Number(hero.heroId) === DREAM_HERO_ID && Number(hero.hp) > 0)
     .sort((a, b) => Number(b.attack || 0) - Number(a.attack || 0));
+}
+
+/** 通关后服务端会清空层数，但仍保留本期梦境商店。 */
+export function isDreamCompleted(dungeon, period) {
+  if (!dungeon || Number(dungeon.beginTime) !== Number(period)) return false;
+  if (!dungeon.merchant) return false;
+
+  const rawFloor = dungeon.id;
+  const floor = Number(rawFloor);
+  return (
+    rawFloor === undefined ||
+    rawFloor === null ||
+    rawFloor === "" ||
+    !Number.isInteger(floor) ||
+    floor < 0
+  );
 }
 
 /** 自动推层：只使用吕布，不消耗复活道具。 */
@@ -55,6 +72,15 @@ export async function runDreamAutoPush({
   };
   let role = await fetchRole();
   let dungeon = role.dungeon;
+  if (isDreamCompleted(dungeon, period)) {
+    return {
+      status: "stopped",
+      reason: "梦境已通关，跳过推层，继续采购",
+      initialFloor: DREAM_FINAL_FLOOR,
+      floor: DREAM_FINAL_FLOOR,
+      battles: 0,
+    };
+  }
   if (Number(dungeon.beginTime) !== period || !Object.values(dungeon.battleTeam || {}).some((h) => h?.heroId)) {
     const battleTeam = { 0: DREAM_HERO_ID };
     try {
@@ -72,7 +98,13 @@ export async function runDreamAutoPush({
   if (!Number.isInteger(initialFloor) || initialFloor < 0) throw new Error("梦境层数无效");
   const failures = new Map();
   let battles = 0;
-  const result = (reason) => ({ status: "stopped", reason, initialFloor, floor: Number(dungeon.id), battles });
+  const result = (reason, floor = Number(dungeon.id)) => ({
+    status: "stopped",
+    reason,
+    initialFloor,
+    floor,
+    battles,
+  });
   log(`开始自动梦境，当前第 ${initialFloor} 层`);
   while (battles < maxBattles) {
     check();
@@ -92,6 +124,12 @@ export async function runDreamAutoPush({
     // 战斗响应是增量数据，不能用它覆盖带有 heroId/hp 的完整阵容。
     role = await fetchRole();
     dungeon = role.dungeon;
+    if (isDreamCompleted(dungeon, period)) {
+      return result(
+        "梦境已通关，结束推层，继续采购",
+        DREAM_FINAL_FLOOR,
+      );
+    }
     if (Number(dungeon.beginTime) !== period) throw new Error("梦境期次发生变化，停止推层");
     const floor = Number(dungeon.id);
     if (!Number.isInteger(floor) || floor < before.floor) throw new Error("梦境层数异常，停止推层");

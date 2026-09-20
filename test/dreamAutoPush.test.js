@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isDungeonOpen } from "../src/utils/dreamConstants.js";
 import {
+  DREAM_FINAL_FLOOR,
   DREAM_PUSH_INTERVAL_MS,
   getDreamPeriod,
+  isDreamCompleted,
   isDreamEnabled,
   runDreamAutoPush,
   runAutomaticDream,
@@ -118,6 +120,58 @@ test("195层可连续向后推层，采购严格晚于全部战斗", async () =>
     3,
   );
   assert.equal(f.calls.at(-1).cmd, "purchase");
+});
+
+test("200关通关后层数字段消失时按已通关处理并继续采购", async () => {
+  const f = fixture();
+  delete f.role.dungeon.id;
+  f.role.dungeon.merchant = { 1: [5] };
+  let purchased = 0;
+
+  assert.equal(
+    isDreamCompleted(f.role.dungeon, getDreamPeriod(now())),
+    true,
+  );
+  const result = await runAutomaticDream({
+    ...f,
+    purchase: async () => {
+      purchased++;
+    },
+  });
+
+  assert.equal(result.floor, DREAM_FINAL_FLOOR);
+  assert.equal(result.battles, 0);
+  assert.match(result.reason, /已通关/);
+  assert.equal(purchased, 1);
+  assert.equal(
+    f.calls.some((call) => call.cmd === "fight_startdungeon"),
+    false,
+  );
+});
+
+test("最后一战通关导致层数字段消失时结束推层并继续采购", async () => {
+  const f = fixture();
+  f.role.dungeon.id = 199;
+  f.role.dungeon.merchant = { 1: [5] };
+  const send = async (cmd, params) => {
+    const response = await f.send(cmd, params);
+    if (cmd === "fight_startdungeon") delete f.role.dungeon.id;
+    return response;
+  };
+  let purchased = 0;
+
+  const result = await runAutomaticDream({
+    ...f,
+    send,
+    purchase: async () => {
+      purchased++;
+    },
+  });
+
+  assert.equal(result.floor, DREAM_FINAL_FLOOR);
+  assert.equal(result.battles, 1);
+  assert.match(result.reason, /已通关/);
+  assert.equal(purchased, 1);
 });
 
 test("超过195层且主线不足4000关时仍执行梦境采购", async (t) => {
