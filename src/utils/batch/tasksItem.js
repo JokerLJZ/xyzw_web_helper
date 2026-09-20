@@ -931,10 +931,11 @@ export function createTasksItem(deps) {
     tokenName,
     ownedHeroIds,
   ) => {
+    const supportHeroId = ownedHeroIds.has(223) ? 223 : 204;
     const targetHeroes = [
       { heroId: 107, slot: 0 }, // 吕布是前期阵容的必要条件
-      { heroId: 204, slot: 1 }, // 张飞
-      { heroId: 106, slot: 2 }, // 太史慈
+      { heroId: supportHeroId, slot: 2 }, // 优先蔡文姬，否则张飞
+      { heroId: 106, slot: 3 }, // 太史慈
     ].filter((target) => ownedHeroIds.has(target.heroId));
 
     const currentTeamResult = await tokenStore.sendMessageWithPromise(
@@ -974,7 +975,7 @@ export function createTasksItem(deps) {
     });
   };
 
-  /** 小号前期推图：吕布必需，按拥有情况培养张飞、太史慈并设置1至3将阵容。 */
+  /** 小号前期推图：吕布必需，优先培养蔡文姬，否则培养张飞，并搭配太史慈。 */
   const batchAdjustEarlyMainLevelFormation = async () => {
     if (selectedTokens.value.length === 0) return;
 
@@ -1014,7 +1015,8 @@ export function createTasksItem(deps) {
           return;
         }
 
-        for (const heroId of [204, 106]) {
+        const supportHeroId = ownedHeroIds.has(223) ? 223 : 204;
+        for (const heroId of [supportHeroId, 106]) {
           if (shouldStop.value) break;
           if (!ownedHeroIds.has(heroId)) continue;
           try {
