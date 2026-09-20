@@ -332,6 +332,10 @@ export function registerDefaultCommands(reg) {
     .register("dungeon_buymerchant")
     // 活动/任务
     .register("activity_get")
+    .register("activity_claimweekactreward", {
+      selectRewardsMap: { 1: 1 },
+      typ: 1,
+    })
     .register("activity_recyclewarorderrewardclaim")
     // 玄武赐福活动
     .register("activity_warorderget")
@@ -1087,6 +1091,7 @@ export class XyzwWebSocketClient {
       fight_startpvpresp: "fight_startpvp",
       fight_startlevelresp: "fight_startlevel",
       activity_getresp: "activity_get",
+      activity_claimweekactrewardresp: "activity_claimweekactreward",
       collection_goodslistresp: "collection_goodslist",
       collection_claimfreerewardresp: "collection_claimfreereward",
       legion_getarearankresp: "legion_getarearank",

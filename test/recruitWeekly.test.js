@@ -8,6 +8,7 @@ const createRecruitScenario = ({
   activityWeek,
   recruitCount = 100,
   roundCount = 1,
+  completedRounds = 0,
 }) => {
   const tokenId = "token-1";
   const token = { id: tokenId, name: "测试账号" };
@@ -29,6 +30,27 @@ const createRecruitScenario = ({
     },
     async sendMessageWithPromise(_tokenId, cmd, params) {
       commands.push({ cmd, params });
+
+      if (cmd === "activity_get") {
+        return {
+          activity: {
+            myTotalInfo: {
+              1: {
+                rounds: Math.min(4, completedRounds + 1),
+                complete:
+                  completedRounds > 0
+                    ? Object.fromEntries(
+                        Array.from({ length: 5 }, (_, index) => [
+                          index,
+                          completedRounds,
+                        ]),
+                      )
+                    : {},
+              },
+            },
+          },
+        };
+      }
 
       if (cmd === "hero_recruit") {
         assert.ok(
@@ -112,6 +134,12 @@ test("招募周按360次、领取邮件、再完成40次", async () => {
       .length,
     1,
   );
+  assert.deepEqual(
+    scenario.commands.find(
+      (item) => item.cmd === "activity_claimweekactreward",
+    )?.params,
+    { selectRewardsMap: { 1: 1 }, typ: 1 },
+  );
   assert.equal(scenario.getRoleInfo().role.items[1001].quantity, 0);
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
   assert.equal(
@@ -178,10 +206,87 @@ test("按配置轮次重复执行360次、领取邮件和40次", async () => {
       .length,
     2,
   );
+  assert.equal(
+    scenario.commands.filter(
+      (item) => item.cmd === "activity_claimweekactreward",
+    ).length,
+    2,
+  );
   assert.equal(scenario.getRoleInfo().role.items[1001].quantity, 0);
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
   assert.equal(
     scenario.logs.some((entry) => entry.message.includes("任务完成：2/2轮")),
+    true,
+  );
+});
+
+test("招募周累计最多执行四轮并逐轮领取万能红", async () => {
+  const scenario = createRecruitScenario({
+    recruitItemCount: 1440,
+    activityWeek: "招募周",
+    roundCount: 9,
+  });
+
+  await scenario.run();
+
+  const claimCommands = scenario.commands.filter(
+    (item) => item.cmd === "activity_claimweekactreward",
+  );
+  let recruitedCount = 0;
+  const recruitedCountsAtClaim = [];
+  scenario.commands.forEach((command) => {
+    if (command.cmd === "hero_recruit") {
+      recruitedCount += command.params.recruitNumber;
+    }
+    if (command.cmd === "activity_claimweekactreward") {
+      recruitedCountsAtClaim.push(recruitedCount);
+    }
+  });
+  assert.equal(
+    getRecruitCommands(scenario.commands).reduce(
+      (total, command) => total + command.params.recruitNumber,
+      0,
+    ),
+    1600,
+  );
+  assert.equal(claimCommands.length, 4);
+  assert.deepEqual(recruitedCountsAtClaim, [400, 800, 1200, 1600]);
+  assert.equal(
+    claimCommands.every(
+      ({ params }) =>
+        params.typ === 1 && params.selectRewardsMap?.[1] === 1,
+    ),
+    true,
+  );
+});
+
+test("已完成三轮时最多再执行一轮", async () => {
+  const scenario = createRecruitScenario({
+    recruitItemCount: 360,
+    activityWeek: "招募周",
+    roundCount: 4,
+    completedRounds: 3,
+  });
+
+  await scenario.run();
+
+  assert.equal(
+    getRecruitCommands(scenario.commands).reduce(
+      (total, command) => total + command.params.recruitNumber,
+      0,
+    ),
+    400,
+  );
+  assert.equal(
+    scenario.commands.filter(
+      (item) => item.cmd === "activity_claimweekactreward",
+    ).length,
+    1,
+  );
+  assert.equal(
+    scenario.logs.some((entry) =>
+      entry.message.includes("本周已完成3/4轮，本次执行1轮"),
+    ),
     true,
   );
 });

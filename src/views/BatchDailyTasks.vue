@@ -2245,7 +2245,7 @@
                 智能招募周任务
               </div>
               <div style="font-size: 12px; color: #86909c">
-                固定规则：每轮起始招募道具达到360个后，先完成360次、领取邮件，再完成40次，共400次。
+                固定规则：活动累计最多四轮；每轮先完成360次、领取邮件，再完成40次，并默认领取万能红自选奖励。
               </div>
               <n-space align="center" style="margin-top: 8px">
                 <span style="font-size: 12px; color: #86909c">任务轮次</span>

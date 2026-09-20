@@ -395,6 +395,23 @@ export class GameCommands {
   }
 
   /**
+   * 领取周活动整轮奖励（默认招募周万能红）
+   */
+  activity_claimweekactreward(ack = 0, seq = 0, params = {}) {
+    return {
+      ack,
+      body: this.g_utils.bon.encode({
+        selectRewardsMap: { 1: 1 },
+        typ: 1,
+        ...params,
+      }),
+      cmd: "activity_claimweekactreward",
+      seq,
+      time: Date.now(),
+    };
+  }
+
+  /**
    * 开始BOSS战
    */
   fight_startboss(ack = 0, seq = 0, params = {}) {

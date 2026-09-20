@@ -1711,7 +1711,7 @@ export function createTasksItem(deps) {
   };
 
   /**
-   * 智能招募周任务：起始招募道具达到360个后，招募360次、领取邮件，再完成40次。
+   * 智能招募周任务：活动累计最多四轮；每轮招募400次后领取万能红自选奖励。
    */
   const batchSmartRecruitWeekly = async (taskConfig = {}) => {
     if (selectedTokens.value.length === 0) return;
@@ -1725,10 +1725,37 @@ export function createTasksItem(deps) {
       Math.trunc(Number(taskConfig.totalCount) || 400),
     );
     const remainingCount = totalCount - startCount;
-    const roundCount = Math.min(
+    const requestedRoundCount = Math.min(
       4,
       Math.max(1, Math.trunc(Number(taskConfig.roundCount) || 1)),
     );
+
+    const getCompletedRecruitRounds = (activityResult) => {
+      const activity =
+        activityResult?.activity ||
+        activityResult?.data?.activity ||
+        activityResult?.body?.activity;
+      const info = activity?.myTotalInfo?.["1"];
+      if (!info) return 0;
+
+      const complete = info.complete || {};
+      const recruitActivity = activity.activity?.find(
+        (item) => Number(item?.id) === 1,
+      );
+      const rewardCount = recruitActivity?.data?.rewards?.length || 5;
+      const finalRewardIndex = rewardCount - 1;
+      const completedByFinalReward =
+        Number(complete[String(finalRewardIndex)]) || 0;
+      const completedByCurrentRound = Math.max(
+        0,
+        (Number(info.rounds) || 1) - 1,
+      );
+
+      return Math.min(
+        4,
+        Math.max(completedByFinalReward, completedByCurrentRound),
+      );
+    };
 
     isRunning.value = true;
     shouldStop.value = false;
@@ -1742,6 +1769,7 @@ export function createTasksItem(deps) {
       count,
       progressOffset,
       roundIndex,
+      roundCount,
     ) => {
       await runInventoryVerifiedGameCommand({
         tokenStore,
@@ -1783,12 +1811,33 @@ export function createTasksItem(deps) {
           return;
         }
 
+        await ensureConnection(tokenId);
+
+        const activityResult = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_get",
+          {},
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+        const completedRounds = getCompletedRecruitRounds(activityResult);
+        const remainingRounds = Math.max(0, 4 - completedRounds);
+        const roundCount = Math.min(requestedRoundCount, remainingRounds);
+
+        if (roundCount === 0) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 招募周已完成4/4轮，无需继续执行`,
+            type: "success",
+          });
+          return;
+        }
+
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始智能招募周任务：${token.name}，目标${roundCount}轮，每轮${totalCount}次 ===`,
+          message: `=== 开始智能招募周任务：${token.name}，本周已完成${completedRounds}/4轮，本次执行${roundCount}轮，每轮${totalCount}次 ===`,
           type: "info",
         });
-        await ensureConnection(tokenId);
 
         for (let roundIndex = 1; roundIndex <= roundCount; roundIndex += 1) {
           if (shouldStop.value) return;
@@ -1811,7 +1860,14 @@ export function createTasksItem(deps) {
             return;
           }
 
-          await runRecruitBatch(tokenId, token, startCount, 0, roundIndex);
+          await runRecruitBatch(
+            tokenId,
+            token,
+            startCount,
+            0,
+            roundIndex,
+            roundCount,
+          );
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 招募周第${roundIndex}轮已完成${startCount}个，开始领取邮件附件`,
@@ -1832,11 +1888,27 @@ export function createTasksItem(deps) {
             remainingCount,
             startCount,
             roundIndex,
+            roundCount,
           );
 
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 招募周第${roundIndex}/${roundCount}轮完成：${totalCount}/${totalCount}次`,
+            type: "success",
+          });
+
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "activity_claimweekactreward",
+            {
+              selectRewardsMap: { 1: 1 },
+              typ: 1,
+            },
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 招募周第${roundIndex}/${roundCount}轮万能红自选奖励领取成功`,
             type: "success",
           });
         }
