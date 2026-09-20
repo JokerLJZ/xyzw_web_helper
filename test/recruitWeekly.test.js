@@ -142,7 +142,7 @@ test("招募周按360次、领取邮件、再完成40次", async () => {
   assert.equal(
     scenario.commands.filter((item) => item.cmd === "mail_claimallattachment")
       .length,
-    1,
+    2,
   );
   assert.deepEqual(
     scenario.commands.find(
@@ -150,7 +150,7 @@ test("招募周按360次、领取邮件、再完成40次", async () => {
     )?.params,
     { selectRewardsMap: { 1: 1 }, typ: 1 },
   );
-  assert.equal(scenario.getRoleInfo().role.items[1001].quantity, 0);
+  assert.equal(scenario.getRoleInfo().role.items[1001].quantity, 40);
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
   assert.equal(
     scenario.logs.some((entry) => entry.message.includes("已达到360进度，开始领取邮件附件")),
@@ -214,7 +214,7 @@ test("按配置轮次重复执行360次、领取邮件和40次", async () => {
   assert.equal(
     scenario.commands.filter((item) => item.cmd === "mail_claimallattachment")
       .length,
-    2,
+    4,
   );
   assert.equal(
     scenario.commands.filter(
@@ -222,7 +222,7 @@ test("按配置轮次重复执行360次、领取邮件和40次", async () => {
     ).length,
     2,
   );
-  assert.equal(scenario.getRoleInfo().role.items[1001].quantity, 0);
+  assert.equal(scenario.getRoleInfo().role.items[1001].quantity, 80);
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
   assert.equal(
     scenario.logs.some((entry) => entry.message.includes("任务完成：2/2轮")),

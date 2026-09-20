@@ -1962,6 +1962,17 @@ export function createTasksItem(deps) {
             message: `${token.name} 招募周第${roundIndex}/${roundCount}轮万能红自选奖励领取成功`,
             type: "success",
           });
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "mail_claimallattachment",
+            { category: 0 },
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 招募周第${roundIndex}/${roundCount}轮完成后邮件附件领取成功`,
+            type: "success",
+          });
           recruitWeekState = {
             completedRounds: Math.min(4, completedRounds + roundIndex),
             currentProgress: 0,
@@ -2457,6 +2468,17 @@ export function createTasksItem(deps) {
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 宝箱周第${groupIndex}/${groupCount}轮万能红自选奖励领取成功`,
+            type: "success",
+          });
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "mail_claimallattachment",
+            { category: 0 },
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 宝箱周第${groupIndex}/${groupCount}轮完成后邮件附件领取成功`,
             type: "success",
           });
           boxWeekState = {
