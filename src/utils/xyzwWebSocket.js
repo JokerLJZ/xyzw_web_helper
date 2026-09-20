@@ -313,6 +313,8 @@ export function registerDefaultCommands(reg) {
     .register("pearl_unloadskill")
 
     // 武将升级相关
+    .register("hero_lordupgradelevel") //主公升级
+    .register("hero_lordupgradeorder") //主公进阶
     .register("hero_heroupgradelevel") //武将升级
     .register("hero_heroupgradeorder") //武将进阶
     .register("hero_rebirth") //武将重新birth
@@ -1185,6 +1187,8 @@ export class XyzwWebSocketClient {
       discount_getdiscountinforesp: "discount_getdiscountinfo",
       // 升星相关响应映射
       hero_heroupgradestarresp: "hero_heroupgradestar",
+      hero_lordupgradelevelresp: "hero_lordupgradelevel",
+      hero_lordupgradeorderresp: "hero_lordupgradeorder",
       hero_heroupgradelevelresp: "hero_heroupgradelevel",
       hero_heroupgradeorderresp: "hero_heroupgradeorder",
       book_upgraderesp: "book_upgrade",

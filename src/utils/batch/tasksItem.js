@@ -203,6 +203,7 @@ export function createTasksItem(deps) {
     { level: 4500, order: 17 },
     { level: 5000, order: 18 },
     { level: 5500, order: 19 },
+    { level: 6000, order: 20 },
   ];
 
   const getHeroFromRoleInfo = (roleInfo, heroId) => {
@@ -493,6 +494,121 @@ export function createTasksItem(deps) {
     });
   };
 
+  const upgradeLordToLevel = async (tokenId, tokenName, targetLevel) => {
+    let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+    let lord = roleInfo?.role?.lord;
+    if (!lord) throw new Error("未获取到主公信息");
+
+    let currentLevel = Number(lord.level) || 0;
+    let currentOrder = Number(lord.order) || 0;
+    while (!shouldStop.value && currentLevel < targetLevel) {
+      const nextOrder = heroLevelOrderThresholds.find(
+        (item) => item.order > currentOrder,
+      );
+
+      if (nextOrder && currentLevel >= nextOrder.level) {
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "hero_lordupgradeorder",
+          {},
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+      } else {
+        const levelBoundary = Math.min(
+          targetLevel,
+          nextOrder?.level || targetLevel,
+        );
+        const upgradeNum = Math.min(50, levelBoundary - currentLevel);
+        if (upgradeNum <= 0) {
+          throw new Error(`主公无法继续升级（当前${currentLevel}级，${currentOrder}阶）`);
+        }
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "hero_lordupgradelevel",
+          { upgradeNum },
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+      }
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+      );
+      roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+      lord = roleInfo?.role?.lord;
+      const updatedLevel = Number(lord?.level);
+      const updatedOrder = Number(lord?.order);
+      if (
+        !lord ||
+        !Number.isFinite(updatedLevel) ||
+        !Number.isFinite(updatedOrder) ||
+        (updatedLevel <= currentLevel && updatedOrder <= currentOrder)
+      ) {
+        throw new Error("主公升级后等级和阶数均未变化");
+      }
+      currentLevel = updatedLevel;
+      currentOrder = updatedOrder;
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 主公已升级至${currentLevel}级（${currentOrder}阶）`,
+      type: "success",
+    });
+  };
+
+  const upgradeLordAndLuBu = async (tokenId, tokenName) => {
+    const LU_BU_ID = 107;
+    const MAX_BALANCE_ROUNDS = 100;
+
+    for (let round = 0; round < MAX_BALANCE_ROUNDS; round += 1) {
+      if (shouldStop.value) break;
+      const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+      const lord = roleInfo?.role?.lord;
+      const luBu = getHeroFromRoleInfo(roleInfo, LU_BU_ID);
+      if (!lord || !luBu) throw new Error("未获取到主公或吕布信息");
+
+      const lordLevel = Number(lord.level) || 0;
+      const lordOrder = Number(lord.order) || 0;
+      const luBuLevel = Number(luBu.level) || 0;
+      const luBuOrder = Number(luBu.order) || 0;
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 当前主公${lordLevel}级/${lordOrder}阶，吕布${luBuLevel}级/${luBuOrder}阶`,
+        type: "info",
+      });
+
+      if (lordOrder > luBuOrder || luBuLevel < lordLevel) {
+        if (luBuLevel >= lordLevel && luBuOrder < lordOrder) {
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "hero_heroupgradeorder",
+            { heroId: LU_BU_ID },
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+          );
+          continue;
+        }
+        await upgradeSingleHero(tokenId, tokenName, LU_BU_ID, lordLevel);
+        continue;
+      }
+
+      const nextLordLevel = heroLevelOrderThresholds.find(
+        (item) => item.level > lordLevel,
+      )?.level;
+      if (!nextLordLevel) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 主公已达到当前自动升级上限，主公和吕布升级结束`,
+          type: "info",
+        });
+        break;
+      }
+      await upgradeLordToLevel(tokenId, tokenName, nextLordLevel);
+    }
+  };
+
   /**
    * 批量将多个指定武将升级并自动进阶到目标等级。
    * 目标等级必须由页面限制为50的整数倍；每次升级最多发送50级，避免跨过进阶阈值。
@@ -706,6 +822,18 @@ export function createTasksItem(deps) {
             Number(hero?.heroId ?? hero?.id),
           ),
         );
+
+        if (!shouldStop.value && ownedHeroIds.has(107)) {
+          try {
+            await upgradeLordAndLuBu(tokenId, tokenName);
+          } catch (error) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 主公和吕布升级停止：${error.message || "资源不足或未知错误"}`,
+              type: "warning",
+            });
+          }
+        }
 
         for (const group of upgradeGroups) {
           for (const heroId of group.heroIds) {
