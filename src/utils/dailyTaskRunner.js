@@ -956,6 +956,17 @@ export class DailyTaskRunner {
     }
 
     // 1. 基础任务
+    taskList.push({
+      name: "分享火把",
+      execute: () =>
+        this.executeGameCommand(
+          tokenId,
+          "system_mysharecallback",
+          { isSkipShareCard: false, type: 1 },
+          "分享火把",
+        ),
+    });
+
     if (!isTaskCompleted(2)) {
       taskList.push({
         name: "分享一次游戏",
