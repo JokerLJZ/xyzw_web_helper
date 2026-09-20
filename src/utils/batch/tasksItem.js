@@ -170,6 +170,18 @@ export function createTasksItem(deps) {
   const HERO_STAR_ACTION_DELAY_MS = 3000;
   const HERO_STAR_RATE_LIMIT_DELAY_MS = 6000;
   const HERO_STAR_MAX_RATE_LIMIT_RETRIES = 4;
+  const lastHeroStarActionAt = new Map();
+  const waitForHeroStarInterval = async (tokenId) => {
+    const lastActionAt = lastHeroStarActionAt.get(tokenId) || 0;
+    const waitMs = Math.max(
+      0,
+      HERO_STAR_ACTION_DELAY_MS - (Date.now() - lastActionAt),
+    );
+    if (waitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    lastHeroStarActionAt.set(tokenId, Date.now());
+  };
 
   const heroLevelOrderThresholds = [
     { level: 100, order: 1 },
@@ -268,6 +280,7 @@ export function createTasksItem(deps) {
               attempt += 1
             ) {
               try {
+                await waitForHeroStarInterval(tokenId);
                 await tokenStore.sendMessageWithPromise(
                   tokenId,
                   "hero_heroupgradestar",
@@ -299,9 +312,6 @@ export function createTasksItem(deps) {
             }
 
             if (!commandCompleted) break;
-            await new Promise((resolve) =>
-              setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
-            );
             roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
             const latestStar =
               Number(getHeroFromRoleInfo(roleInfo, heroId)?.star) || 0;
@@ -2212,6 +2222,7 @@ export function createTasksItem(deps) {
     const OPEN_PACK_ITEM_IDS = [
       3001, 3002, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 35011,
     ];
+    const EXCLUDED_ACTIVITY_ITEM_IDS = new Set([5054, 6001]);
     const LVBU_ID = 107;
     const TAISHICI_ID = 106;
     const DIAOCHAN_ID = 210;
@@ -2243,6 +2254,7 @@ export function createTasksItem(deps) {
         })
         .map(({ itemId }) => itemId)
         .filter((itemId) => !OPEN_PACK_ITEM_IDS.includes(itemId))
+        .filter((itemId) => !EXCLUDED_ACTIVITY_ITEM_IDS.has(itemId))
         .sort((left, right) => left - right);
     const getMainLevel = (result) =>
       Number(getRole(result).levelId ?? result?.levelId ?? 0) || 0;
@@ -2255,6 +2267,16 @@ export function createTasksItem(deps) {
     const isRateLimitError = (error) =>
       getErrorMessage(error).includes("200400") ||
       getErrorMessage(error).includes("操作太快");
+    const lastBookActionAt = new Map();
+    const waitForBookActionInterval = async (tokenId) => {
+      const lastActionAt = lastBookActionAt.get(tokenId) || 0;
+      const waitMs = Math.max(
+        0,
+        HERO_STAR_ACTION_DELAY_MS - (Date.now() - lastActionAt),
+      );
+      if (waitMs > 0) await sleep(waitMs);
+      lastBookActionAt.set(tokenId, Date.now());
+    };
     const useInBatches = async ({
       tokenId,
       itemId,
@@ -2349,6 +2371,7 @@ export function createTasksItem(deps) {
 
         for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
           try {
+            await waitForHeroStarInterval(tokenId);
             await tokenStore.sendMessageWithPromise(
               tokenId,
               "hero_heroupgradestar",
@@ -2364,7 +2387,6 @@ export function createTasksItem(deps) {
           }
         }
 
-        await sleep(Math.max(actionDelayMs, HERO_STAR_ACTION_DELAY_MS));
         const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         const latestStar = getHeroStar(getHeroes(latestRoleInfo), heroId);
         if (latestStar <= currentStar) {
@@ -2380,6 +2402,62 @@ export function createTasksItem(deps) {
       }
 
       return upgraded;
+    };
+    const executeBookCommand = async (tokenId, command, params) => {
+      for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+        try {
+          await waitForBookActionInterval(tokenId);
+          const result = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            command,
+            params,
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          const succeeded = Boolean(
+            result &&
+              (result.code === 0 ||
+                result.success === true ||
+                result.result === 0),
+          );
+          if (!succeeded) throw new Error(`${command}执行失败`);
+          return result;
+        } catch (error) {
+          if (!isRateLimitError(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
+            throw error;
+          }
+          await sleep(RATE_LIMIT_RETRY_DELAY_MS);
+        }
+      }
+      return null;
+    };
+    const upgradeHeroBooks = async (tokenId) => {
+      let upgraded = 0;
+      for (const heroId of heroIds) {
+        if (shouldStop.value) break;
+        // 没有可查询的图鉴升星进度接口，沿用现有逻辑：成功则继续，失败则换下一个武将。
+        for (let attempt = 0; attempt < 10 && !shouldStop.value; attempt += 1) {
+          try {
+            await executeBookCommand(tokenId, "book_upgrade", { heroId });
+            upgraded += 1;
+          } catch (error) {
+            break;
+          }
+        }
+      }
+      return upgraded;
+    };
+    const claimBookRewards = async (tokenId) => {
+      let claimed = 0;
+      // 每次成功后继续领取，直到服务器提示当前已无可领取奖励。
+      for (let attempt = 0; attempt < 10 && !shouldStop.value; attempt += 1) {
+        try {
+          await executeBookCommand(tokenId, "book_claimpointreward", {});
+          claimed += 1;
+        } catch (error) {
+          break;
+        }
+      }
+      return claimed;
     };
     const useUniversalFragments = async ({
       tokenId,
@@ -2588,6 +2666,28 @@ export function createTasksItem(deps) {
           message: `${tokenName} 全武将升星完成：${upgradedHeroCount}名武将，共提升${upgradedStarCount}星`,
           type: "success",
         });
+
+        if (!shouldStop.value) {
+          // 与最后一次武将升星至少间隔3秒，再开始图鉴相关操作。
+          await sleep(HERO_STAR_ACTION_DELAY_MS);
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 开始执行图鉴升星`,
+            type: "info",
+          });
+          const upgradedBookCount = await upgradeHeroBooks(tokenId);
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 图鉴升星完成：成功${upgradedBookCount}次，开始领取图鉴奖励`,
+            type: "success",
+          });
+          const claimedBookRewardCount = await claimBookRewards(tokenId);
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 图鉴奖励领取完成：成功${claimedBookRewardCount}次`,
+            type: "success",
+          });
+        }
 
         roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         addLog({
