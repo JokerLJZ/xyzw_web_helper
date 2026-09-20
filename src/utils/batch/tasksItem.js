@@ -1,4 +1,4 @@
-import { HERO_DICT } from "@/utils/HeroList";
+import { HERO_DICT, LEGION_TECH_NAME } from "@/utils/HeroList";
 import { PEACH_TASKS } from "@/utils/PeachTaskIds";
 import {
   HELPER_COMMAND_TIMEOUT_MS,
@@ -143,6 +143,108 @@ export function createTasksItem(deps) {
     isRunning.value = false;
     shouldStop.value = false;
     message.success("批量水晶升级任务结束");
+  };
+
+  /** 按编号顺序将战士俱乐部科技逐项提升到资源允许的最高等级。 */
+  const batchMaxWarriorLegionTech = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const researchIds = Array.from({ length: 14 }, (_, index) => 101 + index);
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      let completed = 0;
+      let stopReason = "";
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${tokenName} 开始按顺序升级战士俱乐部科技 ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        for (const researchId of researchIds) {
+          if (shouldStop.value) {
+            stopReason = "用户停止任务";
+            break;
+          }
+
+          const techName = LEGION_TECH_NAME[researchId] || `科技${researchId}`;
+          try {
+            const result = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "legion_research",
+              { researchId, isMax: true },
+              10000,
+            );
+            const resultMessage = result?.msg || result?.message || result?.error || "";
+            if (result?.error || (result?.code !== undefined && result.code !== 0)) {
+              throw new Error(resultMessage || `服务器返回错误码 ${result.code}`);
+            }
+
+            completed += 1;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${techName}（${researchId}）已升级到当前最高等级`,
+              type: "success",
+            });
+          } catch (error) {
+            const errorMessage = getErrorMessage(error);
+            if (errorMessage.includes("满级") || errorMessage.includes("最高等级")) {
+              completed += 1;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} ${techName}（${researchId}）已经满级，继续下一项`,
+                type: "info",
+              });
+            } else {
+              stopReason = `${techName}（${researchId}）：${errorMessage}`;
+              break;
+            }
+          }
+
+          await new Promise((resolve) =>
+            setTimeout(resolve, delayConfig.command),
+          );
+        }
+
+        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message:
+            completed === researchIds.length
+              ? `${tokenName} 战士俱乐部科技已全部处理完成`
+              : `${tokenName} 战士科技升级停止：已处理${completed}/${researchIds.length}项，${stopReason || "资源不足或无法继续升级"}`,
+          type: completed === researchIds.length ? "success" : "warning",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 战士科技升级失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+    message.success("批量战士科技升级任务结束");
   };
 
   const smartBoxDefinitions = [
@@ -3975,6 +4077,7 @@ export function createTasksItem(deps) {
   };
 
   return {
+    batchMaxWarriorLegionTech,
     batchUpgradeCrystal,
     batchOpenBox,
     batchOpenBoxByPoints,

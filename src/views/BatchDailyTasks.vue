@@ -722,6 +722,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchMaxWarriorLegionTech"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="按101至114顺序，每项一次升级到当前最高等级"
+                >
+                  战士科技依次升满
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchTopUpGoldFish"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -4695,6 +4703,7 @@ const taskGroupDefinitions = [
     tasks: [
       "batchJoinLegion",
       "batchUpgradeCrystal",
+      "batchMaxWarriorLegionTech",
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
       "batchAdjustEarlyMainLevelFormation",
@@ -7668,6 +7677,7 @@ const {
   batchClaimPeachTasks,
   batchGenieSweep,
   batchUpgradeCrystal,
+  batchMaxWarriorLegionTech,
 } = tasksItem;
 
 const confirmUpgradeLordTo6000 = () => {
