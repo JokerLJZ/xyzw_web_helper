@@ -2161,7 +2161,6 @@ export function createTasksItem(deps) {
     const OPEN_PACK_ITEM_IDS = [
       3001, 3002, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 35011,
     ];
-    const CONSUME_ITEM_IDS = [1008];
     const LVBU_ID = 107;
     const TAISHICI_ID = 106;
     const DIAOCHAN_ID = 210;
@@ -2432,27 +2431,6 @@ export function createTasksItem(deps) {
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${tokenName} 物品${itemId}无法直接使用，已跳过：${getErrorMessage(error)}`,
-              type: "warning",
-            });
-          }
-        }
-
-        for (const itemId of CONSUME_ITEM_IDS) {
-          if (shouldStop.value) break;
-          const quantity = getQuantity(items, itemId);
-          if (quantity <= 0) continue;
-          try {
-            await useInBatches({
-              tokenId,
-              itemId,
-              quantity,
-              tokenName,
-              command: "item_consume",
-            });
-          } catch (error) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 物品${itemId}使用失败，已跳过：${getErrorMessage(error)}`,
               type: "warning",
             });
           }
