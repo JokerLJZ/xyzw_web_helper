@@ -171,6 +171,7 @@ export function createTasksItem(deps) {
   const HERO_STAR_RATE_LIMIT_DELAY_MS = 6000;
   const HERO_STAR_MAX_RATE_LIMIT_RETRIES = 4;
   const lastHeroStarActionAt = new Map();
+  const lastBookActionAt = new Map();
   const waitForHeroStarInterval = async (tokenId) => {
     const lastActionAt = lastHeroStarActionAt.get(tokenId) || 0;
     const waitMs = Math.max(
@@ -181,6 +182,17 @@ export function createTasksItem(deps) {
       await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
     lastHeroStarActionAt.set(tokenId, Date.now());
+  };
+  const waitForBookActionInterval = async (tokenId) => {
+    const lastActionAt = lastBookActionAt.get(tokenId) || 0;
+    const waitMs = Math.max(
+      0,
+      HERO_STAR_ACTION_DELAY_MS - (Date.now() - lastActionAt),
+    );
+    if (waitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    lastBookActionAt.set(tokenId, Date.now());
   };
 
   const heroLevelOrderThresholds = [
@@ -228,6 +240,26 @@ export function createTasksItem(deps) {
         getItemQuantity(roleInfo, heroId) >= fragmentCost
       );
     });
+
+  const getBookUpgradePlan = (roleInfo) =>
+    heroIds
+      .map((heroId) => {
+        const hero = getHeroFromRoleInfo(roleInfo, heroId);
+        const star = Number(hero?.star) || 0;
+        const bookStar = Number(hero?.bookStar) || 0;
+        return { heroId, star, bookStar, upgradeCount: star - bookStar };
+      })
+      .filter(({ upgradeCount }) => upgradeCount > 0);
+
+  const isSuccessfulBookCommand = (result) =>
+    Boolean(
+      result &&
+        (result.role?.heroes ||
+          result.role?.book ||
+          result.code === 0 ||
+          result.success === true ||
+          result.result === 0),
+    );
 
   const isSuccessfulHeroCommand = (result) =>
     Boolean(
@@ -914,42 +946,69 @@ export function createTasksItem(deps) {
         });
 
         await ensureConnection(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const upgradePlan = getBookUpgradePlan(roleInfo);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message:
+            upgradePlan.length > 0
+              ? `${token.name} 检测到${upgradePlan.length}名武将需要图鉴升星，共${upgradePlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次`
+              : `${token.name} 当前没有需要图鉴升星的武将`,
+          type: "info",
+        });
 
-        for (const heroId of heroIds) {
-          if (shouldStop.value) break;
-
-          // 每个英雄尝试最多10次图鉴升星（只要成功就继续，失败则跳过该英雄）
-          for (let i = 1; i <= 10; i++) {
-            if (shouldStop.value) break;
-
-            try {
-              const res = await tokenStore.sendMessageWithPromise(
-                tokenId,
-                "book_upgrade",
-                { heroId },
-                5000,
-              );
-              const ok =
-                res &&
-                (res.code === 0 || res.success === true || res.result === 0);
-
-              if (ok) {
-                addLog({
-                  time: new Date().toLocaleTimeString(),
-                  message: `${token.name} 英雄ID:${heroId} 图鉴升星成功 (第${i}次)`,
-                  type: "success",
-                });
-                // 成功了继续尝试下一级，直到失败或达到10次
-              } else {
-                // 失败说明无法继续图鉴升星（碎片不足或满星），跳出循环处理下一个英雄
-                throw new Error("图鉴升星失败");
+        for (const { heroId, upgradeCount } of upgradePlan) {
+          const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
+          let completed = 0;
+          for (let i = 0; i < upgradeCount && !shouldStop.value; i += 1) {
+            for (
+              let attempt = 0;
+              attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
+              attempt += 1
+            ) {
+              try {
+                await waitForBookActionInterval(tokenId);
+                const result = await tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "book_upgrade",
+                  { heroId },
+                  HELPER_COMMAND_TIMEOUT_MS,
+                );
+                if (!isSuccessfulBookCommand(result)) {
+                  throw new Error("图鉴升星响应未确认成功");
+                }
+                completed += 1;
+                break;
+              } catch (error) {
+                const errorMessage = getErrorMessage(error);
+                const rateLimited =
+                  errorMessage.includes("200400") ||
+                  errorMessage.includes("操作太快");
+                if (
+                  !rateLimited ||
+                  attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
+                ) {
+                  throw error;
+                }
+                await new Promise((resolve) =>
+                  setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
+                );
               }
-            } catch (err) {
-              // 失败则停止当前英雄的图鉴升星尝试
-              break;
             }
-            await new Promise((r) => setTimeout(r, delayConfig.action));
           }
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} ${heroName}图鉴升星完成：${completed}次`,
+            type: "success",
+          });
+        }
+
+        const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const remainingPlan = getBookUpgradePlan(latestRoleInfo);
+        if (remainingPlan.length > 0 && !shouldStop.value) {
+          throw new Error(
+            `仍有${remainingPlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次图鉴升星未完成`,
+          );
         }
 
         tokenStatus.value[tokenId] = "completed";
@@ -2416,16 +2475,6 @@ export function createTasksItem(deps) {
     const isRateLimitError = (error) =>
       getErrorMessage(error).includes("200400") ||
       getErrorMessage(error).includes("操作太快");
-    const lastBookActionAt = new Map();
-    const waitForBookActionInterval = async (tokenId) => {
-      const lastActionAt = lastBookActionAt.get(tokenId) || 0;
-      const waitMs = Math.max(
-        0,
-        HERO_STAR_ACTION_DELAY_MS - (Date.now() - lastActionAt),
-      );
-      if (waitMs > 0) await sleep(waitMs);
-      lastBookActionAt.set(tokenId, Date.now());
-    };
     const useInBatches = async ({
       tokenId,
       itemId,
@@ -2562,13 +2611,9 @@ export function createTasksItem(deps) {
             params,
             HELPER_COMMAND_TIMEOUT_MS,
           );
-          const succeeded = Boolean(
-            result &&
-              (result.code === 0 ||
-                result.success === true ||
-                result.result === 0),
-          );
-          if (!succeeded) throw new Error(`${command}执行失败`);
+          if (!isSuccessfulBookCommand(result)) {
+            throw new Error(`${command}执行失败`);
+          }
           return result;
         } catch (error) {
           if (!isRateLimitError(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
@@ -2580,20 +2625,38 @@ export function createTasksItem(deps) {
       return null;
     };
     const upgradeHeroBooks = async (tokenId) => {
+      const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+      const upgradePlan = getBookUpgradePlan(roleInfo);
       let upgraded = 0;
-      for (const heroId of heroIds) {
-        if (shouldStop.value) break;
-        // 没有可查询的图鉴升星进度接口，沿用现有逻辑：成功则继续，失败则换下一个武将。
-        for (let attempt = 0; attempt < 10 && !shouldStop.value; attempt += 1) {
-          try {
-            await executeBookCommand(tokenId, "book_upgrade", { heroId });
-            upgraded += 1;
-          } catch (error) {
-            break;
-          }
+      for (const { heroId, upgradeCount } of upgradePlan) {
+        for (
+          let index = 0;
+          index < upgradeCount && !shouldStop.value;
+          index += 1
+        ) {
+          await executeBookCommand(tokenId, "book_upgrade", { heroId });
+          upgraded += 1;
         }
       }
-      return upgraded;
+
+      const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+      const remainingPlan = getBookUpgradePlan(latestRoleInfo);
+      if (remainingPlan.length > 0 && !shouldStop.value) {
+        throw new Error(
+          `图鉴升星校验失败，仍有${remainingPlan.reduce(
+            (sum, item) => sum + item.upgradeCount,
+            0,
+          )}次未完成`,
+        );
+      }
+      return {
+        upgraded,
+        heroCount: upgradePlan.length,
+        planned: upgradePlan.reduce(
+          (sum, item) => sum + item.upgradeCount,
+          0,
+        ),
+      };
     };
     const claimBookRewards = async (tokenId) => {
       let claimed = 0;
@@ -2829,10 +2892,10 @@ export function createTasksItem(deps) {
             message: `${tokenName} 开始执行图鉴升星`,
             type: "info",
           });
-          const upgradedBookCount = await upgradeHeroBooks(tokenId);
+          const bookUpgradeResult = await upgradeHeroBooks(tokenId);
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 图鉴升星完成：成功${upgradedBookCount}次，开始领取图鉴奖励`,
+            message: `${tokenName} 图鉴升星完成：检测${bookUpgradeResult.heroCount}名武将，计划${bookUpgradeResult.planned}次，成功${bookUpgradeResult.upgraded}次；开始领取图鉴奖励`,
             type: "success",
           });
           const claimedBookRewardCount = await claimBookRewards(tokenId);
