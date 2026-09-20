@@ -8,6 +8,8 @@ const createSmartBoxScenario = ({
   claimRewards = [],
   groupCount = 1,
   selectedTypes = [2002, 2003, 2004],
+  currentProgress = 0,
+  completedRounds = 0,
 }) => {
   const tokenId = "token-1";
   const token = { id: tokenId, name: "测试账号" };
@@ -20,6 +22,8 @@ const createSmartBoxScenario = ({
   const commands = [];
   const logs = [];
   let rewardIndex = 0;
+  let boxWeekProgress = currentProgress;
+  let boxWeekCompletedRounds = completedRounds;
 
   const getRoleInfo = () => ({
     role: {
@@ -37,6 +41,21 @@ const createSmartBoxScenario = ({
         return getRoleInfo();
       }
 
+      if (cmd === "activity_get") {
+        return {
+          activity: {
+            myTotalInfo: {
+              2: {
+                num: boxWeekProgress,
+                rounds: boxWeekCompletedRounds + 1,
+                complete: { 4: boxWeekCompletedRounds },
+              },
+            },
+            activity: [{ id: 2, data: { rewards: Array(5).fill({}) } }],
+          },
+        };
+      }
+
       if (cmd === "item_openbox") {
         const currentQuantity = items.get(params.itemId) || 0;
         assert.ok(
@@ -44,11 +63,24 @@ const createSmartBoxScenario = ({
           `开箱库存不足：${params.itemId} 当前${currentQuantity}，需要${params.number}`,
         );
         items.set(params.itemId, currentQuantity - params.number);
+        const points = { 2001: 1, 2002: 10, 2003: 20, 2004: 50 }[
+          params.itemId
+        ];
+        boxWeekProgress = Math.min(
+          8000,
+          boxWeekProgress + params.number * points,
+        );
       }
 
       if (cmd === "item_batchclaimboxpointreward") {
         const reward = claimRewards[rewardIndex++] || 0;
         items.set(2003, (items.get(2003) || 0) + reward);
+      }
+
+      if (cmd === "activity_claimweekactreward") {
+        assert.equal(boxWeekProgress, 8000);
+        boxWeekCompletedRounds += 1;
+        boxWeekProgress = 0;
       }
 
       return {};
@@ -102,9 +134,11 @@ test("起始达到4000分后，按累计开箱分数完成8000分", async () => 
 
   assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 2);
   assert.equal(
-    scenario.logs.some((entry) => entry.message.includes("累计7500/8000分")),
+    scenario.logs.some((entry) => entry.message.includes("服务器进度7500/8000")),
     true,
   );
+  assert.equal(countCommands(scenario.commands, "activity_get"), 3);
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
   assert.equal(
     scenario.logs.some((entry) => entry.message.includes("完成1/1组")),
     true,
@@ -165,7 +199,7 @@ test("起始积分不足4000分时，不开始开箱和领取奖励", async () =
   assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
   assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 0);
   assert.equal(
-    scenario.logs.some((entry) => entry.message.includes("起始宝箱积分3980不足4000")),
+    scenario.logs.some((entry) => entry.message.includes("需要4000分，当前选中宝箱仅3980分")),
     true,
   );
   assert.equal(scenario.logs.some((entry) => entry.message.includes("完成0/1组")), true);
@@ -185,6 +219,7 @@ test("木质宝箱按每批10个开箱", async () => {
   assert.equal(openingCommands.length, 800);
   assert.equal(openingCommands.every((item) => item.params.number === 10), true);
   assert.equal(scenario.logs.some((entry) => entry.message.includes("完成1/1组")), true);
+  assert.equal(scenario.getRoleInfo().role.items[2001].quantity, 200);
 });
 
 test("配置两组时，完成两组8000分开箱", async () => {
@@ -199,5 +234,87 @@ test("配置两组时，完成两组8000分开箱", async () => {
     scenario.logs.some((entry) => entry.message.includes("完成2/2组")),
     true,
   );
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 2);
+});
+
+test("根据服务器当前进度只开启补足8000分所需的宝箱", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2003: 250 },
+    currentProgress: 3000,
+  });
+
+  await scenario.run();
+
+  const openedCount = scenario.commands
+    .filter((item) => item.cmd === "item_openbox")
+    .reduce((total, item) => total + item.params.number, 0);
+  assert.equal(openedCount, 250);
+  assert.equal(scenario.getRoleInfo().role.items[2003].quantity, 0);
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
+});
+
+test("当前进度7500时只补开500分", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2004: 10 },
+    currentProgress: 7500,
+  });
+
+  await scenario.run();
+
+  const openedCount = scenario.commands
+    .filter((item) => item.cmd === "item_openbox")
+    .reduce((total, item) => total + item.params.number, 0);
+  assert.equal(openedCount, 10);
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
+
+test("当前进度8000时不再开箱并直接领取本轮万能红", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2003: 0 },
+    currentProgress: 8000,
+  });
+
+  await scenario.run();
+
+  assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 1);
+  const rewardCommand = scenario.commands.find(
+    (item) => item.cmd === "activity_claimweekactreward",
+  );
+  assert.deepEqual(rewardCommand.params, {
+    selectRewardsMap: { 0: 1 },
+    typ: 2,
+  });
+});
+
+test("本周已完成三轮时即使配置四轮也只执行最后一轮", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2003: 400 },
+    groupCount: 4,
+    completedRounds: 3,
+  });
+
+  await scenario.run();
+
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
+  assert.equal(
+    scenario.logs.some((entry) => entry.message.includes("本周已完成3/4轮，本次执行1轮")),
+    true,
+  );
+});
+
+test("本周已完成四轮时不再开箱", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2003: 400 },
+    groupCount: 4,
+    completedRounds: 4,
+  });
+
+  await scenario.run();
+
+  assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 0);
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
 });

@@ -76,7 +76,13 @@ export function createTasksItem(deps) {
   const getSmartBoxPoints = (inventory, selectedTypes) =>
     smartBoxDefinitions
       .filter((box) => selectedTypes.includes(box.id))
-      .reduce((total, box) => total + (inventory[box.id] || 0) * box.points, 0);
+      .reduce(
+        (total, box) =>
+          total +
+          Math.max(0, (inventory[box.id] || 0) - (box.reserve || 0)) *
+            box.points,
+        0,
+      );
 
   const smartBoxPointUnit = 10;
 
@@ -1995,13 +2001,43 @@ export function createTasksItem(deps) {
           .filter((id) => smartBoxDefinitions.some((box) => box.id === id)),
       ),
     );
-    const groupCount = Math.min(
+    const requestedGroupCount = Math.min(
       4,
       Math.max(1, Math.trunc(Number(taskConfig.smartBoxGroupCount) || 1)),
     );
     // 奖励领取后可能只补回少量宝箱，需要多轮补开才能凑出8000分。
     // 同时设置上限，避免奖励接口异常时任务无限循环。
     const maxCyclesPerGroup = 20;
+
+    const getBoxWeekState = (activityResult) => {
+      const activity =
+        activityResult?.activity ||
+        activityResult?.data?.activity ||
+        activityResult?.body?.activity;
+      const info = activity?.myTotalInfo?.["2"];
+      if (!info) return { completedRounds: 0, currentProgress: 0 };
+
+      const complete = info.complete || {};
+      const boxActivity = activity.activity?.find(
+        (item) => Number(item?.id) === 2,
+      );
+      const rewardCount = boxActivity?.data?.rewards?.length || 5;
+      const finalRewardIndex = rewardCount - 1;
+      const completedByFinalReward =
+        Number(complete[String(finalRewardIndex)]) || 0;
+      const completedByCurrentRound = Math.max(
+        0,
+        (Number(info.rounds) || 1) - 1,
+      );
+
+      return {
+        completedRounds: Math.min(
+          4,
+          Math.max(completedByFinalReward, completedByCurrentRound),
+        ),
+        currentProgress: Math.min(8000, Math.max(0, Number(info.num) || 0)),
+      };
+    };
 
     isRunning.value = true;
     shouldStop.value = false;
@@ -2101,128 +2137,184 @@ export function createTasksItem(deps) {
           throw new Error("至少选择一种宝箱类型");
         }
 
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `=== 开始智能宝箱周任务：${token.name}，目标${groupCount}组 ===`,
-          type: "info",
-        });
         await ensureConnection(tokenId);
 
-        let completedGroups = 0;
-        let cycle = 0;
-        let cyclesForCurrentGroup = 0;
-        let currentGroupStarted = false;
-        let accumulatedPoints = 0;
+        let activityResult = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_get",
+          {},
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+        let boxWeekState = getBoxWeekState(activityResult);
+        const completedRounds = boxWeekState.completedRounds;
+        const remainingRounds = Math.max(0, 4 - completedRounds);
+        const groupCount = Math.min(requestedGroupCount, remainingRounds);
 
-        while (
-          completedGroups < groupCount &&
-          cyclesForCurrentGroup < maxCyclesPerGroup &&
-          !shouldStop.value
-        ) {
-          cycle += 1;
-          cyclesForCurrentGroup += 1;
-          const roleInfo = await fetchRoleInfo(tokenId);
-          const inventory = getSmartBoxInventory(roleInfo);
-          const selectedPoints = getSmartBoxPoints(inventory, selectedTypes);
-
+        if (groupCount === 0) {
+          tokenStatus.value[tokenId] = "completed";
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 第${completedGroups + 1}组第${cycle}轮：选中宝箱积分${selectedPoints}`,
-            type: "info",
+            message: `${token.name} 宝箱周已完成4/4轮，无需继续执行`,
+            type: "success",
           });
+          return;
+        }
 
-          if (!currentGroupStarted) {
-            if (selectedPoints < 4000) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始智能宝箱周任务：${token.name}，本周已完成${completedRounds}/4轮，本次执行${groupCount}轮 ===`,
+          type: "info",
+        });
+
+        let completedGroups = 0;
+
+        for (let groupIndex = 1; groupIndex <= groupCount; groupIndex += 1) {
+          if (shouldStop.value) return;
+
+          if (groupIndex > 1) {
+            activityResult = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "activity_get",
+              {},
+              HELPER_COMMAND_TIMEOUT_MS,
+            );
+            boxWeekState = getBoxWeekState(activityResult);
+          }
+
+          let currentProgress = boxWeekState.currentProgress;
+          let cyclesForCurrentGroup = 0;
+
+          if (currentProgress >= 8000) {
+            await claimPointsAndMail(tokenId, token);
+          }
+
+          while (
+            currentProgress < 8000 &&
+            cyclesForCurrentGroup < maxCyclesPerGroup &&
+            !shouldStop.value
+          ) {
+            cyclesForCurrentGroup += 1;
+            const roleInfo = await fetchRoleInfo(tokenId);
+            const inventory = getSmartBoxInventory(roleInfo);
+            const selectedPoints = getSmartBoxPoints(inventory, selectedTypes);
+            const requiredStartPoints = Math.max(0, 4000 - currentProgress);
+
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 第${groupIndex}/${groupCount}轮当前进度${currentProgress}/8000，选中宝箱积分${selectedPoints}`,
+              type: "info",
+            });
+
+            if (
+              cyclesForCurrentGroup === 1 &&
+              selectedPoints < requiredStartPoints
+            ) {
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${token.name} 第${completedGroups + 1}组起始宝箱积分${selectedPoints}不足4000，跳过本组任务`,
+                message: `${token.name} 第${groupIndex}轮补到4000进度需要${requiredStartPoints}分，当前选中宝箱仅${selectedPoints}分，跳过后续任务`,
                 type: "warning",
               });
               break;
             }
 
-            currentGroupStarted = true;
-            accumulatedPoints = 0;
+            const remainingPoints = 8000 - currentProgress;
+            const plan = buildSmartBoxRefillPlan(
+              inventory,
+              selectedTypes,
+              Math.min(remainingPoints, 7500),
+            );
+
+            if (!plan) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 没有满足批次要求的可开宝箱，停止任务`,
+                type: "warning",
+              });
+              break;
+            }
+
+            const beforeInventory = JSON.stringify(
+              selectedTypes.map((id) => inventory[id] || 0),
+            );
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 第${completedGroups + 1}组起始积分${selectedPoints}，开始累计开箱至8000分`,
+              message: `${token.name} 第${groupIndex}/${groupCount}轮本次开箱${plan.points}分，预计进度${Math.min(8000, currentProgress + plan.points)}/8000`,
               type: "info",
             });
-          }
+            const openedPoints = await openSmartBoxes(
+              tokenId,
+              token,
+              plan.boxes,
+              "累计开箱",
+            );
+            if (openedPoints <= 0) break;
 
-          const remainingPoints = 8000 - accumulatedPoints;
-          const plan = buildSmartBoxRefillPlan(
-            inventory,
-            selectedTypes,
-            Math.min(remainingPoints, 7500),
-          );
+            await claimPointsAndMail(tokenId, token);
 
-          if (!plan) {
+            activityResult = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "activity_get",
+              {},
+              HELPER_COMMAND_TIMEOUT_MS,
+            );
+            boxWeekState = getBoxWeekState(activityResult);
+            const refreshedProgress = boxWeekState.currentProgress;
+            const refreshedInventory = getSmartBoxInventory(
+              await fetchRoleInfo(tokenId),
+            );
+            const afterInventory = JSON.stringify(
+              selectedTypes.map((id) => refreshedInventory[id] || 0),
+            );
+
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 没有满足批次要求的可开宝箱，停止任务`,
-              type: "warning",
+              message: `${token.name} 第${groupIndex}/${groupCount}轮服务器进度${refreshedProgress}/8000`,
+              type: "info",
             });
+            currentProgress = refreshedProgress;
+
+            if (currentProgress >= 8000) break;
+
+            if (beforeInventory === afterInventory) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 领取积分和邮件后库存没有增加，停止任务避免重复执行`,
+                type: "warning",
+              });
+              break;
+            }
+          }
+
+          if (currentProgress < 8000) {
+            if (cyclesForCurrentGroup >= maxCyclesPerGroup) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 累计开箱达到${maxCyclesPerGroup}轮仍未凑够8000分，停止任务`,
+                type: "warning",
+              });
+            }
             break;
           }
 
-          const beforeInventory = JSON.stringify(
-            selectedTypes.map((id) => inventory[id] || 0),
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 第${completedGroups + 1}组本轮开箱${plan.points}分，累计${accumulatedPoints + plan.points}/8000分`,
-            type: "info",
-          });
-          const openedPoints = await openSmartBoxes(
+          await tokenStore.sendMessageWithPromise(
             tokenId,
-            token,
-            plan.boxes,
-            "累计开箱",
+            "activity_claimweekactreward",
+            {
+              selectRewardsMap: { 0: 1 },
+              typ: 2,
+            },
+            HELPER_COMMAND_TIMEOUT_MS,
           );
-          if (openedPoints <= 0) break;
-
-          accumulatedPoints += openedPoints;
-          await claimPointsAndMail(tokenId, token);
-
-          const refreshedInventory = getSmartBoxInventory(
-            await fetchRoleInfo(tokenId),
-          );
-          const afterInventory = JSON.stringify(
-            selectedTypes.map((id) => refreshedInventory[id] || 0),
-          );
-
-          if (accumulatedPoints >= 8000) {
-            completedGroups += 1;
-            currentGroupStarted = false;
-            cyclesForCurrentGroup = 0;
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 第${completedGroups}组完成，累计开箱${accumulatedPoints}分`,
-              type: "success",
-            });
-            continue;
-          }
-
-          if (beforeInventory === afterInventory) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 领取积分和邮件后库存没有增加，停止任务避免重复执行`,
-              type: "warning",
-            });
-            break;
-          }
-        }
-
-        if (
-          completedGroups < groupCount &&
-          cyclesForCurrentGroup >= maxCyclesPerGroup
-        ) {
+          completedGroups += 1;
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 累计开箱达到${maxCyclesPerGroup}轮仍未凑够8000分，停止任务`,
-            type: "warning",
+            message: `${token.name} 宝箱周第${groupIndex}/${groupCount}轮万能红自选奖励领取成功`,
+            type: "success",
           });
+          boxWeekState = {
+            completedRounds: Math.min(4, completedRounds + groupIndex),
+            currentProgress: 0,
+          };
         }
 
         tokenStatus.value[tokenId] =
