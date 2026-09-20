@@ -336,6 +336,11 @@ export function registerDefaultCommands(reg) {
       selectRewardsMap: { 1: 1 },
       typ: 1,
     })
+    .register("activity_buystoregoods", {
+      activityId: 9,
+      goodsIndex: 0,
+      buyNum: 1,
+    })
     .register("activity_recyclewarorderrewardclaim")
     // 玄武赐福活动
     .register("activity_warorderget")
@@ -1241,6 +1246,7 @@ export class XyzwWebSocketClient {
       ],
       syncrewardresp: [
         "activity_commonbuygoods",
+        "activity_buystoregoods",
         "system_buygold",
         "system_claimcdkreward",
         "discount_claimreward",

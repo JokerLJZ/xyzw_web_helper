@@ -741,6 +741,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchSmartBlackMarketWeekly"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  江湖黑市周任务
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchRedeemCodes"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -4565,6 +4572,7 @@ const taskGroupDefinitions = [
       "batchAdjustMainLevelFormation",
       "batchSmartBoxWeekly",
       "batchSmartRecruitWeekly",
+      "batchSmartBlackMarketWeekly",
       "batchRedeemCodes",
       "store_discount_purchase",
     ],
@@ -7514,6 +7522,7 @@ const {
   batchClaimBoxPointReward,
   batchSmartBoxWeekly,
   batchSmartRecruitWeekly,
+  batchSmartBlackMarketWeekly,
   batchFish,
   batchRecruit,
   batchHeroUpgrade,

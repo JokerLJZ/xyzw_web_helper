@@ -2000,6 +2000,142 @@ export function createTasksItem(deps) {
     message.success("智能招募周任务结束");
   };
 
+  /**
+   * 小号黑市周任务：购买江湖黑市指定礼包，并在金砖达标完成后领取万能红。
+   * 江湖黑市使用 activityId=9；goodsIndex=3、8按需求跳过，9购买四次。
+   */
+  const batchSmartBlackMarketWeekly = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const goodsIndices = [0, 1, 2, 4, 5, 6, 7, 9, 9, 9, 9];
+    const getGoldWeekProgress = (activityResult) => {
+      const activity =
+        activityResult?.activity ||
+        activityResult?.data?.activity ||
+        activityResult?.body?.activity;
+      const info = activity?.myTotalInfo?.["11"];
+      return Math.max(0, Number(info?.num) || 0);
+    };
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      const token = tokens.value.find((item) => item.id === tokenId);
+      tokenStatus.value[tokenId] = "running";
+
+      try {
+        if (activityWeek?.value && activityWeek.value !== "黑市周") {
+          tokenStatus.value[tokenId] = "skipped";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 当前为${activityWeek.value}，跳过江湖黑市周任务`,
+            type: "warning",
+          });
+          return;
+        }
+
+        await ensureConnection(tokenId);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始江湖黑市周任务：${token.name} ===`,
+          type: "info",
+        });
+
+        for (const goodsIndex of goodsIndices) {
+          if (shouldStop.value) return;
+
+          try {
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "activity_buystoregoods",
+              { activityId: 9, goodsIndex, buyNum: 1 },
+              HELPER_COMMAND_TIMEOUT_MS,
+            );
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 江湖黑市商品${goodsIndex}购买成功`,
+              type: "success",
+            });
+          } catch (error) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 江湖黑市商品${goodsIndex}购买失败，继续后续采购：${getErrorMessage(error)}`,
+              type: "warning",
+            });
+          }
+
+          if (delayConfig.action > 0) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, delayConfig.action),
+            );
+          }
+        }
+
+        const activityResult = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_get",
+          {},
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+        const progress = getGoldWeekProgress(activityResult);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 金砖达标当前进度：${progress}/100000`,
+          type: "info",
+        });
+
+        if (progress >= 100000) {
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "activity_claimweekactreward",
+            { selectRewardsMap: { 0: 1 }, typ: 12 },
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 金砖达标完成，万能红自选奖励领取成功`,
+            type: "success",
+          });
+        } else {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 金砖达标尚未完成，暂不领取自选奖励`,
+            type: "warning",
+          });
+        }
+
+        tokenStatus.value[tokenId] = "completed";
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 江湖黑市周任务失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("江湖黑市周任务结束");
+  };
+
   const batchSmartBoxWeekly = async (taskConfig = {}) => {
     if (selectedTokens.value.length === 0) return;
 
@@ -2618,6 +2754,7 @@ export function createTasksItem(deps) {
     batchClaimBoxPointReward,
     batchSmartBoxWeekly,
     batchSmartRecruitWeekly,
+    batchSmartBlackMarketWeekly,
     batchFish,
     batchRecruit,
     batchHeroUpgrade,
