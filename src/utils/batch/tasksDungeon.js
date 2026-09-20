@@ -66,16 +66,6 @@ export function createTasksDungeon(deps) {
     }
 
     const merchantData = roleInfo.role.dungeon.merchant;
-    const levelId = roleInfo.role.levelId || 0;
-
-    if (levelId < 4000) {
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `${token.name} 关卡数小于4000，无法购买`,
-        type: "warning",
-      });
-      return { successCount: 0, failCount: 0, skipped: true };
-    }
 
     let successCount = 0;
     let failCount = 0;

@@ -99,6 +99,56 @@ test("195层仍可挑战，推进至196层后停止并采购，采购严格晚�
   assert.equal(f.calls.at(-1).cmd, "purchase");
 });
 
+test("超过195层且主线不足4000关时仍执行梦境采购", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: now() });
+  const calls = [];
+  const role = {
+    levelId: 3999,
+    dungeon: {
+      beginTime: getDreamPeriod(now()),
+      id: 196,
+      merchant: { 1: [5] },
+      battleTeam: {},
+    },
+  };
+  const deps = {
+    selectedTokens: { value: ["low-level"] },
+    tokens: { value: [{ id: "low-level", name: "低关卡账号" }] },
+    tokenStatus: { value: {} },
+    isRunning: { value: false },
+    shouldStop: { value: false },
+    currentRunningTokenId: { value: null },
+    batchSettings: {
+      dreamPurchaseList: ["1-5"],
+      commandDelay: 0,
+      maxActive: 2,
+    },
+    tokenStore: {
+      getWebSocketStatus: () => "disconnected",
+      sendMessageWithPromise: async (_tokenId, cmd, params) => {
+        calls.push({ cmd, params });
+        if (cmd === "role_getroleinfo") return { role: structuredClone(role) };
+        if (cmd === "dungeon_buymerchant") return { reward: [{ itemId: 1 }] };
+        assert.fail(`不应发送命令 ${cmd}`);
+      },
+      closeWebSocketConnection: () => {},
+    },
+    ensureConnection: async () => {},
+    releaseConnectionSlot: () => {},
+    connectionQueue: { active: 0 },
+    addLog: () => {},
+    message: { success: () => {}, info: () => {}, warning: () => {} },
+  };
+
+  await createTasksDungeon(deps).batchmengjing();
+
+  assert.deepEqual(
+    calls.filter((call) => call.cmd === "dungeon_buymerchant"),
+    [{ cmd: "dungeon_buymerchant", params: { id: 1, index: 5, pos: 0 } }],
+  );
+  assert.equal(deps.tokenStatus.value["low-level"], "completed");
+});
+
 test("已选阵容没有吕布时不使用其他武将，仍按清单采购", async () => {
   const f = fixture();
   delete f.role.dungeon.battleTeam[0];

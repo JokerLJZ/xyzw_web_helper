@@ -738,12 +738,6 @@ export class DailyTaskRunner {
     }
 
     const merchantData = roleInfo.role.dungeon.merchant;
-    const levelId = roleInfo.role.levelId || 0;
-
-    if (levelId < 4000) {
-      this.log("关卡数小于4000，跳过梦境购买", "warning");
-      return;
-    }
 
     let successCount = 0;
     let failCount = 0;
