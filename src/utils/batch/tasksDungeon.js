@@ -1,5 +1,9 @@
 import { isDungeonOpen, merchantConfig } from "@/utils/dreamConstants";
-import { isDreamEnabled, runAutomaticDream } from "@/utils/dreamTaskRunner.js";
+import {
+  DREAM_PUSH_INTERVAL_MS,
+  isDreamEnabled,
+  runAutomaticDream,
+} from "@/utils/dreamTaskRunner.js";
 
 /**
  * 宝库、梦境类任务
@@ -337,7 +341,7 @@ export function createTasksDungeon(deps) {
           purchase: () => runDreamPurchaseForToken(tokenId, token, purchaseList),
           send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
           stopped: () => shouldStop.value,
-          pause: () => sleep(Math.max(500, Number(batchSettings.commandDelay) || 500)),
+          pause: () => sleep(DREAM_PUSH_INTERVAL_MS),
           log: (text) => addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} ${text}`, type: "info" }),
         });
         addLog({

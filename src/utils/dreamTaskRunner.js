@@ -1,7 +1,7 @@
 import { isDungeonOpen } from "./dreamConstants.js";
 
 export const DREAM_HERO_ID = 107;
-export const DREAM_PUSH_LIMIT = 195;
+export const DREAM_PUSH_INTERVAL_MS = 2000;
 
 /** 与 Token 日常配置共用同一开关及存储键，旧配置保持默认启用。 */
 export function isDreamEnabled(tokenId, storage = globalThis.localStorage) {
@@ -25,11 +25,12 @@ export function getDreamHeroes(dungeon) {
     .sort((a, b) => Number(b.attack || 0) - Number(a.attack || 0));
 }
 
-/** 自动推层：只使用吕布，超过195层停止，不消耗复活道具。 */
+/** 自动推层：只使用吕布，不消耗复活道具。 */
 export async function runDreamAutoPush({
   send, enabled = true, stopped = () => false, log = () => {},
   now = () => new Date(),
-  pause = () => new Promise((resolve) => setTimeout(resolve, 500)),
+  pause = () =>
+    new Promise((resolve) => setTimeout(resolve, DREAM_PUSH_INTERVAL_MS)),
   maxBattles = 1000,
 }) {
   if (!enabled) return { status: "skipped", reason: "该 Token 已关闭梦境功能" };
@@ -44,7 +45,6 @@ export async function runDreamAutoPush({
   const request = async (cmd, params = {}) => {
     check();
     const data = await send(cmd, params);
-    await pause();
     check();
     return data;
   };
@@ -55,9 +55,6 @@ export async function runDreamAutoPush({
   };
   let role = await fetchRole();
   let dungeon = role.dungeon;
-  if (Number(dungeon.beginTime) === period && Number(dungeon.id) > DREAM_PUSH_LIMIT) {
-    return { status: "stopped", reason: "已超过195层，跳过推层，继续采购", initialFloor: Number(dungeon.id), floor: Number(dungeon.id), battles: 0 };
-  }
   if (Number(dungeon.beginTime) !== period || !Object.values(dungeon.battleTeam || {}).some((h) => h?.heroId)) {
     const battleTeam = { 0: DREAM_HERO_ID };
     try {
@@ -79,7 +76,6 @@ export async function runDreamAutoPush({
   log(`开始自动梦境，当前第 ${initialFloor} 层`);
   while (battles < maxBattles) {
     check();
-    if (Number(dungeon.id) > DREAM_PUSH_LIMIT) return result("已超过195层，结束推层，继续采购");
     const heroes = getDreamHeroes(dungeon).filter((h) => (failures.get(h.heroId) || 0) < 3);
     const hero = heroes.find((h) => h.heroId === dungeon.activeHeroId) || heroes[0];
     if (!hero) return result("吕布未在本期阵容中、已阵亡或连续3次未推进，结束推层");
@@ -112,6 +108,10 @@ export async function runDreamAutoPush({
     } else {
       failures.set(hero.heroId, (failures.get(hero.heroId) || 0) + 1);
       log(`英雄 ${hero.heroId} ${fightResult?.isWin === false ? "战败" : "未推进"}，仍在第 ${floor} 层`);
+    }
+    if (battles < maxBattles) {
+      await pause();
+      check();
     }
   }
   return result(`已达到单次 ${maxBattles} 场上限`);

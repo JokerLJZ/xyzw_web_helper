@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isDungeonOpen } from "../src/utils/dreamConstants.js";
-import { getDreamPeriod, isDreamEnabled, runDreamAutoPush, runAutomaticDream } from "../src/utils/dreamTaskRunner.js";
+import {
+  DREAM_PUSH_INTERVAL_MS,
+  getDreamPeriod,
+  isDreamEnabled,
+  runDreamAutoPush,
+  runAutomaticDream,
+} from "../src/utils/dreamTaskRunner.js";
 import { createTasksDungeon } from "../src/utils/batch/tasksDungeon.js";
 
 const now = () => new Date("2026-09-23T10:00:00+08:00");
@@ -75,27 +81,42 @@ test("本期已选阵容不会被覆盖，增量战报不丢失英雄身份", as
   assert.equal(f.calls.some((c) => c.cmd === "dungeon_selecthero"), false);
 });
 
-test("已经超过195层时不选阵、不战斗，直接自动采购", async () => {
+test("已经超过195层时仍继续使用吕布推层，再自动采购", async () => {
   const f = fixture();
   f.role.dungeon.id = 196;
-  f.role.dungeon.battleTeam = {};
   let purchased = 0;
-  const result = await runAutomaticDream({ ...f, purchase: async () => { purchased++; } });
-  assert.equal(result.floor, 196);
-  assert.equal(result.battles, 0);
+  const result = await runAutomaticDream({
+    ...f,
+    maxBattles: 2,
+    purchase: async () => {
+      purchased++;
+    },
+  });
+  assert.equal(result.floor, 198);
+  assert.equal(result.battles, 2);
   assert.equal(purchased, 1);
-  assert.deepEqual(f.calls.map((c) => c.cmd), ["role_getroleinfo"]);
+  assert.equal(
+    f.calls.filter((c) => c.cmd === "fight_startdungeon").length,
+    2,
+  );
 });
 
-test("195层仍可挑战，推进至196层后停止并采购，采购严格晚于战斗", async () => {
+test("195层可连续向后推层，采购严格晚于全部战斗", async () => {
   const f = fixture();
   f.role.dungeon.id = 195;
-  const result = await runAutomaticDream({ ...f, purchase: async () => {
-    assert.equal(f.role.dungeon.id, 196);
-    f.calls.push({ cmd: "purchase" });
-  } });
-  assert.equal(result.battles, 1);
-  assert.equal(f.calls.filter((c) => c.cmd === "fight_startdungeon").length, 1);
+  const result = await runAutomaticDream({
+    ...f,
+    maxBattles: 3,
+    purchase: async () => {
+      assert.equal(f.role.dungeon.id, 198);
+      f.calls.push({ cmd: "purchase" });
+    },
+  });
+  assert.equal(result.battles, 3);
+  assert.equal(
+    f.calls.filter((c) => c.cmd === "fight_startdungeon").length,
+    3,
+  );
   assert.equal(f.calls.at(-1).cmd, "purchase");
 });
 
@@ -108,7 +129,8 @@ test("超过195层且主线不足4000关时仍执行梦境采购", async (t) => 
       beginTime: getDreamPeriod(now()),
       id: 196,
       merchant: { 1: [5] },
-      battleTeam: {},
+      activeHeroId: 106,
+      battleTeam: { 0: { heroId: 106, hp: 100, attack: 100 } },
     },
   };
   const deps = {
@@ -149,6 +171,21 @@ test("超过195层且主线不足4000关时仍执行梦境采购", async (t) => 
   assert.equal(deps.tokenStatus.value["low-level"], "completed");
 });
 
+test("自动梦境推层的相邻挑战固定间隔2秒", async () => {
+  assert.equal(DREAM_PUSH_INTERVAL_MS, 2000);
+  const f = fixture();
+  let pauses = 0;
+  const result = await runDreamAutoPush({
+    ...f,
+    maxBattles: 3,
+    pause: async () => {
+      pauses++;
+    },
+  });
+  assert.equal(result.battles, 3);
+  assert.equal(pauses, 2);
+});
+
 test("已选阵容没有吕布时不使用其他武将，仍按清单采购", async () => {
   const f = fixture();
   delete f.role.dungeon.battleTeam[0];
@@ -171,10 +208,13 @@ test("关闭、战斗异常或用户停止时不自动采购", async () => {
   await runAutomaticDream({ ...fixture(), enabled: false, purchase });
   await assert.rejects(runAutomaticDream({ ...fixture({ fail: "timeout" }), purchase }), /无法确认/);
   const f = fixture();
-  f.role.dungeon.id = 196;
+  f.role.dungeon.activeHeroId = 106;
+  f.role.dungeon.battleTeam = {
+    0: { heroId: 106, hp: 100, attack: 100 },
+  };
   // 推层结果已经返回，但用户在采购开始前停止。
   let checks = 0;
-  await runAutomaticDream({ ...f, purchase, stopped: () => ++checks > 2 });
+  await runAutomaticDream({ ...f, purchase, stopped: () => ++checks > 3 });
 });
 
 test("吕布阵亡后停止，不切换其他存活英雄", async () => {

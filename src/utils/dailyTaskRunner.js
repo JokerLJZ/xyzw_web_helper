@@ -1,6 +1,10 @@
 import { useTokenStore } from "@/stores/tokenStore";
 import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
-import { isDreamEnabled, runAutomaticDream } from "@/utils/dreamTaskRunner.js";
+import {
+  DREAM_PUSH_INTERVAL_MS,
+  isDreamEnabled,
+  runAutomaticDream,
+} from "@/utils/dreamTaskRunner.js";
 import { goldItemsConfig, merchantConfig } from "@/utils/dreamConstants";
 import {
   BLACK_MARKET_MODES,
@@ -807,7 +811,7 @@ export class DailyTaskRunner {
       enabled: isDreamEnabled(tokenId),
       send: (cmd, params) => this.tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
       stopped: () => this.callbacks?.shouldStop?.() === true,
-      pause: () => sleep(Math.max(500, Number(this.delaySettings.commandDelay) || 500)),
+      pause: () => sleep(DREAM_PUSH_INTERVAL_MS),
       log: (text) => this.log(text),
     });
     this.log(`自动梦境：${result.reason}，当前层数 ${result.floor ?? "未知"}`);

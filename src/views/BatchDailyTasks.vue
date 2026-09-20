@@ -910,7 +910,7 @@
               ><n-switch v-model:value="currentSettings.studyEnable" />
             </div>
             <div class="switch-row">
-              <span class="switch-label" title="仅吕布推层，超过195层跳过战斗，随后按清单采购；关闭时跳过梦境任务">自动梦境</span
+              <span class="switch-label" title="仅使用吕布推层，每次挑战间隔2秒，推层结束后按清单采购；关闭时跳过梦境任务">自动梦境</span
               ><n-switch v-model:value="currentSettings.dreamEnable" />
             </div>
             <div class="switch-row">
@@ -1039,7 +1039,7 @@
               ><n-switch v-model:value="currentTemplate.studyEnable" />
             </div>
             <div class="switch-row">
-              <span class="switch-label" title="仅吕布推层，超过195层跳过战斗，随后按清单采购；关闭时跳过梦境任务">自动梦境</span
+              <span class="switch-label" title="仅使用吕布推层，每次挑战间隔2秒，推层结束后按清单采购；关闭时跳过梦境任务">自动梦境</span
               ><n-switch v-model:value="currentTemplate.dreamEnable" />
             </div>
             <div class="switch-row">
