@@ -2541,6 +2541,24 @@ export function createTasksItem(deps) {
       new Promise((resolve) => setTimeout(resolve, delayMs));
     const isRateLimitError = (error) =>
       isHeroStarRateLimitError(error);
+    const getRoleInfoWithRetry = async (tokenId, tokenName) => {
+      for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+        try {
+          return await tokenStore.sendGetRoleInfo(tokenId);
+        } catch (error) {
+          if (!isRateLimitError(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
+            throw error;
+          }
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 查询仓库/武将状态触发200400，等待6秒后进行第${attempt + 1}次重试`,
+            type: "warning",
+          });
+          await sleep(RATE_LIMIT_RETRY_DELAY_MS);
+        }
+      }
+      throw new Error("查询角色状态重试次数已用尽");
+    };
     const useInBatches = async ({
       tokenId,
       itemId,
@@ -2553,7 +2571,7 @@ export function createTasksItem(deps) {
       let used = 0;
       while (remaining > 0 && !shouldStop.value) {
         const amount = Math.min(MAX_USE_PER_REQUEST, remaining);
-        const beforeInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const beforeInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         const beforeQuantity = getQuantity(getItems(beforeInfo), itemId);
         let consumedAmount = 0;
 
@@ -2572,11 +2590,16 @@ export function createTasksItem(deps) {
           } catch (error) {
             if (isRateLimitError(error)) {
               if (attempt >= MAX_RATE_LIMIT_RETRIES) throw error;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} 使用物品${itemId}触发200400，等待6秒后进行第${attempt + 1}次重试`,
+                type: "warning",
+              });
               await sleep(RATE_LIMIT_RETRY_DELAY_MS);
               continue;
             }
             // 请求超时或异常时先对账，防止服务器已成功却重复使用。
-            const afterInfo = await tokenStore.sendGetRoleInfo(tokenId);
+            const afterInfo = await getRoleInfoWithRetry(tokenId, tokenName);
             const afterQuantity = getQuantity(getItems(afterInfo), itemId);
             consumedAmount = Math.max(0, beforeQuantity - afterQuantity);
             if (consumedAmount > 0) break;
@@ -2625,7 +2648,7 @@ export function createTasksItem(deps) {
       let upgraded = 0;
 
       while (!shouldStop.value) {
-        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         const currentStar = getHeroStar(getHeroes(roleInfo), heroId);
         const fragmentCost = Number(starFragmentCosts[currentStar]) || 0;
         const fragmentCount = getQuantity(getItems(roleInfo), heroId);
@@ -2656,7 +2679,7 @@ export function createTasksItem(deps) {
           }
         }
 
-        const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const latestRoleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         const latestStar = getHeroStar(getHeroes(latestRoleInfo), heroId);
         if (latestStar <= currentStar) {
           throw new Error(`${heroName}升星后星级未变化`);
@@ -2695,8 +2718,8 @@ export function createTasksItem(deps) {
       }
       return null;
     };
-    const upgradeHeroBooks = async (tokenId) => {
-      const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+    const upgradeHeroBooks = async (tokenId, tokenName) => {
+      const roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
       const upgradePlan = getBookUpgradePlan(roleInfo);
       let upgraded = 0;
       for (const { heroId, upgradeCount } of upgradePlan) {
@@ -2710,7 +2733,7 @@ export function createTasksItem(deps) {
         }
       }
 
-      const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+      const latestRoleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
       const remainingPlan = getBookUpgradePlan(latestRoleInfo);
       if (remainingPlan.length > 0 && !shouldStop.value) {
         throw new Error(
@@ -2749,12 +2772,12 @@ export function createTasksItem(deps) {
       tokenName,
     }) => {
       while (!shouldStop.value) {
-        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         let targetHeroId = resolveTargetHeroId(roleInfo);
 
         // 先把已有的目标武将碎片用掉，再计算还需要转换多少万能碎片。
         await upgradeHeroStars(tokenId, targetHeroId, tokenName);
-        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         targetHeroId = resolveTargetHeroId(roleInfo);
         if (getHeroStar(getHeroes(roleInfo), targetHeroId) >= 30) break;
 
@@ -2814,7 +2837,7 @@ export function createTasksItem(deps) {
       tokenStatus.value[tokenId] = "running";
       try {
         await ensureConnection(tokenId);
-        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         const mainLevel = getMainLevel(roleInfo);
         const items = getItems(roleInfo);
         addLog({
@@ -2892,7 +2915,7 @@ export function createTasksItem(deps) {
           await sleep(ITEM_COOLDOWN_MS);
         }
 
-        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         const latestItems = getItems(roleInfo);
         const activityItemIds = getActivityPackItemIds(latestItems);
         if (activityItemIds.length > 0) {
@@ -2917,7 +2940,7 @@ export function createTasksItem(deps) {
           await sleep(ITEM_COOLDOWN_MS);
         }
 
-        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         const upgradeableHeroIds = getUpgradeableHeroIds(roleInfo);
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -2963,7 +2986,7 @@ export function createTasksItem(deps) {
             message: `${tokenName} 开始执行图鉴升星`,
             type: "info",
           });
-          const bookUpgradeResult = await upgradeHeroBooks(tokenId);
+          const bookUpgradeResult = await upgradeHeroBooks(tokenId, tokenName);
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${tokenName} 图鉴升星完成：检测${bookUpgradeResult.heroCount}名武将，计划${bookUpgradeResult.planned}次，成功${bookUpgradeResult.upgraded}次；开始领取图鉴奖励`,
@@ -2977,7 +3000,7 @@ export function createTasksItem(deps) {
           });
         }
 
-        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${tokenName} 仓库物品使用任务完成，剩余物品已重新查询`,
