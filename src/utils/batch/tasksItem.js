@@ -1724,19 +1724,18 @@ export function createTasksItem(deps) {
       startCount,
       Math.trunc(Number(taskConfig.totalCount) || 400),
     );
-    const remainingCount = totalCount - startCount;
     const requestedRoundCount = Math.min(
       4,
       Math.max(1, Math.trunc(Number(taskConfig.roundCount) || 1)),
     );
 
-    const getCompletedRecruitRounds = (activityResult) => {
+    const getRecruitWeekState = (activityResult) => {
       const activity =
         activityResult?.activity ||
         activityResult?.data?.activity ||
         activityResult?.body?.activity;
       const info = activity?.myTotalInfo?.["1"];
-      if (!info) return 0;
+      if (!info) return { completedRounds: 0, currentProgress: 0 };
 
       const complete = info.complete || {};
       const recruitActivity = activity.activity?.find(
@@ -1751,10 +1750,16 @@ export function createTasksItem(deps) {
         (Number(info.rounds) || 1) - 1,
       );
 
-      return Math.min(
-        4,
-        Math.max(completedByFinalReward, completedByCurrentRound),
-      );
+      return {
+        completedRounds: Math.min(
+          4,
+          Math.max(completedByFinalReward, completedByCurrentRound),
+        ),
+        currentProgress: Math.min(
+          totalCount,
+          Math.max(0, Number(info.num) || 0),
+        ),
+      };
     };
 
     isRunning.value = true;
@@ -1813,13 +1818,14 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
-        const activityResult = await tokenStore.sendMessageWithPromise(
+        let activityResult = await tokenStore.sendMessageWithPromise(
           tokenId,
           "activity_get",
           {},
           HELPER_COMMAND_TIMEOUT_MS,
         );
-        const completedRounds = getCompletedRecruitRounds(activityResult);
+        let recruitWeekState = getRecruitWeekState(activityResult);
+        const completedRounds = recruitWeekState.completedRounds;
         const remainingRounds = Math.max(0, 4 - completedRounds);
         const roundCount = Math.min(requestedRoundCount, remainingRounds);
 
@@ -1842,54 +1848,81 @@ export function createTasksItem(deps) {
         for (let roundIndex = 1; roundIndex <= roundCount; roundIndex += 1) {
           if (shouldStop.value) return;
 
+          if (roundIndex > 1) {
+            activityResult = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "activity_get",
+              {},
+              HELPER_COMMAND_TIMEOUT_MS,
+            );
+            recruitWeekState = getRecruitWeekState(activityResult);
+          }
+
+          const currentProgress = recruitWeekState.currentProgress;
+          const beforeMailCount = Math.max(0, startCount - currentProgress);
+          const progressAfterFirstStage = currentProgress + beforeMailCount;
+          const afterMailCount = Math.max(
+            0,
+            totalCount - progressAfterFirstStage,
+          );
+          const actualRecruitCount = beforeMailCount + afterMailCount;
+
           const initialRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
           const initialRecruitCount = getItemQuantity(initialRoleInfo, 1001);
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 招募周第${roundIndex}/${roundCount}轮起始招募道具${initialRecruitCount}个，启动要求${startCount}个`,
+            message: `${token.name} 招募周第${roundIndex}/${roundCount}轮当前进度${currentProgress}/${totalCount}，还需招募${actualRecruitCount}次，现有招募道具${initialRecruitCount}个`,
             type: "info",
           });
 
-          if (initialRecruitCount < startCount) {
+          if (initialRecruitCount < beforeMailCount) {
             tokenStatus.value[tokenId] = "skipped";
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 招募周第${roundIndex}轮起始数量不足${startCount}个，跳过后续任务`,
+              message: `${token.name} 招募周第${roundIndex}轮招募道具不足，补到${startCount}进度需要${beforeMailCount}个，当前仅${initialRecruitCount}个，跳过后续任务`,
               type: "warning",
             });
             return;
           }
 
-          await runRecruitBatch(
-            tokenId,
-            token,
-            startCount,
-            0,
-            roundIndex,
-            roundCount,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 招募周第${roundIndex}轮已完成${startCount}个，开始领取邮件附件`,
-            type: "info",
-          });
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "mail_claimallattachment",
-            { category: 0 },
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
-          await new Promise((resolve) =>
-            setTimeout(resolve, delayConfig.action),
-          );
-          await runRecruitBatch(
-            tokenId,
-            token,
-            remainingCount,
-            startCount,
-            roundIndex,
-            roundCount,
-          );
+          if (beforeMailCount > 0) {
+            await runRecruitBatch(
+              tokenId,
+              token,
+              beforeMailCount,
+              currentProgress,
+              roundIndex,
+              roundCount,
+            );
+          }
+
+          if (currentProgress < totalCount) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 招募周第${roundIndex}轮已达到${progressAfterFirstStage}进度，开始领取邮件附件`,
+              type: "info",
+            });
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "mail_claimallattachment",
+              { category: 0 },
+              HELPER_COMMAND_TIMEOUT_MS,
+            );
+            await new Promise((resolve) =>
+              setTimeout(resolve, delayConfig.action),
+            );
+          }
+
+          if (afterMailCount > 0) {
+            await runRecruitBatch(
+              tokenId,
+              token,
+              afterMailCount,
+              progressAfterFirstStage,
+              roundIndex,
+              roundCount,
+            );
+          }
 
           addLog({
             time: new Date().toLocaleTimeString(),
@@ -1911,6 +1944,10 @@ export function createTasksItem(deps) {
             message: `${token.name} 招募周第${roundIndex}/${roundCount}轮万能红自选奖励领取成功`,
             type: "success",
           });
+          recruitWeekState = {
+            completedRounds: Math.min(4, completedRounds + roundIndex),
+            currentProgress: 0,
+          };
         }
 
         await tokenStore.sendMessage(tokenId, "role_getroleinfo");

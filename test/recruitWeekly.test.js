@@ -9,10 +9,13 @@ const createRecruitScenario = ({
   recruitCount = 100,
   roundCount = 1,
   completedRounds = 0,
+  activityProgress = 0,
 }) => {
   const tokenId = "token-1";
   const token = { id: tokenId, name: "测试账号" };
   let currentRecruitItemCount = recruitItemCount;
+  let currentCompletedRounds = completedRounds;
+  let currentActivityProgress = activityProgress;
   const commands = [];
   const logs = [];
 
@@ -36,13 +39,14 @@ const createRecruitScenario = ({
           activity: {
             myTotalInfo: {
               1: {
-                rounds: Math.min(4, completedRounds + 1),
+                num: currentActivityProgress,
+                rounds: Math.min(4, currentCompletedRounds + 1),
                 complete:
-                  completedRounds > 0
+                  currentCompletedRounds > 0
                     ? Object.fromEntries(
                         Array.from({ length: 5 }, (_, index) => [
                           index,
-                          completedRounds,
+                          currentCompletedRounds,
                         ]),
                       )
                     : {},
@@ -58,10 +62,16 @@ const createRecruitScenario = ({
           `招募道具不足：当前${currentRecruitItemCount}，需要${params.recruitNumber}`,
         );
         currentRecruitItemCount -= params.recruitNumber;
+        currentActivityProgress += params.recruitNumber;
       }
 
       if (cmd === "mail_claimallattachment") {
         currentRecruitItemCount += 40;
+      }
+
+      if (cmd === "activity_claimweekactreward") {
+        currentCompletedRounds += 1;
+        currentActivityProgress = 0;
       }
 
       return {};
@@ -143,7 +153,7 @@ test("招募周按360次、领取邮件、再完成40次", async () => {
   assert.equal(scenario.getRoleInfo().role.items[1001].quantity, 0);
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
   assert.equal(
-    scenario.logs.some((entry) => entry.message.includes("已完成360个，开始领取邮件附件")),
+    scenario.logs.some((entry) => entry.message.includes("已达到360进度，开始领取邮件附件")),
     true,
   );
 });
@@ -289,4 +299,57 @@ test("已完成三轮时最多再执行一轮", async () => {
     ),
     true,
   );
+});
+
+test("当前轮已有进度时只招募剩余数量", async () => {
+  const scenario = createRecruitScenario({
+    recruitItemCount: 260,
+    activityWeek: "招募周",
+    activityProgress: 100,
+  });
+
+  await scenario.run();
+
+  const recruitCommands = getRecruitCommands(scenario.commands);
+  assert.equal(
+    recruitCommands.reduce(
+      (total, command) => total + command.params.recruitNumber,
+      0,
+    ),
+    300,
+  );
+  const mailIndex = scenario.commands.findIndex(
+    (command) => command.cmd === "mail_claimallattachment",
+  );
+  const recruitedBeforeMail = scenario.commands
+    .slice(0, mailIndex)
+    .filter((command) => command.cmd === "hero_recruit")
+    .reduce((total, command) => total + command.params.recruitNumber, 0);
+  assert.equal(recruitedBeforeMail, 260);
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
+
+test("当前轮超过360进度时领取邮件后只补到400", async () => {
+  const scenario = createRecruitScenario({
+    recruitItemCount: 0,
+    activityWeek: "招募周",
+    activityProgress: 370,
+  });
+
+  await scenario.run();
+
+  const recruitCommands = getRecruitCommands(scenario.commands);
+  assert.equal(
+    recruitCommands.reduce(
+      (total, command) => total + command.params.recruitNumber,
+      0,
+    ),
+    30,
+  );
+  assert.ok(
+    scenario.commands.findIndex(
+      (command) => command.cmd === "mail_claimallattachment",
+    ) < scenario.commands.findIndex((command) => command.cmd === "hero_recruit"),
+  );
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
 });
