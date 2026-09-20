@@ -241,6 +241,22 @@ export function createTasksItem(deps) {
       );
     });
 
+  const getHeroStarUpgradeCount = (roleInfo, heroId) => {
+    const currentStar =
+      Number(getHeroFromRoleInfo(roleInfo, heroId)?.star) || 0;
+    let fragments = getItemQuantity(roleInfo, heroId);
+    let upgradeCount = 0;
+
+    for (let star = currentStar; star < 30; star += 1) {
+      const fragmentCost = Number(starFragmentCosts[star]) || 0;
+      if (fragmentCost <= 0 || fragments < fragmentCost) break;
+      fragments -= fragmentCost;
+      upgradeCount += 1;
+    }
+
+    return { heroId, currentStar, upgradeCount };
+  };
+
   const getBookUpgradePlan = (roleInfo) =>
     heroIds
       .map((heroId) => {
@@ -317,27 +333,22 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
         let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        const upgradeableHeroIds = getUpgradeableHeroIds(roleInfo);
+        const starUpgradePlan = heroIds
+          .map((heroId) => getHeroStarUpgradeCount(roleInfo, heroId))
+          .filter(({ upgradeCount }) => upgradeCount > 0);
         addLog({
           time: new Date().toLocaleTimeString(),
           message:
-            upgradeableHeroIds.length > 0
-              ? `${token.name} 检测到${upgradeableHeroIds.length}名可升星武将：${upgradeableHeroIds.map((heroId) => HERO_DICT[heroId]?.name || heroId).join("、")}`
+            starUpgradePlan.length > 0
+              ? `${token.name} 检测到${starUpgradePlan.length}名可升星武将，共计划升星${starUpgradePlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次：${starUpgradePlan.map(({ heroId, upgradeCount }) => `${HERO_DICT[heroId]?.name || heroId}${upgradeCount}次`).join("、")}`
               : `${token.name} 当前没有可升星武将`,
           type: "info",
         });
 
-        for (const heroId of upgradeableHeroIds) {
+        for (const { heroId, upgradeCount } of starUpgradePlan) {
           if (shouldStop.value) break;
           const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
-          const initialStar = Number(getHeroFromRoleInfo(roleInfo, heroId)?.star) || 0;
-          let currentStar = initialStar;
-
-          while (!shouldStop.value && currentStar < 30) {
-            const fragmentCost = Number(starFragmentCosts[currentStar]) || 0;
-            const fragmentCount = getItemQuantity(roleInfo, heroId);
-            if (fragmentCost <= 0 || fragmentCount < fragmentCost) break;
-
+          for (let index = 0; index < upgradeCount && !shouldStop.value; index += 1) {
             let commandCompleted = false;
             for (
               let attempt = 0;
@@ -380,25 +391,27 @@ export function createTasksItem(deps) {
             }
 
             if (!commandCompleted) break;
-            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          }
+        }
+
+        if (starUpgradePlan.length > 0 && !shouldStop.value) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+          );
+          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          for (const { heroId, currentStar, upgradeCount } of starUpgradePlan) {
             const latestStar =
               Number(getHeroFromRoleInfo(roleInfo, heroId)?.star) || 0;
-            if (latestStar <= currentStar) {
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} ${heroName}升星后星级未变化，停止该武将`,
-                type: "warning",
-              });
-              break;
-            }
-            currentStar = latestStar;
-          }
-
-          if (currentStar > initialStar) {
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} ${heroName}：${initialStar}星 → ${currentStar}星`,
-              type: "success",
+              message:
+                latestStar >= currentStar + upgradeCount
+                  ? `${token.name} ${HERO_DICT[heroId]?.name || heroId}：${currentStar}星 → ${latestStar}星`
+                  : `${token.name} ${HERO_DICT[heroId]?.name || heroId}计划升星${upgradeCount}次，实际${currentStar}星 → ${latestStar}星`,
+              type:
+                latestStar >= currentStar + upgradeCount
+                  ? "success"
+                  : "warning",
             });
           }
         }
@@ -541,6 +554,40 @@ export function createTasksItem(deps) {
   };
 
   const upgradeLordToLevel = async (tokenId, tokenName, targetLevel) => {
+    const maxTransientRetries = 3;
+    const transientRetryDelayMs = 6000;
+    const isTransientLordUpgradeError = (error) =>
+      /200020|200050|200400|操作太快|未知错误|重启游戏/.test(
+        getErrorMessage(error),
+      );
+    const runLordCommand = async (command, params, actionName) => {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await tokenStore.sendMessageWithPromise(
+            tokenId,
+            command,
+            params,
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+        } catch (error) {
+          if (
+            !isTransientLordUpgradeError(error) ||
+            attempt >= maxTransientRetries
+          ) {
+            throw error;
+          }
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${actionName}触发临时错误，等待6秒后进行第${attempt + 1}次重试：${getErrorMessage(error)}`,
+            type: "warning",
+          });
+          await new Promise((resolve) =>
+            setTimeout(resolve, transientRetryDelayMs),
+          );
+        }
+      }
+    };
+
     let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
     let lord = roleInfo?.role?.lord;
     if (!lord) throw new Error("未获取到主公信息");
@@ -553,11 +600,10 @@ export function createTasksItem(deps) {
       );
 
       if (nextOrder && currentLevel >= nextOrder.level) {
-        await tokenStore.sendMessageWithPromise(
-          tokenId,
+        await runLordCommand(
           "hero_lordupgradeorder",
           {},
-          HELPER_COMMAND_TIMEOUT_MS,
+          `主公${currentOrder + 1}阶进阶`,
         );
       } else {
         const levelBoundary = Math.min(
@@ -568,11 +614,10 @@ export function createTasksItem(deps) {
         if (upgradeNum <= 0) {
           throw new Error(`主公无法继续升级（当前${currentLevel}级，${currentOrder}阶）`);
         }
-        await tokenStore.sendMessageWithPromise(
-          tokenId,
+        await runLordCommand(
           "hero_lordupgradelevel",
           { upgradeNum },
-          HELPER_COMMAND_TIMEOUT_MS,
+          `主公升级${upgradeNum}级`,
         );
       }
 
@@ -665,8 +710,9 @@ export function createTasksItem(deps) {
       tokenStatus.value[tokenId] = "waiting";
     });
 
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
-      if (shouldStop.value) return;
+    // 主公升级请求较密集，多账号串行处理，避免同一时间连续触发服务器限频。
+    for (const tokenId of selectedTokens.value) {
+      if (shouldStop.value) break;
       const token = tokens.value.find((item) => item.id === tokenId);
       const tokenName = token?.name || tokenId;
       tokenStatus.value[tokenId] = "running";
@@ -700,9 +746,7 @@ export function createTasksItem(deps) {
         tokenStore.closeWebSocketConnection(tokenId);
         releaseConnectionSlot();
       }
-    });
-
-    await Promise.all(taskPromises);
+    }
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("所选小号的主公升级任务已结束");
@@ -1070,12 +1114,18 @@ export function createTasksItem(deps) {
           });
         }
 
-        const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        const remainingPlan = getBookUpgradePlan(latestRoleInfo);
-        if (remainingPlan.length > 0 && !shouldStop.value) {
-          throw new Error(
-            `仍有${remainingPlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次图鉴升星未完成`,
+        if (upgradePlan.length > 0 && !shouldStop.value) {
+          // 完整计划执行期间不查询，最后一次操作后留出间隔再统一校验。
+          await new Promise((resolve) =>
+            setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
           );
+          const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          const remainingPlan = getBookUpgradePlan(latestRoleInfo);
+          if (remainingPlan.length > 0) {
+            throw new Error(
+              `仍有${remainingPlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次图鉴升星未完成`,
+            );
+          }
         }
 
         tokenStatus.value[tokenId] = "completed";
@@ -2497,7 +2547,7 @@ export function createTasksItem(deps) {
     const OPEN_PACK_ITEM_IDS = [
       3001, 3002, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 35011,
     ];
-    const EXCLUDED_ACTIVITY_ITEM_IDS = new Set([5054, 6001]);
+    const EXCLUDED_ACTIVITY_ITEM_IDS = new Set([5054, 5095, 6001]);
     const LVBU_ID = 107;
     const TAISHICI_ID = 106;
     const DIAOCHAN_ID = 210;
@@ -2643,56 +2693,61 @@ export function createTasksItem(deps) {
 
       return amount;
     };
-    const upgradeHeroStars = async (tokenId, heroId, tokenName) => {
-      const heroName = HERO_DICT[heroId]?.name || `武将${heroId}`;
-      let upgraded = 0;
-
-      while (!shouldStop.value) {
-        const roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-        const currentStar = getHeroStar(getHeroes(roleInfo), heroId);
-        const fragmentCost = Number(starFragmentCosts[currentStar]) || 0;
-        const fragmentCount = getQuantity(getItems(roleInfo), heroId);
-        if (currentStar >= 30 || fragmentCost <= 0 || fragmentCount < fragmentCost) {
-          break;
-        }
-
-        for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
-          try {
-            await waitForHeroStarInterval(tokenId);
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "hero_heroupgradestar",
-              { heroId },
-              HELPER_COMMAND_TIMEOUT_MS,
-            );
-            break;
-          } catch (error) {
-            if (!isRateLimitError(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
-              throw error;
+    const executeHeroStarPlan = async (tokenId, tokenName, plan) => {
+      for (const { heroId, upgradeCount } of plan) {
+        const heroName = HERO_DICT[heroId]?.name || `武将${heroId}`;
+        for (
+          let index = 0;
+          index < upgradeCount && !shouldStop.value;
+          index += 1
+        ) {
+          for (
+            let attempt = 0;
+            attempt <= MAX_RATE_LIMIT_RETRIES;
+            attempt += 1
+          ) {
+            try {
+              await waitForHeroStarInterval(tokenId);
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "hero_heroupgradestar",
+                { heroId },
+                HELPER_COMMAND_TIMEOUT_MS,
+              );
+              break;
+            } catch (error) {
+              if (
+                !isRateLimitError(error) ||
+                attempt >= MAX_RATE_LIMIT_RETRIES
+              ) {
+                throw error;
+              }
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} ${heroName}升星触发200400，等待6秒后进行第${attempt + 1}次重试`,
+                type: "warning",
+              });
+              await sleep(RATE_LIMIT_RETRY_DELAY_MS);
             }
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${tokenName} ${heroName}升星触发200400，等待6秒后进行第${attempt + 1}次重试`,
-              type: "warning",
-            });
-            await sleep(RATE_LIMIT_RETRY_DELAY_MS);
           }
         }
-
-        const latestRoleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-        const latestStar = getHeroStar(getHeroes(latestRoleInfo), heroId);
-        if (latestStar <= currentStar) {
-          throw new Error(`${heroName}升星后星级未变化`);
-        }
-
-        upgraded += latestStar - currentStar;
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${tokenName} ${heroName}已升至${latestStar}星`,
-          type: "success",
-        });
       }
+    };
+    const upgradeHeroStars = async (tokenId, heroId, tokenName) => {
+      const roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
+      const planItem = getHeroStarUpgradeCount(roleInfo, heroId);
+      if (planItem.upgradeCount <= 0) return 0;
 
+      await executeHeroStarPlan(tokenId, tokenName, [planItem]);
+      await sleep(HERO_STAR_ACTION_DELAY_MS);
+      const latestRoleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
+      const latestStar = getHeroStar(getHeroes(latestRoleInfo), heroId);
+      const upgraded = Math.max(0, latestStar - planItem.currentStar);
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} ${HERO_DICT[heroId]?.name || heroId}计划升星${planItem.upgradeCount}次，实际${planItem.currentStar}星 → ${latestStar}星`,
+        type: upgraded >= planItem.upgradeCount ? "success" : "warning",
+      });
       return upgraded;
     };
     const executeBookCommand = async (tokenId, command, params) => {
@@ -2733,15 +2788,19 @@ export function createTasksItem(deps) {
         }
       }
 
-      const latestRoleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-      const remainingPlan = getBookUpgradePlan(latestRoleInfo);
-      if (remainingPlan.length > 0 && !shouldStop.value) {
-        throw new Error(
-          `图鉴升星校验失败，仍有${remainingPlan.reduce(
-            (sum, item) => sum + item.upgradeCount,
-            0,
-          )}次未完成`,
-        );
+      if (upgradePlan.length > 0 && !shouldStop.value) {
+        // 完整计划执行期间不查询，结束后统一查询一次实际结果。
+        await sleep(HERO_STAR_ACTION_DELAY_MS);
+        const latestRoleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
+        const remainingPlan = getBookUpgradePlan(latestRoleInfo);
+        if (remainingPlan.length > 0) {
+          throw new Error(
+            `图鉴升星校验失败，仍有${remainingPlan.reduce(
+              (sum, item) => sum + item.upgradeCount,
+              0,
+            )}次未完成`,
+          );
+        }
       }
       return {
         upgraded,
@@ -2941,34 +3000,32 @@ export function createTasksItem(deps) {
         }
 
         roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-        const upgradeableHeroIds = getUpgradeableHeroIds(roleInfo);
+        const starUpgradePlan = heroIds
+          .map((heroId) => getHeroStarUpgradeCount(roleInfo, heroId))
+          .filter(({ upgradeCount }) => upgradeCount > 0);
         addLog({
           time: new Date().toLocaleTimeString(),
           message:
-            upgradeableHeroIds.length > 0
-              ? `${tokenName} 仓库物品处理完成，检测到${upgradeableHeroIds.length}名可升星武将：${upgradeableHeroIds.map((heroId) => HERO_DICT[heroId]?.name || heroId).join("、")}`
+            starUpgradePlan.length > 0
+              ? `${tokenName} 仓库物品处理完成，检测到${starUpgradePlan.length}名可升星武将，共计划升星${starUpgradePlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次：${starUpgradePlan.map(({ heroId, upgradeCount }) => `${HERO_DICT[heroId]?.name || heroId}${upgradeCount}次`).join("、")}`
               : `${tokenName} 仓库物品处理完成，当前没有可升星武将`,
           type: "info",
         });
         let upgradedHeroCount = 0;
         let upgradedStarCount = 0;
-        for (const heroId of upgradeableHeroIds) {
-          if (shouldStop.value) break;
-          try {
-            const upgraded = await upgradeHeroStars(
-              tokenId,
-              heroId,
-              tokenName,
-            );
-            if (upgraded > 0) {
-              upgradedHeroCount += 1;
-              upgradedStarCount += upgraded;
-            }
-          } catch (error) {
+        if (starUpgradePlan.length > 0 && !shouldStop.value) {
+          await executeHeroStarPlan(tokenId, tokenName, starUpgradePlan);
+          await sleep(HERO_STAR_ACTION_DELAY_MS);
+          const latestRoleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
+          for (const { heroId, currentStar, upgradeCount } of starUpgradePlan) {
+            const latestStar = getHeroStar(getHeroes(latestRoleInfo), heroId);
+            const upgraded = Math.max(0, latestStar - currentStar);
+            if (upgraded > 0) upgradedHeroCount += 1;
+            upgradedStarCount += upgraded;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${tokenName} ${HERO_DICT[heroId]?.name || heroId}升星失败，继续下一武将：${getErrorMessage(error)}`,
-              type: "warning",
+              message: `${tokenName} ${HERO_DICT[heroId]?.name || heroId}计划升星${upgradeCount}次，实际${currentStar}星 → ${latestStar}星`,
+              type: upgraded >= upgradeCount ? "success" : "warning",
             });
           }
         }
