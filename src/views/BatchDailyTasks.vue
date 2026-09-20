@@ -748,6 +748,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchUseWarehouseItems"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  使用仓库物品
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchRedeemCodes"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -4573,6 +4580,7 @@ const taskGroupDefinitions = [
       "batchSmartBoxWeekly",
       "batchSmartRecruitWeekly",
       "batchSmartBlackMarketWeekly",
+      "batchUseWarehouseItems",
       "batchRedeemCodes",
       "store_discount_purchase",
     ],
@@ -7523,6 +7531,7 @@ const {
   batchSmartBoxWeekly,
   batchSmartRecruitWeekly,
   batchSmartBlackMarketWeekly,
+  batchUseWarehouseItems,
   batchFish,
   batchRecruit,
   batchHeroUpgrade,

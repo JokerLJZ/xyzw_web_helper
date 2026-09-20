@@ -51,6 +51,7 @@ export const availableTasks = [
   { label: "智能宝箱周任务", value: "batchSmartBoxWeekly" },
   { label: "智能招募周任务", value: "batchSmartRecruitWeekly" },
   { label: "江湖黑市周任务", value: "batchSmartBlackMarketWeekly" },
+  { label: "使用仓库物品", value: "batchUseWarehouseItems" },
   { label: "自动兑换码", value: "batchRedeemCodes" },
   { label: "批量钓鱼", value: "batchFish" },
   { label: "批量招募", value: "batchRecruit" },

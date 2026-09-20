@@ -2147,6 +2147,171 @@ export function createTasksItem(deps) {
     message.success("江湖黑市周任务结束");
   };
 
+  /** 小号任务：按规则消耗仓库内可使用物品。 */
+  const batchUseWarehouseItems = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const MAX_USE_PER_REQUEST = 999;
+    const GOLD_BAG_ITEM_ID = 3002;
+    const UNIVERSAL_RED_ITEM_ID = 3201;
+    const UNIVERSAL_ORANGE_ITEM_ID = 3302;
+    const LVBU_ID = 107;
+    const TAISHICI_ID = 106;
+    const DIAOCHAN_ID = 210;
+    const getRole = (result) =>
+      result?.role || result?.data?.role || result?.body?.role || result?.data?.body?.role || {};
+    const getItems = (result) => getRole(result).items || {};
+    const getHeroes = (result) => getRole(result).heroes || {};
+    const getQuantity = (items, itemId) => {
+      const item = items[itemId] ?? items[String(itemId)];
+      return Math.max(0, Number(item?.quantity ?? item?.count ?? item ?? 0) || 0);
+    };
+    const getMainLevel = (result) =>
+      Number(getRole(result).levelId ?? result?.levelId ?? 0) || 0;
+    const getHeroStar = (heroes, heroId) => {
+      const hero = heroes[heroId] ?? heroes[String(heroId)];
+      return Number(hero?.star ?? 0) || 0;
+    };
+    const getItemIds = (items) =>
+      Object.keys(items)
+        .map(Number)
+        .filter((itemId) => Number.isFinite(itemId) && getQuantity(items, itemId) > 0)
+        .sort((a, b) => a - b);
+    const useInBatches = async (tokenId, itemId, quantity, index, tokenName) => {
+      let remaining = Math.max(0, Math.trunc(quantity));
+      let used = 0;
+      while (remaining > 0 && !shouldStop.value) {
+        const amount = Math.min(MAX_USE_PER_REQUEST, remaining);
+        const beforeInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const beforeQuantity = getQuantity(getItems(beforeInfo), itemId);
+        let consumedAmount = 0;
+        try {
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "item_openpack",
+            { itemId, number: amount, index },
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+        } catch (openError) {
+          // 超时/异常时先对账，避免服务端已成功却再次消耗。
+          const afterOpenInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          const afterOpenQuantity = getQuantity(getItems(afterOpenInfo), itemId);
+          consumedAmount = Math.max(0, beforeQuantity - afterOpenQuantity);
+          if (consumedAmount <= 0) {
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "item_consume",
+              { itemId, quantity: amount },
+              HELPER_COMMAND_TIMEOUT_MS,
+            );
+          }
+        }
+        const actualUsed = consumedAmount > 0 ? consumedAmount : amount;
+        used += actualUsed;
+        remaining -= actualUsed;
+        if (delayConfig.action > 0 && remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+        }
+      }
+      if (used > 0) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 使用物品${itemId}：${used}个${index == null ? "" : `，目标序号${index}`}`,
+          type: "success",
+        });
+      }
+      return used;
+    };
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => (tokenStatus.value[id] = "waiting"));
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      tokenStatus.value[tokenId] = "running";
+      try {
+        await ensureConnection(tokenId);
+        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const mainLevel = getMainLevel(roleInfo);
+        const heroes = getHeroes(roleInfo);
+        const items = getItems(roleInfo);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 当前主线关卡${mainLevel}，开始使用仓库物品`,
+          type: "info",
+        });
+
+        const redQuantity = getQuantity(items, UNIVERSAL_RED_ITEM_ID);
+        const lvbuStar = getHeroStar(heroes, LVBU_ID);
+        const redTarget = lvbuStar < 30 ? LVBU_ID : TAISHICI_ID;
+        const redTargetIndex = redTarget - 101;
+        if (redQuantity > 0 && lvbuStar < 30) {
+          await useInBatches(tokenId, UNIVERSAL_RED_ITEM_ID, redQuantity, redTargetIndex, tokenName);
+        } else if (redQuantity > 0) {
+          await useInBatches(tokenId, UNIVERSAL_RED_ITEM_ID, redQuantity, TAISHICI_ID - 101, tokenName);
+        }
+
+        const orangeQuantity = getQuantity(items, UNIVERSAL_ORANGE_ITEM_ID);
+        if (orangeQuantity > 0) {
+          await useInBatches(tokenId, UNIVERSAL_ORANGE_ITEM_ID, orangeQuantity, DIAOCHAN_ID - 201, tokenName);
+        }
+
+        if (mainLevel >= 7200) {
+          const goldBagQuantity = getQuantity(items, GOLD_BAG_ITEM_ID);
+          if (goldBagQuantity > 0) {
+            await useInBatches(tokenId, GOLD_BAG_ITEM_ID, goldBagQuantity, 0, tokenName);
+          }
+        } else if (getQuantity(items, GOLD_BAG_ITEM_ID) > 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 主线未达到7200，跳过金砖袋使用`,
+            type: "warning",
+          });
+        }
+
+        const handled = new Set([UNIVERSAL_RED_ITEM_ID, UNIVERSAL_ORANGE_ITEM_ID, GOLD_BAG_ITEM_ID]);
+        for (const itemId of getItemIds(items)) {
+          if (handled.has(itemId) || shouldStop.value) continue;
+          const quantity = getQuantity(items, itemId);
+          try {
+            await useInBatches(tokenId, itemId, quantity, 0, tokenName);
+          } catch (error) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 物品${itemId}无法直接使用，已跳过：${getErrorMessage(error)}`,
+              type: "warning",
+            });
+          }
+        }
+
+        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 仓库物品使用任务完成，剩余物品已重新查询`,
+          type: "success",
+        });
+        tokenStatus.value[tokenId] = "completed";
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 使用仓库物品失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("仓库物品使用任务结束");
+  };
+
   const batchSmartBoxWeekly = async (taskConfig = {}) => {
     if (selectedTokens.value.length === 0) return;
 
@@ -2777,6 +2942,7 @@ export function createTasksItem(deps) {
     batchSmartBoxWeekly,
     batchSmartRecruitWeekly,
     batchSmartBlackMarketWeekly,
+    batchUseWarehouseItems,
     batchFish,
     batchRecruit,
     batchHeroUpgrade,
