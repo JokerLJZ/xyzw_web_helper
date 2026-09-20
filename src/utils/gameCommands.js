@@ -579,6 +579,22 @@ export class GameCommands {
     };
   }
 
+  /** 升级梦魇水晶。 */
+  trump_upgrade(ack = 0, seq = 0, params = {}) {
+    return {
+      ack,
+      body: this.g_utils.bon.encode({
+        heroId: params.heroId,
+        isLocked: params.isLocked ?? true,
+        isTrans: false,
+        ...params,
+      }),
+      cmd: "trump_upgrade",
+      seq,
+      time: Date.now(),
+    };
+  }
+
   /**
    * 军团匹配角色报名
    *

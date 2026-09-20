@@ -46,6 +46,105 @@ export function createTasksItem(deps) {
 
   const fishNames = { 1: "普通鱼竿", 2: "黄金鱼竿" };
 
+  /** 升级指定武将的梦魇水晶，直到资源不足或服务器拒绝继续升级。 */
+  const batchUpgradeCrystal = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const heroId = Number(batchSettings.crystalHeroId);
+    if (!Number.isSafeInteger(heroId) || !HERO_DICT[heroId]) {
+      message.warning("请先在任务设置中选择水晶所属武将");
+      return;
+    }
+
+    const heroName = HERO_DICT[heroId].name;
+    const isLocked = batchSettings.crystalLockAttribute !== false;
+    const maxUpgradeAttempts = 10000;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      let upgraded = 0;
+      let stopReason = "";
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${tokenName} 开始升级${heroName}水晶（${isLocked ? "锁定当前属性" : "不锁定属性"}） ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        while (!shouldStop.value && upgraded < maxUpgradeAttempts) {
+          try {
+            const result = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "trump_upgrade",
+              { heroId, isLocked, isTrans: false },
+              10000,
+            );
+            const resultMessage = result?.msg || result?.message || result?.error || "";
+            if (result?.error || (result?.code !== undefined && result.code !== 0)) {
+              throw new Error(resultMessage || `服务器返回错误码 ${result.code}`);
+            }
+            upgraded += 1;
+
+            if (upgraded % 10 === 0) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} ${heroName}水晶已连续升级 ${upgraded} 次`,
+                type: "info",
+              });
+            }
+
+            await new Promise((resolve) =>
+              setTimeout(resolve, delayConfig.command),
+            );
+          } catch (error) {
+            stopReason = getErrorMessage(error) || "资源不足或无法继续升级";
+            break;
+          }
+        }
+
+        if (shouldStop.value) stopReason = "用户停止任务";
+        if (upgraded >= maxUpgradeAttempts) {
+          stopReason = `达到安全上限 ${maxUpgradeAttempts} 次`;
+        }
+
+        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} ${heroName}水晶升级结束：成功${upgraded}次，停止原因：${stopReason || "无法继续升级"}`,
+          type: upgraded > 0 ? "success" : "warning",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} ${heroName}水晶升级失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+    message.success("批量水晶升级任务结束");
+  };
+
   const smartBoxDefinitions = [
     { id: 2001, name: "木质宝箱", points: 1, batchSize: 10, reserve: 200 },
     { id: 2002, name: "青铜宝箱", points: 10, batchSize: 10 },
@@ -3876,6 +3975,7 @@ export function createTasksItem(deps) {
   };
 
   return {
+    batchUpgradeCrystal,
     batchOpenBox,
     batchOpenBoxByPoints,
     batchClaimBoxPointReward,

@@ -65,6 +65,7 @@ export const availableTasks = [
   { label: "一键钓鱼补齐", value: "batchTopUpFish" },
   { label: "一键金鱼杆补齐", value: "batchTopUpGoldFish" },
   { label: "批量加入俱乐部", value: "batchJoinLegion" },
+  { label: "水晶升级至资源不足", value: "batchUpgradeCrystal" },
   { label: "一键竞技场补齐", value: "batchTopUpArena" },
   { label: "一键换皮闯关", value: "skinChallenge" },
   { label: "一键购买四圣碎片", value: "legion_storebuygoods" },
@@ -157,6 +158,8 @@ export const defaultSettings = {
 // 默认批量设置
 export const defaultBatchSettings = {
   legionId: null,
+  crystalHeroId: 107,
+  crystalLockAttribute: true,
   redemptionCodeMode: REDEMPTION_CODE_MODES.DEFAULT,
   customRedemptionCodes: "",
   boxCount: 100,

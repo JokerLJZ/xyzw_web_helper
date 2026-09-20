@@ -714,6 +714,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchUpgradeCrystal"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="武将和属性锁定方式请在任务设置中选择"
+                >
+                  水晶升级至资源不足
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchTopUpGoldFish"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -2432,6 +2440,26 @@
                   size="small"
                   style="width: 140px"
                 />
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">水晶所属武将</label>
+                <n-select
+                  v-model:value="batchSettings.crystalHeroId"
+                  :options="heroLevelUpgradeHeroOptions"
+                  filterable
+                  size="small"
+                  style="width: 180px"
+                />
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">锁定当前水晶属性</label>
+                <n-switch v-model:value="batchSettings.crystalLockAttribute" />
               </div>
               <div
                 class="setting-item"
@@ -4292,6 +4320,8 @@ for (const merchantId in goldItemsConfig) {
 
 const batchSettings = reactive({
   legionId: null,
+  crystalHeroId: 107,
+  crystalLockAttribute: true,
   dreamPurchaseList: defaultDreamPurchaseList,
   redemptionCodeMode: "default",
   customRedemptionCodes: "",
@@ -4664,6 +4694,7 @@ const taskGroupDefinitions = [
     label: "小号任务",
     tasks: [
       "batchJoinLegion",
+      "batchUpgradeCrystal",
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
       "batchAdjustEarlyMainLevelFormation",
@@ -7636,6 +7667,7 @@ const {
   batchClaimStarRewards,
   batchClaimPeachTasks,
   batchGenieSweep,
+  batchUpgradeCrystal,
 } = tasksItem;
 
 const confirmUpgradeLordTo6000 = () => {
