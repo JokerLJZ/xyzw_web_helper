@@ -1782,27 +1782,39 @@ export function createTasksItem(deps) {
       roundIndex,
       roundCount,
     ) => {
-      await runInventoryVerifiedGameCommand({
-        tokenStore,
-        tokenId,
-        cmd: "hero_recruit",
-        itemId: 1001,
-        total: count,
-        timeout: HELPER_COMMAND_TIMEOUT_MS,
-        delayMs: delayConfig.action,
-        createParams: (amount) => ({
-          recruitType: 1,
-          recruitNumber: amount,
-        }),
-        queryInventory: () => tokenStore.sendGetRoleInfo(tokenId),
-        onProgress: (progress) => {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 招募周第${roundIndex}/${roundCount}轮进度：${progressOffset + progress.completed}/${totalCount}`,
-            type: "info",
-          });
-        },
-      });
+      const runRecruitPart = async (partCount, partOffset, batchSize) => {
+        if (partCount <= 0) return;
+
+        await runInventoryVerifiedGameCommand({
+          tokenStore,
+          tokenId,
+          cmd: "hero_recruit",
+          itemId: 1001,
+          total: partCount,
+          batchSize,
+          timeout: HELPER_COMMAND_TIMEOUT_MS,
+          delayMs: delayConfig.action,
+          createParams: (amount) => ({
+            recruitType: 1,
+            recruitNumber: amount,
+          }),
+          queryInventory: () => tokenStore.sendGetRoleInfo(tokenId),
+          onProgress: (progress) => {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 招募周第${roundIndex}/${roundCount}轮进度：${progressOffset + partOffset + progress.completed}/${totalCount}`,
+              type: "info",
+            });
+          },
+        });
+      };
+
+      // 服务端批量招募只稳定支持10次；免费招募会让周进度偏移1，
+      // 因此余数不能一次发送9次，需要拆成多个单次招募请求。
+      const fullBatchCount = Math.floor(count / 10) * 10;
+      const remainder = count - fullBatchCount;
+      await runRecruitPart(fullBatchCount, 0, 10);
+      await runRecruitPart(remainder, fullBatchCount, 1);
     };
 
     const taskPromises = selectedTokens.value.map(async (tokenId) => {

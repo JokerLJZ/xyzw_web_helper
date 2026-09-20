@@ -353,3 +353,40 @@ test("当前轮超过360进度时领取邮件后只补到400", async () => {
   );
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
 });
+
+test("免费招募导致进度为1时，剩余招募拆成单次请求", async () => {
+  const scenario = createRecruitScenario({
+    recruitItemCount: 399,
+    activityWeek: "招募周",
+    activityProgress: 1,
+  });
+
+  await scenario.run();
+
+  const recruitCommands = getRecruitCommands(scenario.commands);
+  assert.equal(
+    recruitCommands.reduce(
+      (total, command) => total + command.params.recruitNumber,
+      0,
+    ),
+    399,
+  );
+  assert.equal(
+    recruitCommands.some((command) => command.params.recruitNumber === 9),
+    false,
+  );
+  assert.equal(
+    recruitCommands.filter((command) => command.params.recruitNumber === 1)
+      .length,
+    9,
+  );
+  assert.equal(
+    scenario.commands.some(
+      (command) =>
+        command.cmd === "activity_claimweekactreward" &&
+        command.params.typ === 1,
+    ),
+    true,
+  );
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
