@@ -76,6 +76,7 @@ export const availableTasks = [
   { label: "一键领取蟠桃园任务", value: "batchClaimPeachTasks" },
   { label: "一键扫荡灯神", value: "batchGenieSweep" },
   { label: "主线关卡信息获取", value: "batchPushMainLevelInfo" },
+  { label: "小号推图默认阵容调整", value: "batchAdjustMainLevelFormation" },
   { label: "一键玄武赐福", value: "batchXuanwuBlessing" },
 ];
 

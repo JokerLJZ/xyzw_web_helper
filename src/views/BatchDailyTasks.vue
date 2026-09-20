@@ -720,6 +720,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchAdjustMainLevelFormation"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  推图默认阵容调整
+                </n-button>
+                <n-button
+                  size="small"
                   @click="openSmartBoxWeeklyModal"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -4555,6 +4562,7 @@ const taskGroupDefinitions = [
     tasks: [
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
+      "batchAdjustMainLevelFormation",
       "batchSmartBoxWeekly",
       "batchSmartRecruitWeekly",
       "batchRedeemCodes",
@@ -7510,6 +7518,7 @@ const {
   batchRecruit,
   batchHeroUpgrade,
   batchHeroLevelUpgrade,
+  batchAdjustMainLevelFormation,
   batchBookUpgrade,
   batchClaimStarRewards,
   batchClaimPeachTasks,

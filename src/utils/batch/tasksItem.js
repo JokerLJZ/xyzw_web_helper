@@ -508,6 +508,170 @@ export function createTasksItem(deps) {
     message.success(`批量升级${heroNames.join("、")}结束`);
   };
 
+  const getPresetTeamHeroes = (presetTeamResult) => {
+    const teamInfo = presetTeamResult?.presetTeamInfo;
+    const teams = teamInfo?.presetTeamInfo || teamInfo?.teams || {};
+    const activeTeamId = teamInfo?.useTeamId;
+    const activeTeam =
+      teams?.[activeTeamId] || teams?.[String(activeTeamId)] || teams;
+
+    return Object.entries(activeTeam || {})
+      .map(([key, hero]) => ({
+        heroId: Number(hero?.heroId ?? hero?.id),
+        slot: Number(hero?.battleTeamSlot ?? hero?.position ?? key),
+      }))
+      .filter(
+        (hero) => Number.isFinite(hero.heroId) && Number.isFinite(hero.slot),
+      );
+  };
+
+  const adjustMainLevelFormation = async (tokenId, tokenName) => {
+    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+    const ownedHeroIds = new Set(
+      Object.values(roleInfo?.role?.heroes || {}).map((hero) =>
+        Number(hero?.heroId ?? hero?.id),
+      ),
+    );
+    const targetHeroes = [
+      { heroId: 107, slot: 0 }, // 吕布
+      { heroId: 110, slot: 1 }, // 黄月英
+      { heroId: 104, slot: 2 }, // 诸葛亮
+      { heroId: 106, slot: 3 }, // 太史慈
+      {
+        heroId: ownedHeroIds.has(223) ? 223 : 204, // 蔡文姬，否则张飞
+        slot: 4,
+      },
+    ].filter((target) => ownedHeroIds.has(target.heroId));
+
+    const currentTeamResult = await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "presetteam_getinfo",
+      {},
+      5000,
+    );
+    const currentHeroes = getPresetTeamHeroes(currentTeamResult);
+
+    for (const hero of currentHeroes) {
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "hero_gobackbattle",
+        { slot: hero.slot },
+        5000,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+    }
+
+    for (const target of targetHeroes) {
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "hero_gointobattle",
+        { heroId: target.heroId, slot: target.slot },
+        5000,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 推图默认阵容已调整：${targetHeroes
+        .map((hero) => `${hero.slot + 1}号位${HERO_DICT[hero.heroId]?.name}`)
+        .join("、")}`,
+      type: "success",
+    });
+  };
+
+  /** 小号推图准备：按拥有情况升级武将并设置默认推图阵容。 */
+  const batchAdjustMainLevelFormation = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const upgradeGroups = [
+      {
+        targetLevel: 900,
+        heroIds: [223, 202, 204, 110, 104, 106, 116, 112, 312],
+      },
+      { targetLevel: 250, heroIds: [210, 217] },
+    ];
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      tokenStatus.value[tokenId] = "running";
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始小号推图准备: ${tokenName} ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const ownedHeroIds = new Set(
+          Object.values(roleInfo?.role?.heroes || {}).map((hero) =>
+            Number(hero?.heroId ?? hero?.id),
+          ),
+        );
+
+        for (const group of upgradeGroups) {
+          for (const heroId of group.heroIds) {
+            if (shouldStop.value) break;
+            if (!ownedHeroIds.has(heroId)) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} 未拥有${HERO_DICT[heroId].name}，跳过升级`,
+                type: "info",
+              });
+              continue;
+            }
+
+            try {
+              await upgradeSingleHero(
+                tokenId,
+                tokenName,
+                heroId,
+                group.targetLevel,
+              );
+            } catch (error) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} ${HERO_DICT[heroId].name}升级失败: ${error.message}`,
+                type: "warning",
+              });
+            }
+          }
+        }
+
+        if (!shouldStop.value) {
+          await adjustMainLevelFormation(tokenId, tokenName);
+        }
+        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 小号推图准备失败: ${error.message || "未知错误"}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("小号推图默认阵容调整完成");
+  };
+
   /**
    * 批量图鉴升星
    */
@@ -2245,6 +2409,7 @@ export function createTasksItem(deps) {
     batchRecruit,
     batchHeroUpgrade,
     batchHeroLevelUpgrade,
+    batchAdjustMainLevelFormation,
     batchBookUpgrade,
     batchClaimStarRewards,
     batchClaimPeachTasks,
