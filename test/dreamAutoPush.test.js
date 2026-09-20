@@ -4,6 +4,7 @@ import { isDungeonOpen } from "../src/utils/dreamConstants.js";
 import {
   DREAM_FINAL_FLOOR,
   DREAM_PUSH_INTERVAL_MS,
+  DREAM_RATE_LIMIT_COOLDOWN_MS,
   getDreamPeriod,
   isDreamCompleted,
   isDreamEnabled,
@@ -225,8 +226,8 @@ test("超过195层且主线不足4000关时仍执行梦境采购", async (t) => 
   assert.equal(deps.tokenStatus.value["low-level"], "completed");
 });
 
-test("自动梦境推层的相邻挑战固定间隔2秒", async () => {
-  assert.equal(DREAM_PUSH_INTERVAL_MS, 2000);
+test("自动梦境推层的相邻挑战固定间隔3秒", async () => {
+  assert.equal(DREAM_PUSH_INTERVAL_MS, 3000);
   const f = fixture();
   let pauses = 0;
   const result = await runDreamAutoPush({
@@ -238,6 +239,62 @@ test("自动梦境推层的相邻挑战固定间隔2秒", async () => {
   });
   assert.equal(result.battles, 3);
   assert.equal(pauses, 2);
+});
+
+test("梦境触发200400时冷却核对状态并只重试当前层一次", async () => {
+  assert.equal(DREAM_RATE_LIMIT_COOLDOWN_MS, 6000);
+  const f = fixture();
+  let fightCalls = 0;
+  let cooldowns = 0;
+  const send = async (cmd, params) => {
+    if (cmd === "fight_startdungeon" && fightCalls++ === 0) {
+      f.calls.push({ cmd, params });
+      throw new Error("服务器错误: 200400 - 操作太快，请稍后再试");
+    }
+    return f.send(cmd, params);
+  };
+
+  const result = await runDreamAutoPush({
+    ...f,
+    send,
+    maxBattles: 2,
+    rateLimitPause: async () => {
+      cooldowns++;
+    },
+  });
+
+  assert.equal(result.floor, 42);
+  assert.equal(result.battles, 2);
+  assert.equal(fightCalls, 2);
+  assert.equal(cooldowns, 1);
+});
+
+test("梦境限频重试仍失败时停止推层并继续采购", async () => {
+  const f = fixture();
+  let purchased = 0;
+  let fightCalls = 0;
+  const send = async (cmd, params) => {
+    if (cmd === "fight_startdungeon") {
+      fightCalls++;
+      f.calls.push({ cmd, params });
+      throw new Error("服务器错误: 200400 - 操作太快，请稍后再试");
+    }
+    return f.send(cmd, params);
+  };
+
+  const result = await runAutomaticDream({
+    ...f,
+    send,
+    rateLimitPause: async () => {},
+    purchase: async () => {
+      purchased++;
+    },
+  });
+
+  assert.equal(fightCalls, 2);
+  assert.equal(result.battles, 2);
+  assert.match(result.reason, /仍触发服务器限频/);
+  assert.equal(purchased, 1);
 });
 
 test("已选阵容没有吕布时不使用其他武将，仍按清单采购", async () => {
