@@ -926,6 +926,147 @@ export function createTasksItem(deps) {
     });
   };
 
+  const adjustEarlyMainLevelFormation = async (
+    tokenId,
+    tokenName,
+    ownedHeroIds,
+  ) => {
+    const targetHeroes = [
+      { heroId: 107, slot: 0 }, // 吕布是前期阵容的必要条件
+      { heroId: 204, slot: 1 }, // 张飞
+      { heroId: 106, slot: 2 }, // 太史慈
+    ].filter((target) => ownedHeroIds.has(target.heroId));
+
+    const currentTeamResult = await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "presetteam_getinfo",
+      {},
+      HELPER_COMMAND_TIMEOUT_MS,
+    );
+    const currentHeroes = getPresetTeamHeroes(currentTeamResult);
+
+    for (const hero of currentHeroes) {
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "hero_gobackbattle",
+        { slot: hero.slot },
+        HELPER_COMMAND_TIMEOUT_MS,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+    }
+
+    for (const target of targetHeroes) {
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "hero_gointobattle",
+        { heroId: target.heroId, slot: target.slot },
+        HELPER_COMMAND_TIMEOUT_MS,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 前期推图阵容已调整：${targetHeroes
+        .map((hero) => `${hero.slot + 1}号位${HERO_DICT[hero.heroId]?.name}`)
+        .join("、")}`,
+      type: "success",
+    });
+  };
+
+  /** 小号前期推图：吕布必需，按拥有情况培养张飞、太史慈并设置1至3将阵容。 */
+  const batchAdjustEarlyMainLevelFormation = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      tokenStatus.value[tokenId] = "running";
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始前期推图阵容调整: ${tokenName} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const ownedHeroIds = new Set(
+          Object.values(roleInfo?.role?.heroes || {}).map((hero) =>
+            Number(hero?.heroId ?? hero?.id),
+          ),
+        );
+
+        if (!ownedHeroIds.has(107)) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 未拥有吕布，前期推图培养及阵容均不调整`,
+            type: "info",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        for (const heroId of [204, 106]) {
+          if (shouldStop.value) break;
+          if (!ownedHeroIds.has(heroId)) continue;
+          try {
+            await upgradeSingleHero(tokenId, tokenName, heroId, 750);
+          } catch (error) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${HERO_DICT[heroId].name}升级至750级停止：${error.message}`,
+              type: "warning",
+            });
+          }
+        }
+
+        if (!shouldStop.value) {
+          try {
+            await upgradeLordAndLuBu(tokenId, tokenName);
+          } catch (error) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 主公和吕布升级停止：${error.message || "资源不足或未知错误"}`,
+              type: "warning",
+            });
+          }
+        }
+
+        if (!shouldStop.value) {
+          await adjustEarlyMainLevelFormation(
+            tokenId,
+            tokenName,
+            ownedHeroIds,
+          );
+        }
+        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 前期推图阵容调整失败：${error.message || "未知错误"}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("小号前期推图阵容调整完成");
+  };
+
   /** 小号推图准备：按拥有情况升级武将并设置默认推图阵容。 */
   const batchAdjustMainLevelFormation = async () => {
     if (selectedTokens.value.length === 0) return;
@@ -3719,6 +3860,7 @@ export function createTasksItem(deps) {
     batchHeroUpgrade,
     batchHeroLevelUpgrade,
     batchUpgradeLordTo6000,
+    batchAdjustEarlyMainLevelFormation,
     batchAdjustMainLevelFormation,
     batchBookUpgrade,
     batchClaimStarRewards,

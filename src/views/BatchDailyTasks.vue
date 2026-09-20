@@ -727,6 +727,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchAdjustEarlyMainLevelFormation"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  前期推图阵容
+                </n-button>
+                <n-button
+                  size="small"
                   @click="confirmUpgradeLordTo6000"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -4634,6 +4641,7 @@ const taskGroupDefinitions = [
     tasks: [
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
+      "batchAdjustEarlyMainLevelFormation",
       "batchAdjustMainLevelFormation",
       "batchSmartBoxWeekly",
       "batchSmartRecruitWeekly",
@@ -7597,6 +7605,7 @@ const {
   batchHeroUpgrade,
   batchHeroLevelUpgrade,
   batchUpgradeLordTo6000,
+  batchAdjustEarlyMainLevelFormation,
   batchAdjustMainLevelFormation,
   batchBookUpgrade,
   batchClaimStarRewards,
