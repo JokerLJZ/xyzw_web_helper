@@ -266,7 +266,7 @@
                           <div class="team-block" :class="{ win: m.team1Win }">
                             <div class="team-name">
                               {{ m.team1Name }}
-                              <n-tag v-if="m.team1Win" size="tiny" type="success" round>胜</n-tag>
+                              <n-tag v-if="m.team1Win" round size="tiny" type="success">胜</n-tag>
                             </div>
                             <div class="team-meta">战力 {{ (m.team1Power / POWER_UNIT).toFixed(1) }}亿</div>
                           </div>
@@ -274,7 +274,7 @@
                           <div class="team-block right" :class="{ win: m.team2Win }">
                             <div class="team-name">
                               {{ m.team2Name }}
-                              <n-tag v-if="m.team2Win" size="tiny" type="success" round>胜</n-tag>
+                              <n-tag v-if="m.team2Win" round size="tiny" type="success">胜</n-tag>
                             </div>
                             <div class="team-meta">战力 {{ (m.team2Power / POWER_UNIT).toFixed(1) }}亿</div>
                           </div>
@@ -303,7 +303,7 @@
           />
           <n-space v-else vertical size="small">
             <n-card
-              v-for="(grp, gi) in currentBets"
+              v-for="grp in currentBets"
               :key="`cbg${grp.scheduleId}`"
               size="small"
               class="stage-group-card"
@@ -344,8 +344,8 @@
                         :type="canBetRow(grp, b) ? 'primary' : 'default'"
                         :disabled="!canBetRow(grp, b) || pendingGuessTeamId !== '' || actionCooldown.guess > 0"
                         :loading="pendingGuessTeamId === b.team1Id"
-                        :title="grp.betTip"
                         style="margin-top: 6px"
+                        :title="grp.betTip"
                         @click="doGuess(b.team1Id, b, grp)"
                       >
                         押 {{ b.team1Name.slice(0, BET_BTN_NAME_LEN) }}
@@ -366,8 +366,8 @@
                         :type="canBetRow(grp, b) ? 'primary' : 'default'"
                         :disabled="!canBetRow(grp, b) || pendingGuessTeamId !== '' || actionCooldown.guess > 0"
                         :loading="pendingGuessTeamId === b.team2Id"
-                        :title="grp.betTip"
                         style="margin-top: 6px"
+                        :title="grp.betTip"
                         @click="doGuess(b.team2Id, b, grp)"
                       >
                         押 {{ b.team2Name.slice(0, BET_BTN_NAME_LEN) }}
@@ -1180,21 +1180,47 @@ const syncSelectedRound = () => {
   selectedRound.value = getInitialRound(rounds, season.value, serverNowMs.value);
 };
 
-/** 对阵行映射（真实字段：team.name/teamId/power/cheerCnt/isWin） */
-const toMatchRow = (pair) => {
-  const t1 = pair?.[0] || {};
-  const t2 = pair?.[1] || {};
+/**
+ * 单支队伍字段归一（真实字段：name / teamId / power / cheerCnt / isWin）。
+ *
+ * 三个接口的队伍对象结构差异很大（对阵列表、竞猜记录、战报），调用方各自把
+ * 「队伍 id + 名字/战力」拼成一个对象再交给本函数，避免每处各写一遍
+ * `t.teamId || "-"` 这类兜底。
+ *
+ * ⚠️ 归一后的 Id 会把 falsy 值（0 / "" / undefined）统一成 "-"，因此**不能**
+ * 用它做队伍身份比对（真实 teamId 为 0 时会失配）；身份比对请用原始 teamId。
+ * @param {object} src 队伍对象
+ * @returns {object} 归一后的队伍字段
+ */
+const toTeamFields = (src) => {
+  const t = src || {};
   return {
-    team1Id: t1.teamId || "-",
-    team1Name: t1.name || "未知",
-    team1Power: t1.power || 0,
-    team1Cheer: t1.cheerCnt || 0,
-    team1Win: t1.isWin === true,
-    team2Id: t2.teamId || "-",
-    team2Name: t2.name || "未知",
-    team2Power: t2.power || 0,
-    team2Cheer: t2.cheerCnt || 0,
-    team2Win: t2.isWin === true,
+    Id: t.teamId || "-",
+    Name: t.name || "未知",
+    Power: t.power || 0,
+  };
+};
+
+/**
+ * 转换为竞猜对阵行（apex_getguesslist）。
+ * @param {Array<object>} pair 长度 2 的队伍数组
+ * @returns {object} 对阵行（含竞猜页需要的助威数）
+ */
+const toMatchRow = (pair) => {
+  const [t1, t2] = pair || [];
+  const s1 = toTeamFields(t1);
+  const s2 = toTeamFields(t2);
+  return {
+    team1Id: s1.Id,
+    team1Name: s1.Name,
+    team1Power: s1.Power,
+    team1Cheer: t1?.cheerCnt || 0,
+    team1Win: t1?.isWin === true,
+    team2Id: s2.Id,
+    team2Name: s2.Name,
+    team2Power: s2.Power,
+    team2Cheer: t2?.cheerCnt || 0,
+    team2Win: t2?.isWin === true,
   };
 };
 
@@ -1216,11 +1242,13 @@ const fetchMatchesPage = async (grp) => {
       maxPages: FIRST_PAGES,
     });
     grp.matches.push(...rows.map(toMatchRow));
+    // 服务端「还有下一页」信号：为 false 即不再续拉（与 exhausted 互补）
     grp.hasMore = !last && rows.length > 0;
     // 服务端可能在仍有数据时就返回 last=true，因此另用 exhausted 标记「确实拉不到新行」
     if (!rows.length) grp.exhausted = true;
   } catch {
-    grp.hasMore = false; // 该阶段未开放或参数错误：停止分页
+    // 该阶段未开放或参数错误：停止继续分页
+    grp.hasMore = false;
     grp.exhausted = true;
   } finally {
     grp.loading = false;
@@ -1327,6 +1355,7 @@ const refreshCurrentBets = () => {
       openTip: buildOpenTip(tab.scheduleId),
       // 复用已加载的对阵，避免轮询时清空导致闪烁
       matches: prev?.matches || [],
+      // 服务端是否还有下一页（false 表示已翻到底，不再续拉）
       hasMore: prev?.hasMore ?? true,
       // 已确认拉不到更多数据（区别于服务端 last 标记）
       exhausted: prev?.exhausted ?? false,
@@ -1335,8 +1364,10 @@ const refreshCurrentBets = () => {
       loading: false,
     };
     if (grp.state === ApexScheduleStatus.None) {
+      // 该阶段尚未解锁：不会有对阵数据，直接标记无更多页，避免后续误触发分页
       grp.hasMore = false;
     } else if (grp.matches.length === 0 && grp.hasMore) {
+      // 首屏为该阶段预拉一页
       fetchMatchesPage(grp);
     }
     return grp;
@@ -1369,26 +1400,28 @@ const fetchGuessHistory = async () => {
       const conf = getScheduleConf(sid);
       const myTeamIds = roleInfo.value.guessMap[sid] || [];
       pairs.forEach((pair, idx) => {
-        const t1 = pair?.[0] || {};
-        const t2 = pair?.[1] || {};
-        const myIsT1 = myTeamIds.includes(t1.teamId);
-        const myIsT2 = myTeamIds.includes(t2.teamId);
+        // 身份匹配用原始 teamId（0/空值不能被归一化的 "-" 顶替），展示字段才走 toMatchRow
+        const rawT1 = pair?.[0] || {};
+        const rawT2 = pair?.[1] || {};
+        const myIsT1 = myTeamIds.includes(rawT1.teamId);
+        const myIsT2 = myTeamIds.includes(rawT2.teamId);
         if (!myIsT1 && !myIsT2) return;
+        const row = toMatchRow(pair);
         rows.push({
           scheduleId: sid,
           round: conf?.round ?? 0,
           stageName: conf ? getStageName(conf.stage) : "未知",
           index: idx + 1,
-          team1Id: t1.teamId || "-",
-          team1Name: t1.name || "未知",
-          team1Power: t1.power || 0,
-          team1Win: t1.isWin === true,
-          team2Id: t2.teamId || "-",
-          team2Name: t2.name || "未知",
-          team2Power: t2.power || 0,
-          team2Win: t2.isWin === true,
-          myTeamId: myIsT1 ? t1.teamId : t2.teamId,
-          myWin: myIsT1 ? t1.isWin === true : t2.isWin === true,
+          team1Id: row.team1Id,
+          team1Name: row.team1Name,
+          team1Power: row.team1Power,
+          team1Win: row.team1Win,
+          team2Id: row.team2Id,
+          team2Name: row.team2Name,
+          team2Power: row.team2Power,
+          team2Win: row.team2Win,
+          myTeamId: myIsT1 ? rawT1.teamId : rawT2.teamId,
+          myWin: myIsT1 ? rawT1.isWin === true : rawT2.isWin === true,
           claimed:
             !!claimMap[sid] &&
             Object.values(claimMap[sid] || {}).includes(true),
@@ -1443,19 +1476,26 @@ const fetchScheduleHistory = async () => {
           );
           return (res?.apexRecords || []).map((rec) => {
             const bi = rec.battleInfo || {};
-            const t1 = bi.team1?.members?.[0]?.role || {};
-            const t2 = bi.team2?.members?.[0]?.role || {};
+            // 战报里队伍名在 members[0].role 上，队伍 id 在 team 上，故分两处摘取
+            const s1 = toTeamFields({
+              teamId: bi.team1?.teamId,
+              ...(bi.team1?.members?.[0]?.role || {}),
+            });
+            const s2 = toTeamFields({
+              teamId: bi.team2?.teamId,
+              ...(bi.team2?.members?.[0]?.role || {}),
+            });
             const conf = getScheduleConf(rec.scheduleId ?? sid);
             return {
               round: conf?.round ?? 0,
               stage: conf?.stage ?? 0,
               stageName: conf ? getStageName(conf.stage) : "未知",
-              team1Id: bi.team1?.teamId || "-",
-              team1Name: t1.name || "未知",
-              team1Power: t1.power || 0,
-              team2Id: bi.team2?.teamId || "-",
-              team2Name: t2.name || "未知",
-              team2Power: t2.power || 0,
+              team1Id: s1.Id,
+              team1Name: s1.Name,
+              team1Power: s1.Power,
+              team2Id: s2.Id,
+              team2Name: s2.Name,
+              team2Power: s2.Power,
               team1Win: BATTLE_WIN_1.includes(bi.state),
               team2Win: BATTLE_WIN_2.includes(bi.state),
             };

@@ -25,6 +25,14 @@
  *
  * 赛季更新：配置快照由 `scratch/gen_apex_stage_map.py` 从游戏远端 config.json 生成，
  * 本引擎不含任何硬编码的赛季 / 期 / 阶段 / 日期，配置更新后全部判定自动跟随。
+ *
+ * 时间字段说明（避免与客户端字段名对不上）：
+ *   · 配置快照里的 `date` 就是客户端的 `serverDate`（`scratch/gen_apex_stage_map.py`
+ *     原样取自 `ApexScheduleConf[*].serverDate`），格式恒为 "YYYY/MM/DD"。
+ *   · 客户端所有「当日 0 点」换算（getScheduleStatus / getDateZeroTime）都以它为基准，
+ *     本引擎的 getDateZeroTime 与之等价（本地时区按 UTC+8 理解）。
+ *   · endDate 是行政截止日（比该期末场晚约 19 天），**不可用于判定该期是否结束**，
+ *     该判定一律走 getRoundEndTime。
  */
 
 import {
@@ -179,16 +187,24 @@ export const getStageName = (stage) =>
 
 /**
  * 取某赛季某期的全部赛程配置。
- * @param {number} round
- * @param {number} season
+ *
+ * seasonRoundMap 的键由配置快照预置为 Number，而调用方传进来的期号可能来自
+ * 界面的字符串（如下拉项的 value），故入口显式 Number 归一后再查表。
+ * @param {number|string} round
+ * @param {number|string} season
  * @returns {Array<object>} 该期全部赛程配置，按 id 升序
  */
 export function getRoundSchedules(round, season) {
-  return seasonRoundMap.get(season)?.get(round) || [];
+  return seasonRoundMap.get(Number(season))?.get(Number(round)) || [];
 }
 
 /**
  * 按 scheduleId 取配置（跨赛季安全，无需知道期号）。
+ *
+ * 注：apexScheduleMap 是普通对象，键为字符串形式的 id，用 `map[scheduleId]` 访问时
+ * JS 会自动把数字键转字符串，故 number / string 两种入参都能命中（与客户端
+ * ApexScheduleConf.getById 的字符串查表行为一致）。返回前把 id 归一为 Number，
+ * 便于调用方直接与配置里的数值 id 比较。
  * @param {number|string} scheduleId
  * @returns {object|null} 形如 { id, round, season, stage, date, ... }
  */
@@ -413,20 +429,36 @@ export function checkNowInSeason(nowMs) {
 }
 
 /**
+ * 遍历某期赛程，跳过日期不可解析的场次，把「当日零点 + 场次内秒偏移」交给回调。
+ *
+ * 报名起始时刻与该期结束时刻都要按 `conf.date` 取零再加偏移，且都要跳过坏日期，
+ * 因此共用这一处收敛器，避免两处各写一遍取零逻辑。
+ * @param {Array<object>} list 该期赛程配置
+ * @param {string} field 场次内的秒偏移字段名（signStartTime / endTime）
+ * @param {(at: number) => void} collect 收到该场的绝对时刻（ms）
+ */
+const forEachScheduleTime = (list, field, collect) => {
+  for (const conf of list) {
+    const offset = conf[field];
+    if (!offset) continue;
+    const zero = getDateZeroTime(conf.date);
+    if (!Number.isFinite(zero)) continue;
+    collect(zero + offset * 1000);
+  }
+};
+
+/**
  * 该期报名开始时刻（取最早一条 signStartTime，无则退回首场当日 0 点）。
  * @param {number} round
  * @param {number} season
  * @returns {number} 无法解析时返回 NaN
  */
-export function getRoundSignStartTime(round, season) {
+function getRoundSignStartTime(round, season) {
   const list = getRoundSchedules(round, season);
   let min = Infinity;
-  for (const conf of list) {
-    if (!conf.signStartTime) continue;
-    const zero = getDateZeroTime(conf.date);
-    if (!Number.isFinite(zero)) continue;
-    min = Math.min(min, zero + conf.signStartTime * 1000);
-  }
+  forEachScheduleTime(list, "signStartTime", (at) => {
+    min = Math.min(min, at);
+  });
   if (Number.isFinite(min)) return min;
   return list.length ? getDateZeroTime(list[0].date) : Number.NaN;
 }
@@ -445,12 +477,11 @@ export function getRoundSignStartTime(round, season) {
 export function getRoundEndTime(round, season) {
   const list = getRoundSchedules(round, season);
   let max = -Infinity;
-  for (const conf of list) {
-    const zero = getDateZeroTime(conf.date);
-    if (!Number.isFinite(zero)) continue;
-    max = Math.max(max, zero + (conf.endTime || 0) * 1000);
-  }
+  forEachScheduleTime(list, "endTime", (at) => {
+    max = Math.max(max, at);
+  });
   if (Number.isFinite(max)) return max;
+  // 兜底：全部场次日期不可解析时，改用配置里的行政截止日 endDate
   let fallback = -Infinity;
   for (const conf of list) {
     const zero = getDateZeroTime(conf.endDate);
@@ -458,6 +489,28 @@ export function getRoundEndTime(round, season) {
     fallback = Math.max(fallback, zero + (conf.endTime || 0) * 1000);
   }
   return Number.isFinite(fallback) ? fallback : Number.NaN;
+}
+
+/**
+ * 该期「结算时刻」：决赛当日 0 点 + 一天（等价客户端 DayDuration）。
+ *
+ * 客户端在 _getInitialPhaseIndex 里判定「该期还没翻篇」用的是这个时刻，而不是
+ * 决赛 endTime：只要还没到决赛次日的 0 点，这一期就仍算「当前期」。
+ *
+ * ⚠️ 与 getRoundEndTime 差一个 1h45m 窗口：实测各期决赛 endTime 恒为 22:15，
+ *    而结算时刻是次日 00:00，两者之间决赛已打完但该期尚未翻篇。只用 endTime 判定
+ *    会在这段窗口里提前跳到下一期。
+ * @param {number} round
+ * @param {number} season
+ * @returns {number} 无法解析时返回 NaN
+ */
+export function getRoundSettleTime(round, season) {
+  const final = getRoundSchedules(round, season).find(
+    (c) => c.stage === ApexStage.TAOTAI_2,
+  );
+  if (!final) return Number.NaN;
+  const zero = getDateZeroTime(final.date);
+  return Number.isFinite(zero) ? zero + DAY_MS : Number.NaN;
 }
 
 /**
@@ -509,7 +562,6 @@ export function getAvailableRounds(season, nowMs) {
   }
   return result;
 }
-
 /**
  * 当前进行中的期（已开始且末场未结束），升序。
  * @param {number} season
@@ -537,12 +589,12 @@ export function getHistoryRounds(season, nowMs) {
 /** 该期是否处于报名窗口内（等价客户端 checkDuringSignUp） */
 const checkDuringSignUp = (round, season, nowMs) => {
   for (const conf of getRoundSchedules(round, season)) {
-    if (!conf.signStartTime) continue;
-    const dayZero = getDateZeroTime(conf.date);
-    if (!Number.isFinite(dayZero)) continue;
+    if (!conf.signStartTime || !conf.signEndTime) continue;
+    const zero = getDateZeroTime(conf.date);
+    if (!Number.isFinite(zero)) continue;
     if (
-      nowMs >= dayZero + conf.signStartTime * 1000 &&
-      nowMs <= dayZero + conf.signEndTime * 1000
+      nowMs >= zero + conf.signStartTime * 1000 &&
+      nowMs <= zero + conf.signEndTime * 1000
     ) {
       return true;
     }
@@ -551,10 +603,18 @@ const checkDuringSignUp = (round, season, nowMs) => {
 };
 
 /**
- * 默认展示的期号（等价客户端 ApexPanel._getInitialPhaseIndex 的判定顺序）：
- * 0) 先剔除历史期（末场已结束的期不参与「当前期」判定）；
- * 1) 处于报名窗口内的期；2) 决赛尚未结束的最早期；3) 进行中期里的首项。
- * 若全部期均已结束，回退到最近一期供回看。
+ * 默认展示的期号（等价客户端 ApexPanel._getInitialPhaseIndex）。
+ *
+ * 判定顺序：
+ *   1) 处于报名窗口内的期 → 取该期；
+ *   2) 决赛尚未结束、或已结束但未到结算时刻（决赛次日 0 点）的期 → 取该期；
+ *   3) 都不满足 → 回退到第 1 期（客户端 _getEarliestUnfinishedPhaseIndex 恒返回 0）。
+ *
+ * 有意简化：客户端在 1) 之前还有一步「报名期避让」（checkIsSignUp +
+ * getPhaseState），依赖报名表 TEAM_UP.getTeamInfoByType 与数百行阶段判定，
+ * 本实现无法取得该状态，故不做避让，直接按窗口判定。此处差异只影响「玩家已淘汰
+ * 且正处于新报名期」这一种情形下的默认期号，不影响各期本身的可押判定。
+ *
  * @param {number[]} availableRounds
  * @param {number} season
  * @param {number} nowMs
@@ -563,25 +623,24 @@ const checkDuringSignUp = (round, season, nowMs) => {
 export function getInitialRound(availableRounds, season, nowMs) {
   if (!availableRounds.length) return null;
 
-  // 历史期不参与「当前期」判定：只在未结束的期里挑
-  const ongoing = availableRounds.filter(
-    (round) => !isRoundEnded(round, season, nowMs),
-  );
-  // 全部已结束（赛季末）：回退到最近一期，便于回看
-  if (!ongoing.length) return availableRounds[availableRounds.length - 1];
-
-  for (const round of ongoing) {
+  for (const round of availableRounds) {
     if (checkDuringSignUp(round, season, nowMs)) return round;
   }
-  for (const round of ongoing) {
+
+  for (const round of availableRounds) {
     const final = getRoundSchedules(round, season).find(
       (c) => c.stage === ApexStage.TAOTAI_2,
     );
-    if (final && getScheduleStatus(final.id, nowMs) !== ApexScheduleStatus.Completed) {
+    if (!final) continue;
+    if (getScheduleStatus(final.id, nowMs) !== ApexScheduleStatus.Completed) {
       return round;
     }
+    // 决赛已打完但未到结算时刻（决赛次日 0 点）时，该期仍视为当前期
+    const settle = getRoundSettleTime(round, season);
+    if (Number.isFinite(settle) && nowMs <= settle) return round;
   }
-  return ongoing[0];
+
+  return availableRounds[0];
 }
 
 /**
