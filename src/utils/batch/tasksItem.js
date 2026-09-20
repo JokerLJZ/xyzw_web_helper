@@ -931,6 +931,31 @@ export function createTasksItem(deps) {
     tokenName,
     ownedHeroIds,
   ) => {
+    const runFormationCommand = async (command, params, actionName) => {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await tokenStore.sendMessageWithPromise(
+            tokenId,
+            command,
+            params,
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+        } catch (error) {
+          const errorMessage = getErrorMessage(error);
+          const transientError =
+            /200020|200050|200400|操作太快|未知错误|重启游戏/.test(
+              errorMessage,
+            );
+          if (!transientError || attempt >= 3) throw error;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${actionName}触发临时错误，等待6秒后进行第${attempt + 1}次重试：${errorMessage}`,
+            type: "warning",
+          });
+          await new Promise((resolve) => setTimeout(resolve, 6000));
+        }
+      }
+    };
     const supportHeroId = ownedHeroIds.has(223) ? 223 : 204;
     const targetHeroes = [
       { heroId: 107, slot: 0 }, // 吕布是前期阵容的必要条件
@@ -938,30 +963,27 @@ export function createTasksItem(deps) {
       { heroId: 106, slot: 3 }, // 太史慈
     ].filter((target) => ownedHeroIds.has(target.heroId));
 
-    const currentTeamResult = await tokenStore.sendMessageWithPromise(
-      tokenId,
+    const currentTeamResult = await runFormationCommand(
       "presetteam_getinfo",
       {},
-      HELPER_COMMAND_TIMEOUT_MS,
+      "查询当前阵容",
     );
     const currentHeroes = getPresetTeamHeroes(currentTeamResult);
 
     for (const hero of currentHeroes) {
-      await tokenStore.sendMessageWithPromise(
-        tokenId,
+      await runFormationCommand(
         "hero_gobackbattle",
         { slot: hero.slot },
-        HELPER_COMMAND_TIMEOUT_MS,
+        `${hero.slot + 1}号位武将下阵`,
       );
       await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
     }
 
     for (const target of targetHeroes) {
-      await tokenStore.sendMessageWithPromise(
-        tokenId,
+      await runFormationCommand(
         "hero_gointobattle",
         { heroId: target.heroId, slot: target.slot },
-        HELPER_COMMAND_TIMEOUT_MS,
+        `${HERO_DICT[target.heroId]?.name || target.heroId}上阵`,
       );
       await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
     }
@@ -1027,6 +1049,8 @@ export function createTasksItem(deps) {
               message: `${tokenName} ${HERO_DICT[heroId].name}升级至750级停止：${error.message}`,
               type: "warning",
             });
+            // 培养失败后服务器可能仍处于短暂忙碌状态，冷却后再调整阵容。
+            await new Promise((resolve) => setTimeout(resolve, 6000));
           }
         }
 
@@ -1039,6 +1063,8 @@ export function createTasksItem(deps) {
               message: `${tokenName} 主公和吕布升级停止：${error.message || "资源不足或未知错误"}`,
               type: "warning",
             });
+            // 进阶材料不足等失败后先等待服务器状态稳定，再切换阵容。
+            await new Promise((resolve) => setTimeout(resolve, 6000));
           }
         }
 
