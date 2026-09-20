@@ -11,8 +11,10 @@ const WAR_ORDER_SUFFIX = "1";
 const SIGN_SUFFIX = "5";
 const GOODS_SUFFIX = "41";
 
-// 抽奖次数（默认1次，需要连抽改成10即可）
-const DRAW_TIMES = 1;
+// 防止异常响应导致无限抽奖；正常情况会在玄武灵契耗尽时由服务器终止。
+const MAX_DRAW_TIMES = 20;
+const MAX_RATE_LIMIT_RETRIES = 4;
+const RATE_LIMIT_RETRY_DELAY_MS = 6000;
 
 // 通行证奖励领取最大轮数
 const MAX_REWARD_ROUNDS = 10;
@@ -181,7 +183,11 @@ export function createTasksXuanwuBlessing(deps) {
   };
 
   /** 抽奖（会推进抽奖类任务进度） */
-  const doLottery = async (tokenId, tokenName) => {
+  const doLottery = async (
+    tokenId,
+    tokenName,
+    maxDrawTimes = MAX_DRAW_TIMES,
+  ) => {
     try {
       const lotteryInfo = await tokenStore.sendMessageWithPromise(
         tokenId,
@@ -195,25 +201,55 @@ export function createTasksXuanwuBlessing(deps) {
     }
 
     let count = 0;
-    for (let i = 0; i < DRAW_TIMES; i++) {
+    for (let i = 0; i < maxDrawTimes; i++) {
       if (shouldStop.value) break;
-      try {
-        const res = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "activity_lottery",
-          { times: 1 },
-          8000,
-        );
-        log(
-          `${tokenName} 抽奖第${i + 1}次: ${formatReward(res?.reward || []) || "无奖励"}`,
-          "success",
-        );
-        count++;
-      } catch (error) {
-        log(`${tokenName} 抽奖失败: ${error.message || "未知错误"}`, "warning");
-        break;
+      let drawn = false;
+      for (
+        let attempt = 0;
+        attempt <= MAX_RATE_LIMIT_RETRIES;
+        attempt += 1
+      ) {
+        try {
+          const res = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "activity_lottery",
+            { times: 1 },
+            8000,
+          );
+          log(
+            `${tokenName} 抽奖第${count + 1}次: ${formatReward(res?.reward || []) || "无奖励"}`,
+            "success",
+          );
+          count++;
+          drawn = true;
+          break;
+        } catch (error) {
+          const errorMessage = error?.message || "未知错误";
+          const rateLimited =
+            errorMessage.includes("200400") ||
+            errorMessage.includes("操作太快");
+          if (rateLimited && attempt < MAX_RATE_LIMIT_RETRIES) {
+            log(
+              `${tokenName} 玄武抽奖触发200400，等待6秒后进行第${attempt + 1}次重试`,
+              "warning",
+            );
+            await delay(RATE_LIMIT_RETRY_DELAY_MS);
+            continue;
+          }
+          log(
+            count > 0
+              ? `${tokenName} 玄武灵契已抽完，本轮共抽奖${count}次`
+              : `${tokenName} 当前没有可用玄武灵契`,
+            "info",
+          );
+          return count;
+        }
       }
+      if (!drawn) break;
       await delay(commandDelay);
+    }
+    if (count >= maxDrawTimes) {
+      log(`${tokenName} 抽奖达到本次剩余安全额度${maxDrawTimes}次`, "warning");
     }
     return count;
   };
@@ -288,23 +324,37 @@ export function createTasksXuanwuBlessing(deps) {
         await buyFreeGoods(tokenId, goodsId, token.name);
         await delay(commandDelay);
 
-        // 3. 抽奖（会推进"抽奖X次"类任务进度）
-        const lotteryCnt = await doLottery(tokenId, token.name);
-
-        // 4. 点卯补领（同样可能推进任务进度）
+        // 3. 点卯补领（同样可能推进任务进度）
         const signCnt = await claimSign(tokenId, signActivityId, token.name);
 
-        // 5. 抽奖/点卯后重新拉取，领取新完成的任务
+        // 4. 抽完全部玄武灵契；领奖若再次产出灵契，则继续抽取并再次领奖。
+        let lotteryCnt = 0;
         let secondClaimed = 0;
-        if (lotteryCnt > 0 || signCnt > 0) {
-          const latestInfo = await fetchWarOrder(tokenId, actId);
-          if (latestInfo) {
-            const second = await claimTasks(tokenId, actId, latestInfo, token.name);
-            secondClaimed = second.claimed;
-            if (secondClaimed > 0) {
-              passRewards += await claimPassRewards(tokenId, actId, token.name);
-            }
+        for (let round = 0; round < MAX_REWARD_ROUNDS; round++) {
+          const remainingDrawTimes = MAX_DRAW_TIMES - lotteryCnt;
+          if (remainingDrawTimes <= 0) {
+            log(
+              `${token.name} 本次抽奖已达到安全上限${MAX_DRAW_TIMES}次，停止继续抽奖`,
+              "warning",
+            );
+            break;
           }
+          const drawn = await doLottery(
+            tokenId,
+            token.name,
+            remainingDrawTimes,
+          );
+          lotteryCnt += drawn;
+          const latestInfo = await fetchWarOrder(tokenId, actId);
+          if (!latestInfo) break;
+          const second = await claimTasks(tokenId, actId, latestInfo, token.name);
+          secondClaimed += second.claimed;
+          const newPassRewards =
+            second.claimed > 0
+              ? await claimPassRewards(tokenId, actId, token.name)
+              : 0;
+          passRewards += newPassRewards;
+          if (drawn === 0 && second.claimed === 0 && newPassRewards === 0) break;
         }
 
         log(
