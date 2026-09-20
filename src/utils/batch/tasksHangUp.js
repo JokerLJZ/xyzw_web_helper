@@ -26,6 +26,80 @@ export function createTasksHangUp(deps) {
   } = deps;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const HANG_UP_UPGRADE_ITEM_ID = 1024;
+
+  const getItemQuantity = (roleInfo, itemId) => {
+    const items =
+      roleInfo?.role?.items || roleInfo?.body?.role?.items || roleInfo?.items;
+    if (Array.isArray(items)) {
+      const item = items.find(
+        (entry) => Number(entry?.id ?? entry?.itemId) === Number(itemId),
+      );
+      return Number(item?.quantity ?? item?.num ?? item?.count ?? 0) || 0;
+    }
+    const item = items?.[itemId] ?? items?.[String(itemId)];
+    return Number(item?.quantity ?? item?.num ?? item?.count ?? item ?? 0) || 0;
+  };
+
+  const isRateLimitError = (error) => {
+    const text = String(error?.message || error || "");
+    return text.includes("200400") || text.includes("操作太快");
+  };
+
+  const upgradeHangUpBeforeClaim = async (tokenId, tokenName) => {
+    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+    let remaining = getItemQuantity(roleInfo, HANG_UP_UPGRADE_ITEM_ID);
+    if (remaining <= 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 当前没有可用知识币，跳过挂机升级`,
+        type: "info",
+      });
+      return 0;
+    }
+
+    const initialQuantity = remaining;
+    let used = 0;
+    while (remaining > 0 && !shouldStop.value) {
+      const upgradeNum = remaining >= 50 ? 50 : remaining >= 10 ? 10 : 1;
+      let succeeded = false;
+      for (let attempt = 0; attempt <= 4; attempt += 1) {
+        try {
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "system_hangupupgrade",
+            { upgradeNum },
+            5000,
+          );
+          succeeded = true;
+          break;
+        } catch (error) {
+          if (!isRateLimitError(error) || attempt >= 4) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 当前无法继续挂机升级，已使用${used}/${initialQuantity}个知识币：${error.message || error}`,
+              type: "warning",
+            });
+            return used;
+          }
+          await sleep(6000);
+        }
+      }
+      if (!succeeded) break;
+      remaining -= upgradeNum;
+      used += upgradeNum;
+      await sleep(1200);
+    }
+
+    if (used > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 挂机升级完成，共使用${used}个知识币`,
+        type: "success",
+      });
+    }
+    return used;
+  };
 
   const addHangUpTimeForToken = async (tokenId, tokenName, actionText) => {
     for (let i = 0; i < 4; i++) {
@@ -73,6 +147,16 @@ export function createTasksHangUp(deps) {
         });
 
         await ensureConnection(tokenId);
+
+        try {
+          await upgradeHangUpBeforeClaim(tokenId, token.name);
+        } catch (error) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 挂机升级检查失败，继续领取奖励：${error.message || error}`,
+            type: "warning",
+          });
+        }
 
         // 1. Claim reward
         addLog({
@@ -152,6 +236,16 @@ export function createTasksHangUp(deps) {
         });
 
         await ensureConnection(tokenId);
+
+        try {
+          await upgradeHangUpBeforeClaim(tokenId, tokenName);
+        } catch (error) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 挂机升级检查失败，继续领取奖励：${error.message || error}`,
+            type: "warning",
+          });
+        }
 
         for (let i = 0; i < 5; i++) {
           if (shouldStop.value) break;

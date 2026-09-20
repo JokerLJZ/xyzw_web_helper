@@ -727,6 +727,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="confirmUpgradeLordTo6000"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  主公升级至6000级
+                </n-button>
+                <n-button
+                  size="small"
                   @click="openSmartBoxWeeklyModal"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -3477,7 +3484,7 @@ import {
   sanitizeScheduledTaskForSnapshot,
 } from "@/utils/backup/snapshotBuilder";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
-import { useMessage } from "naive-ui";
+import { useDialog, useMessage } from "naive-ui";
 import { Settings } from "@vicons/ionicons5";
 
 // Import batch task modules
@@ -3557,6 +3564,7 @@ import { sendWxPusherMessage, sendPushPlusMessage, formatScheduledTaskNotificati
 // Initialize token store, message service, and task runner
 const tokenStore = useTokenStore();
 const message = useMessage();
+const dialog = useDialog();
 
 // 排序配置（从localStorage读取，与TokenImport共享）
 const savedSortConfig = localStorage.getItem("tokenSortConfig");
@@ -7588,12 +7596,31 @@ const {
   batchRecruit,
   batchHeroUpgrade,
   batchHeroLevelUpgrade,
+  batchUpgradeLordTo6000,
   batchAdjustMainLevelFormation,
   batchBookUpgrade,
   batchClaimStarRewards,
   batchClaimPeachTasks,
   batchGenieSweep,
 } = tasksItem;
+
+const confirmUpgradeLordTo6000 = () => {
+  if (selectedTokens.value.length === 0) {
+    message.warning("请至少选择一个账号执行主公升级");
+    return;
+  }
+  const selectedNames = selectedTokens.value.map((tokenId) => {
+    const token = tokens.value.find((item) => item.id === tokenId);
+    return token?.name || tokenId;
+  });
+  dialog.warning({
+    title: "确认升级主公",
+    content: `确定要将所选${selectedNames.length}个账号的主公持续升级至6000级吗？该操作会消耗大量金币和进阶石。账号：${selectedNames.join("、")}`,
+    positiveText: "确认升级",
+    negativeText: "取消",
+    onPositiveClick: () => batchUpgradeLordTo6000(),
+  });
+};
 
 const tasksDungeon = createTasksDungeon(createTaskDeps());
 const { batchbaoku13, batchbaoku45, batchmengjing, batchBuyDreamItems } =

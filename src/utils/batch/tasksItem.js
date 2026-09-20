@@ -270,6 +270,17 @@ export function createTasksItem(deps) {
           result.result === 0),
     );
 
+  const isHeroStarRateLimitError = (error) => {
+    const text = [
+      getErrorMessage(error),
+      error?.code,
+      error?.body?.code,
+      error?.data?.code,
+      error?.response?.code,
+    ].join(" ");
+    return text.includes("200400") || text.includes("操作太快");
+  };
+
   const getLatestHero = async (tokenId, heroId, response) => {
     const responseHero = getHeroFromRoleInfo(response, heroId);
     if (responseHero) return responseHero;
@@ -345,9 +356,7 @@ export function createTasksItem(deps) {
                 break;
               } catch (error) {
                 const errorMessage = getErrorMessage(error);
-                const isRateLimited =
-                  errorMessage.includes("200400") ||
-                  errorMessage.includes("操作太快");
+                const isRateLimited = isHeroStarRateLimitError(error);
                 if (
                   !isRateLimited ||
                   attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
@@ -359,6 +368,11 @@ export function createTasksItem(deps) {
                   });
                   break;
                 }
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} ${heroName}升星触发200400，等待6秒后进行第${attempt + 1}次重试`,
+                  type: "warning",
+                });
                 await new Promise((resolve) =>
                   setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
                 );
@@ -641,6 +655,59 @@ export function createTasksItem(deps) {
     }
   };
 
+  /** 小号任务：将所选账号的主公直接升级至6000级。 */
+  const batchUpgradeLordTo6000 = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((tokenId) => {
+      tokenStatus.value[tokenId] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      tokenStatus.value[tokenId] = "running";
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始主公升级至6000级: ${tokenName} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+        await upgradeLordToLevel(tokenId, tokenName, 6000);
+        tokenStatus.value[tokenId] = shouldStop.value
+          ? "stopped"
+          : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: shouldStop.value
+            ? `${tokenName} 主公升级任务已停止`
+            : `${tokenName} 主公升级至6000级任务完成`,
+          type: shouldStop.value ? "warning" : "success",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 主公升级至6000级失败：${error.message || "未知错误"}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("所选小号的主公升级任务已结束");
+  };
+
   /**
    * 批量将多个指定武将升级并自动进阶到目标等级。
    * 目标等级必须由页面限制为50的整数倍；每次升级最多发送50级，避免跨过进阶阈值。
@@ -855,18 +922,6 @@ export function createTasksItem(deps) {
           ),
         );
 
-        if (!shouldStop.value && ownedHeroIds.has(107)) {
-          try {
-            await upgradeLordAndLuBu(tokenId, tokenName);
-          } catch (error) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 主公和吕布升级停止：${error.message || "资源不足或未知错误"}`,
-              type: "warning",
-            });
-          }
-        }
-
         for (const group of upgradeGroups) {
           for (const heroId of group.heroIds) {
             if (shouldStop.value) break;
@@ -893,6 +948,18 @@ export function createTasksItem(deps) {
                 type: "warning",
               });
             }
+          }
+        }
+
+        if (!shouldStop.value && ownedHeroIds.has(107)) {
+          try {
+            await upgradeLordAndLuBu(tokenId, tokenName);
+          } catch (error) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 主公和吕布升级停止：${error.message || "资源不足或未知错误"}`,
+              type: "warning",
+            });
           }
         }
 
@@ -2473,8 +2540,7 @@ export function createTasksItem(deps) {
     const sleep = (delayMs) =>
       new Promise((resolve) => setTimeout(resolve, delayMs));
     const isRateLimitError = (error) =>
-      getErrorMessage(error).includes("200400") ||
-      getErrorMessage(error).includes("操作太快");
+      isHeroStarRateLimitError(error);
     const useInBatches = async ({
       tokenId,
       itemId,
@@ -2581,6 +2647,11 @@ export function createTasksItem(deps) {
             if (!isRateLimitError(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
               throw error;
             }
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${heroName}升星触发200400，等待6秒后进行第${attempt + 1}次重试`,
+              type: "warning",
+            });
             await sleep(RATE_LIMIT_RETRY_DELAY_MS);
           }
         }
@@ -3567,6 +3638,7 @@ export function createTasksItem(deps) {
     batchRecruit,
     batchHeroUpgrade,
     batchHeroLevelUpgrade,
+    batchUpgradeLordTo6000,
     batchAdjustMainLevelFormation,
     batchBookUpgrade,
     batchClaimStarRewards,
