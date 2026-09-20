@@ -292,6 +292,9 @@
 
       <!-- ==================== 竞猜（当前 + 历史） ==================== -->
       <div v-show="activeSubTab === 'bet'" class="tab-content">
+        <n-alert v-if="actionCooldown.guess > 0" size="small" style="margin-bottom: 12px" type="warning">
+          竞猜被服务器限流（200400），请 {{ actionCooldown.guess }} 秒后再试；间隔由自适应限流学习得到，连续成功后会自动缩短。
+        </n-alert>
         <n-card :title="`🎯 ${currentBetTitle}`" size="small" style="margin-bottom: 12px">
           <n-empty
             v-if="currentBets.length === 0"
@@ -339,7 +342,7 @@
                         v-if="!grp.myBets.includes(b.team1Id)"
                         size="tiny"
                         :type="canBetRow(grp, b) ? 'primary' : 'default'"
-                        :disabled="!canBetRow(grp, b) || pendingGuessTeamId !== ''"
+                        :disabled="!canBetRow(grp, b) || pendingGuessTeamId !== '' || actionCooldown.guess > 0"
                         :loading="pendingGuessTeamId === b.team1Id"
                         :title="grp.betTip"
                         style="margin-top: 6px"
@@ -361,7 +364,7 @@
                         v-if="!grp.myBets.includes(b.team2Id)"
                         size="tiny"
                         :type="canBetRow(grp, b) ? 'primary' : 'default'"
-                        :disabled="!canBetRow(grp, b) || pendingGuessTeamId !== ''"
+                        :disabled="!canBetRow(grp, b) || pendingGuessTeamId !== '' || actionCooldown.guess > 0"
                         :loading="pendingGuessTeamId === b.team2Id"
                         :title="grp.betTip"
                         style="margin-top: 6px"
@@ -411,10 +414,14 @@
             size="small"
           />
         </n-card>
+        <div class="stage-date" style="margin-top: 8px">{{ rateLimitText }}</div>
       </div>
 
       <!-- ==================== 助威（当前） ==================== -->
       <div v-show="activeSubTab === 'vote'" class="tab-content">
+        <n-alert v-if="actionCooldown.vote > 0" size="small" style="margin-bottom: 12px" type="warning">
+          助威被服务器限流（200400），请 {{ actionCooldown.vote }} 秒后再试；间隔由自适应限流学习得到，连续成功后会自动缩短。
+        </n-alert>
         <n-card :title="`📣 ${currentRoundTitle}`" size="small" style="margin-bottom: 12px">
           <n-alert v-if="!supportOpen" type="warning" size="small" style="margin-bottom: 12px">
             当前不在助威时间内（仅正式赛段 / 淘汰赛段可助威，且该期不能有已锁定或进行中的场次）。
@@ -451,7 +458,7 @@
                 type="success"
                 round
                 style="margin-top: 8px"
-                :disabled="t.isOut || !supportOpen || selectedRoundEnded || voteLoading"
+                :disabled="t.isOut || !supportOpen || selectedRoundEnded || voteLoading || actionCooldown.vote > 0"
                 :loading="voteLoading"
                 @click="openVoteDialog(t.teamId, t.name, selectedRound)"
               >
@@ -488,8 +495,14 @@
           </div>
           <n-space justify="end">
             <n-button size="small" @click="voteDialogVisible = false">取消</n-button>
-            <n-button size="small" type="primary" :loading="voteLoading" @click="doVote">
-              确认助威
+            <n-button
+              size="small"
+              type="primary"
+              :disabled="actionCooldown.vote > 0"
+              :loading="voteLoading"
+              @click="doVote"
+            >
+              确认助威{{ actionCooldown.vote > 0 ? `（冷却 ${actionCooldown.vote}s）` : "" }}
             </n-button>
           </n-space>
         </n-space>
@@ -510,7 +523,7 @@
  *
  * 赛季更新后只需重新生成配置快照，本组件无需改动。
  */
-import { ref, computed, onMounted, onUnmounted, watch, h } from "vue";
+import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import {
   NTag,
   NButton,
@@ -533,6 +546,13 @@ import {
 } from "naive-ui";
 import { RefreshOutline } from "@vicons/ionicons5";
 import { useTokenStore } from "@/stores/tokenStore";
+import {
+  ApexAction,
+  apexCooldownLeft,
+  apexEstText,
+  isApexRateLimited,
+  runApexAction,
+} from "@/utils/apexRateLimit";
 import {
   ApexRoundPhase,
   ApexScheduleStatus,
@@ -929,6 +949,9 @@ const voteMaxCnt = ref(0);
 
 /** 并发防护：当前进行中的押注队伍 ID（'' = 空闲） */
 const pendingGuessTeamId = ref("");
+/** 竞猜 / 助威的服务端冷却倒计时（秒，0 = 可操作） */
+const actionCooldown = reactive({ guess: 0, vote: 0 });
+const cooldownTimer = { guess: null, vote: null };
 /** 正在分页中的阶段 scheduleId，避免轮询重建分组时重复拉取 */
 const fetchingStages = new Set();
 /** 数据版本号：防止乱序响应覆盖新数据 */
@@ -938,6 +961,41 @@ let pollTimer = null;
 let clockTimer = null;
 
 // ==================== 工具函数 ====================
+
+/**
+ * 启动某动作的冷却倒计时（秒级刷新，用于按钮禁用与提示文案）。
+ * 冷却时长由 apexRateLimit 按服务器真实限流学习得到，不写死。
+ * @param {string} key 动作类型（仅限 guess / vote）
+ * @param {number} ms 冷却毫秒数
+ */
+const startActionCooldown = (key, ms) => {
+  const sec = Math.max(1, Math.ceil(ms / 1000));
+  if (actionCooldown[key] < sec) {
+    actionCooldown[key] = sec;
+  }
+  if (cooldownTimer[key]) {
+    return;
+  }
+  cooldownTimer[key] = setInterval(() => {
+    actionCooldown[key] -= 1;
+    if (actionCooldown[key] <= 0) {
+      actionCooldown[key] = 0;
+      clearInterval(cooldownTimer[key]);
+      cooldownTimer[key] = null;
+    }
+  }, 1000);
+};
+
+/** 清理冷却倒计时定时器 */
+const stopActionCooldown = () => {
+  for (const key of Object.keys(cooldownTimer)) {
+    if (cooldownTimer[key]) {
+      clearInterval(cooldownTimer[key]);
+      cooldownTimer[key] = null;
+    }
+    actionCooldown[key] = 0;
+  }
+};
 
 const formatSeason = (val) => (val > 0 ? `第${val}赛季` : "-");
 
@@ -1006,6 +1064,15 @@ const currentMaxCheer = computed(() =>
   currentVoteBoard.value.reduce((m, t) => Math.max(m, t.cheerCnt || 0), 0),
 );
 
+/**
+ * 自适应限流概览（展示学习到的发送间隔）。
+ * 依赖 clockTick 以便每隔 CLOCK_INTERVAL 自动刷新一次文案。
+ */
+const rateLimitText = computed(() => {
+  void clockTick.value;
+  return apexEstText();
+});
+
 // ==================== 数据获取 ====================
 
 /**
@@ -1035,12 +1102,27 @@ const fetchPagedList = async ({
   const rows = [];
   let last = false;
   for (let p = 0; p < maxPages && !last; p++) {
-    const res = await tokenStore.sendMessageWithPromise(
-      token.id,
-      cmd,
-      { ...params, idx: startIdx + rows.length },
-      timeout,
-    );
+    let res;
+    try {
+      // 走自适应限流器：页面轮询 / 首屏并发拉取都不会突发打爆服务器
+      res = await runApexAction(
+        ApexAction.READ,
+        () =>
+          tokenStore.sendMessageWithPromise(
+            token.id,
+            cmd,
+            { ...params, idx: startIdx + rows.length },
+            timeout,
+          ),
+        { maxRetry: 1 },
+      );
+    } catch (e) {
+      // 被限流：保留已加载的行，last 保持 false，交给下一次轮询续拉
+      if (isApexRateLimited(e)) {
+        break;
+      }
+      throw e;
+    }
     const list = res?.[listKey] || [];
     if (!list.length) break;
     rows.push(...list);
@@ -1057,11 +1139,16 @@ const fetchRoleInfo = async () => {
   const token = tokenStore.selectedToken;
   if (!token) return null;
   try {
-    const res = await tokenStore.sendMessageWithPromise(
-      token.id,
-      "apex_getroleinfo",
-      {},
-      TIMEOUT_READ,
+    const res = await runApexAction(
+      ApexAction.READ,
+      () =>
+        tokenStore.sendMessageWithPromise(
+          token.id,
+          "apex_getroleinfo",
+          {},
+          TIMEOUT_READ,
+        ),
+      { maxRetry: 1 },
     );
     const ri = res?.apexRoleInfo;
     if (ri) {
@@ -1343,11 +1430,16 @@ const fetchScheduleHistory = async () => {
     const rawMatches = (
       await mapLimit(scheduleIds, REQUEST_LIMIT, async (sid) => {
         try {
-          const res = await tokenStore.sendMessageWithPromise(
-            tokenStore.selectedToken.id,
-            "apex_get64oppomap",
-            { scheduleId: sid, groupId: Number(roleInfo.value.group?.[String(sid)] ?? 1) },
-            TIMEOUT_QUERY,
+          const res = await runApexAction(
+            ApexAction.READ,
+            () =>
+              tokenStore.sendMessageWithPromise(
+                tokenStore.selectedToken.id,
+                "apex_get64oppomap",
+                { scheduleId: sid, groupId: Number(roleInfo.value.group?.[String(sid)] ?? 1) },
+                TIMEOUT_QUERY,
+              ),
+            { maxRetry: 1 },
           );
           return (res?.apexRecords || []).map((rec) => {
             const bi = rec.battleInfo || {};
@@ -1447,6 +1539,10 @@ const doGuess = async (teamId, row, grp) => {
     message.warning("上一笔竞猜请求处理中，请稍候");
     return;
   }
+  if (actionCooldown.guess > 0) {
+    message.warning(`竞猜被服务器限流，请 ${actionCooldown.guess} 秒后再试`);
+    return;
+  }
   if (!canBetRow(grp, row)) {
     message.warning(grp.betTip || "该场竞猜当前不可押注");
     return;
@@ -1456,19 +1552,31 @@ const doGuess = async (teamId, row, grp) => {
   const name = row.team1Id === teamId ? row.team1Name : row.team2Name;
   pendingGuessTeamId.value = teamId;
   try {
-    await tokenStore.sendMessageWithPromise(
-      token.id,
-      "apex_guess",
-      { teamId },
-      TIMEOUT_ACTION,
+    // 被 200400 打回时由限流器放大间隔并自动退避重试，重试耗尽才提示用户
+    await runApexAction(
+      ApexAction.GUESS,
+      () =>
+        tokenStore.sendMessageWithPromise(
+          token.id,
+          "apex_guess",
+          { teamId },
+          TIMEOUT_ACTION,
+        ),
+      { onWait: (ms) => startActionCooldown("guess", ms) },
     );
     // 业务错误码由 xyzwWebSocket.js 直接 reject，成功分支即 resolve
     message.success(`已竞猜 ${name}，等待开赛结果`);
+    actionCooldown.guess = 0;
     await fetchRoleInfo();
     refreshCurrentBets();
     fetchGuessHistory();
   } catch (e) {
-    message.error(`竞猜请求失败: ${e.message}`);
+    if (isApexRateLimited(e)) {
+      startActionCooldown("guess", apexCooldownLeft(ApexAction.GUESS));
+      message.warning(`服务器限流（200400），请 ${actionCooldown.guess} 秒后再试`);
+    } else {
+      message.error(`竞猜请求失败: ${e.message}`);
+    }
   } finally {
     pendingGuessTeamId.value = "";
   }
@@ -1502,6 +1610,10 @@ const doVote = async () => {
     message.warning("助威期数无效，请重新选择队伍");
     return;
   }
+  if (actionCooldown.vote > 0) {
+    message.warning(`助威被服务器限流，请 ${actionCooldown.vote} 秒后再试`);
+    return;
+  }
   if (!supportOpen.value) {
     message.warning("当前不在助威时间内");
     return;
@@ -1512,18 +1624,29 @@ const doVote = async () => {
   }
   voteLoading.value = true;
   try {
-    await tokenStore.sendMessageWithPromise(
-      token.id,
-      "apex_vote",
-      { teamId: voteTargetTeamId.value, round: voteRound.value, voteCnt: voteCnt.value },
-      TIMEOUT_ACTION,
+    await runApexAction(
+      ApexAction.VOTE,
+      () =>
+        tokenStore.sendMessageWithPromise(
+          token.id,
+          "apex_vote",
+          { teamId: voteTargetTeamId.value, round: voteRound.value, voteCnt: voteCnt.value },
+          TIMEOUT_ACTION,
+        ),
+      { onWait: (ms) => startActionCooldown("vote", ms) },
     );
     message.success(`已为 ${voteTargetName.value} 助威 ${voteCnt.value} 次`);
     voteDialogVisible.value = false;
+    actionCooldown.vote = 0;
     await fetchRoleInfo();
     fetchVoteBoard();
   } catch (e) {
-    message.error(`助威请求失败: ${e.message}`);
+    if (isApexRateLimited(e)) {
+      startActionCooldown("vote", apexCooldownLeft(ApexAction.VOTE));
+      message.warning(`服务器限流（200400），请 ${actionCooldown.vote} 秒后再试`);
+    } else {
+      message.error(`助威请求失败: ${e.message}`);
+    }
   } finally {
     voteLoading.value = false;
   }
@@ -1588,6 +1711,7 @@ const stopPolling = () => {
   if (clockTimer) clearInterval(clockTimer);
   pollTimer = null;
   clockTimer = null;
+  stopActionCooldown();
 };
 
 /** 切换期号后刷新该期的竞猜与助威数据 */

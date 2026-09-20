@@ -16,6 +16,12 @@ import {
   getCurrentSeason,
   getGuessTabs,
 } from "@/utils/apexRules";
+import {
+  ApexAction,
+  apexCooldownLeft,
+  isApexRateLimited,
+  runApexAction,
+} from "@/utils/apexRateLimit";
 
 /** 单次请求超时（ms） */
 const TIMEOUT_MS = 8000;
@@ -23,8 +29,20 @@ const TIMEOUT_MS = 8000;
 /** 单阶段分页拉取的最大页数（防御 last 异常导致死循环） */
 const MAX_PAGES = 12;
 
-/** 竞猜间隔（ms） */
-const GUESS_INTERVAL_MS = 500;
+/** 只读拉取遇到 200400 时的自动重试次数 */
+const READ_MAX_RETRY = 1;
+
+/**
+ * 经自适应限流器发送一条 apex 命令。
+ *
+ * 服务器对 apex_* 有频控（200400「操作太快」），固定 sleep 无法适配真实冷却，
+ * 统一走 utils/apexRateLimit.js：串行排队 + AIMD 自适应间隔。
+ * @param {string} action 动作类型（ApexAction）
+ * @param {Function} task 实际发送函数
+ * @param {number} [maxRetry] 200400 自动重试次数
+ * @returns {Promise<*>} 命令响应
+ */
+const sendApex = (action, task, maxRetry) => runApexAction(action, task, { maxRetry });
 
 /**
  * 解析当前赛季「竞猜开放中」的阶段页签。
@@ -102,11 +120,16 @@ export function createTasksApex(deps) {
         });
 
         // 1. 获取角色信息（resetTime.day 用于服务端时间校准）
-        const roleResp = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "apex_getroleinfo",
-          {},
-          TIMEOUT_MS,
+        const roleResp = await sendApex(
+          ApexAction.READ,
+          () =>
+            tokenStore.sendMessageWithPromise(
+              tokenId,
+              "apex_getroleinfo",
+              {},
+              TIMEOUT_MS,
+            ),
+          READ_MAX_RETRY,
         );
         const apexInfo = roleResp?.apexRoleInfo || {};
         const guessMap = apexInfo.guessMap || {};
@@ -134,9 +157,12 @@ export function createTasksApex(deps) {
         let successCount = 0;
         let skipCount = 0;
         let failCount = 0;
+        /** 连续被 200400 打回后置位：中止该账号剩余竞猜，避免持续轰炸服务器 */
+        let abortedByRateLimit = false;
 
         for (const tab of open.tabs) {
           if (shouldStop.value) break;
+          if (abortedByRateLimit) break;
 
           const advanceNum = getAdvanceNum(open.round, open.season, tab.stage);
           const guessedTeamIds = new Set(guessMap[tab.scheduleId] || []);
@@ -155,11 +181,16 @@ export function createTasksApex(deps) {
           let last = false;
           for (let p = 0; p < MAX_PAGES && !last; p++) {
             if (shouldStop.value) break;
-            const resp = await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "apex_getguesslist",
-              { scheduleId: tab.scheduleId, idx: allGroups.length },
-              TIMEOUT_MS,
+            const resp = await sendApex(
+              ApexAction.READ,
+              () =>
+                tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "apex_getguesslist",
+                  { scheduleId: tab.scheduleId, idx: allGroups.length },
+                  TIMEOUT_MS,
+                ),
+              READ_MAX_RETRY,
             );
             const groups = resp?.apexGuessList || [];
             if (groups.length === 0) break;
@@ -183,6 +214,7 @@ export function createTasksApex(deps) {
 
           for (const group of allGroups) {
             if (shouldStop.value) break;
+            if (abortedByRateLimit) break;
             if (advanceNum > 0 && guessedTeamIds.size >= advanceNum) break;
 
             const [team0, team1] = group;
@@ -205,11 +237,24 @@ export function createTasksApex(deps) {
             }
 
             try {
-              await tokenStore.sendMessageWithPromise(
-                tokenId,
-                "apex_guess",
-                { teamId: pick.teamId },
-                TIMEOUT_MS,
+              await runApexAction(
+                ApexAction.GUESS,
+                () =>
+                  tokenStore.sendMessageWithPromise(
+                    tokenId,
+                    "apex_guess",
+                    { teamId: pick.teamId },
+                    TIMEOUT_MS,
+                  ),
+                {
+                  // 等待服务器冷却时给出可见反馈，避免界面像卡死
+                  onWait: (ms) =>
+                    addLog({
+                      time: new Date().toLocaleTimeString(),
+                      message: `${token.name} 竞猜遇到服务器限流，等待 ${Math.ceil(ms / 1000)}s 后重试`,
+                      type: "warning",
+                    }),
+                },
               );
               guessedTeamIds.add(pick.teamId);
               successCount++;
@@ -225,11 +270,25 @@ export function createTasksApex(deps) {
                 message: `${token.name} ${tab.title} 竞猜 ${pick.name} 失败: ${err.message}`,
                 type: "error",
               });
+              if (isApexRateLimited(err)) {
+                // 重试仍被限流：停止该账号后续竞猜，等待自适应间隔恢复
+                abortedByRateLimit = true;
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} 连续被服务器限流（200400），约 ${Math.ceil(apexCooldownLeft(ApexAction.GUESS) / 1000)}s 后可继续，本次中止剩余竞猜`,
+                  type: "warning",
+                });
+              }
             }
-
-            // 竞猜间隔
-            await new Promise((r) => setTimeout(r, GUESS_INTERVAL_MS));
           }
+        }
+
+        if (abortedByRateLimit) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 因服务器限流提前结束，未完成部分稍后重跑即可续押`,
+            type: "warning",
+          });
         }
 
         tokenStatus.value[tokenId] = "completed";
