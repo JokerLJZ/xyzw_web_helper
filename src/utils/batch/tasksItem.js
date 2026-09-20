@@ -159,6 +159,17 @@ export function createTasksItem(deps) {
   };
 
   const heroIds = Object.keys(HERO_DICT).map(Number);
+  const starFragmentCosts = [
+    8, 8, 8, 8, 8,
+    40, 40, 40, 40, 40,
+    80, 80, 80, 80, 80,
+    200, 200, 200, 200, 200,
+    400, 400, 400, 400, 400,
+    400, 400, 400, 400, 400,
+  ];
+  const HERO_STAR_ACTION_DELAY_MS = 3000;
+  const HERO_STAR_RATE_LIMIT_DELAY_MS = 6000;
+  const HERO_STAR_MAX_RATE_LIMIT_RETRIES = 4;
 
   const heroLevelOrderThresholds = [
     { level: 100, order: 1 },
@@ -237,41 +248,80 @@ export function createTasksItem(deps) {
         });
 
         await ensureConnection(tokenId);
+        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
 
         for (const heroId of heroIds) {
           if (shouldStop.value) break;
+          const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
+          const initialStar = Number(getHeroFromRoleInfo(roleInfo, heroId)?.star) || 0;
+          let currentStar = initialStar;
 
-          // 每个英雄尝试最多10次升星（只要成功就继续，失败则跳过该英雄）
-          for (let i = 1; i <= 10; i++) {
-            if (shouldStop.value) break;
+          while (!shouldStop.value && currentStar < 30) {
+            const fragmentCost = Number(starFragmentCosts[currentStar]) || 0;
+            const fragmentCount = getItemQuantity(roleInfo, heroId);
+            if (fragmentCost <= 0 || fragmentCount < fragmentCost) break;
 
-            try {
-              const res = await tokenStore.sendMessageWithPromise(
-                tokenId,
-                "hero_heroupgradestar",
-                { heroId },
-                5000,
-              );
-              const ok =
-                res &&
-                (res.code === 0 || res.success === true || res.result === 0);
-
-              if (ok) {
-                addLog({
-                  time: new Date().toLocaleTimeString(),
-                  message: `${token.name} 英雄ID:${heroId} 升星成功 (第${i}次)`,
-                  type: "success",
-                });
-                // 成功了继续尝试下一级，直到失败或达到10次
-              } else {
-                // 失败说明无法继续升星（碎片不足或满星），跳出循环处理下一个英雄
-                throw new Error("升星失败");
+            let commandCompleted = false;
+            for (
+              let attempt = 0;
+              attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
+              attempt += 1
+            ) {
+              try {
+                await tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "hero_heroupgradestar",
+                  { heroId },
+                  HELPER_COMMAND_TIMEOUT_MS,
+                );
+                commandCompleted = true;
+                break;
+              } catch (error) {
+                const errorMessage = getErrorMessage(error);
+                const isRateLimited =
+                  errorMessage.includes("200400") ||
+                  errorMessage.includes("操作太快");
+                if (
+                  !isRateLimited ||
+                  attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
+                ) {
+                  addLog({
+                    time: new Date().toLocaleTimeString(),
+                    message: `${token.name} ${heroName}升星失败，已跳过：${errorMessage}`,
+                    type: "warning",
+                  });
+                  break;
+                }
+                await new Promise((resolve) =>
+                  setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
+                );
               }
-            } catch (err) {
-              // 失败则停止当前英雄的升星尝试
+            }
+
+            if (!commandCompleted) break;
+            await new Promise((resolve) =>
+              setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+            );
+            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+            const latestStar =
+              Number(getHeroFromRoleInfo(roleInfo, heroId)?.star) || 0;
+            if (latestStar <= currentStar) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} ${heroName}升星后星级未变化，停止该武将`,
+                type: "warning",
+              });
               break;
             }
-            await new Promise((r) => setTimeout(r, delayConfig.action));
+            currentStar = latestStar;
+          }
+
+          if (currentStar > initialStar) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} ${heroName}：${initialStar}星 → ${currentStar}星`,
+              type: "success",
+            });
           }
         }
 
@@ -2154,7 +2204,7 @@ export function createTasksItem(deps) {
     const MAX_USE_PER_REQUEST = 999;
     const MIN_ACTION_DELAY_MS = 2000;
     const ITEM_COOLDOWN_MS = 5000;
-    const RATE_LIMIT_RETRY_DELAY_MS = 5000;
+    const RATE_LIMIT_RETRY_DELAY_MS = 6000;
     const MAX_RATE_LIMIT_RETRIES = 4;
     const COIN_BAG_ITEM_ID = 3001;
     const UNIVERSAL_RED_ITEM_ID = 3201;
@@ -2165,14 +2215,6 @@ export function createTasksItem(deps) {
     const LVBU_ID = 107;
     const TAISHICI_ID = 106;
     const DIAOCHAN_ID = 210;
-    const STAR_FRAGMENT_COSTS = [
-      8, 8, 8, 8, 8,
-      40, 40, 40, 40, 40,
-      80, 80, 80, 80, 80,
-      200, 200, 200, 200, 200,
-      400, 400, 400, 400, 400,
-      400, 400, 400, 400, 400,
-    ];
     const useUniversalRed = taskConfig.useUniversalRed !== false;
     const useUniversalOrange = taskConfig.useUniversalOrange !== false;
     const actionDelayMs = Math.max(
@@ -2244,7 +2286,7 @@ export function createTasksItem(deps) {
           } catch (error) {
             if (isRateLimitError(error)) {
               if (attempt >= MAX_RATE_LIMIT_RETRIES) throw error;
-              await sleep(RATE_LIMIT_RETRY_DELAY_MS * (attempt + 1));
+              await sleep(RATE_LIMIT_RETRY_DELAY_MS);
               continue;
             }
             // 请求超时或异常时先对账，防止服务器已成功却重复使用。
@@ -2282,7 +2324,7 @@ export function createTasksItem(deps) {
       const limit = Math.min(MAX_USE_PER_REQUEST, universalQuantity);
 
       for (let star = currentStar; star < 30; star += 1) {
-        const cost = Number(STAR_FRAGMENT_COSTS[star]) || 0;
+        const cost = Number(starFragmentCosts[star]) || 0;
         if (cost <= 0) break;
         const missing = Math.max(0, cost - fragments);
         if (amount + missing > limit) break;
@@ -2299,7 +2341,7 @@ export function createTasksItem(deps) {
       while (!shouldStop.value) {
         const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         const currentStar = getHeroStar(getHeroes(roleInfo), heroId);
-        const fragmentCost = Number(STAR_FRAGMENT_COSTS[currentStar]) || 0;
+        const fragmentCost = Number(starFragmentCosts[currentStar]) || 0;
         const fragmentCount = getQuantity(getItems(roleInfo), heroId);
         if (currentStar >= 30 || fragmentCost <= 0 || fragmentCount < fragmentCost) {
           break;
@@ -2318,11 +2360,11 @@ export function createTasksItem(deps) {
             if (!isRateLimitError(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
               throw error;
             }
-            await sleep(RATE_LIMIT_RETRY_DELAY_MS * (attempt + 1));
+            await sleep(RATE_LIMIT_RETRY_DELAY_MS);
           }
         }
 
-        await sleep(actionDelayMs);
+        await sleep(Math.max(actionDelayMs, HERO_STAR_ACTION_DELAY_MS));
         const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         const latestStar = getHeroStar(getHeroes(latestRoleInfo), heroId);
         if (latestStar <= currentStar) {
@@ -2369,7 +2411,7 @@ export function createTasksItem(deps) {
           const heroName = HERO_DICT[targetHeroId]?.name || targetHeroId;
           const currentStar = getHeroStar(getHeroes(roleInfo), targetHeroId);
           const fragmentCount = getQuantity(getItems(roleInfo), targetHeroId);
-          const nextCost = Number(STAR_FRAGMENT_COSTS[currentStar]) || 0;
+          const nextCost = Number(starFragmentCosts[currentStar]) || 0;
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${tokenName} ${heroName}升星还需${Math.max(0, nextCost - fragmentCount)}个碎片，当前万能碎片${universalQuantity}个，不转换以避免碎片闲置`,
@@ -2513,6 +2555,39 @@ export function createTasksItem(deps) {
           }
           await sleep(ITEM_COOLDOWN_MS);
         }
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 仓库物品处理完成，开始执行全武将升星`,
+          type: "info",
+        });
+        let upgradedHeroCount = 0;
+        let upgradedStarCount = 0;
+        for (const heroId of heroIds) {
+          if (shouldStop.value) break;
+          try {
+            const upgraded = await upgradeHeroStars(
+              tokenId,
+              heroId,
+              tokenName,
+            );
+            if (upgraded > 0) {
+              upgradedHeroCount += 1;
+              upgradedStarCount += upgraded;
+            }
+          } catch (error) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${HERO_DICT[heroId]?.name || heroId}升星失败，继续下一武将：${getErrorMessage(error)}`,
+              type: "warning",
+            });
+          }
+        }
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 全武将升星完成：${upgradedHeroCount}名武将，共提升${upgradedStarCount}星`,
+          type: "success",
+        });
 
         roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         addLog({
