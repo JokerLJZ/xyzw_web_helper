@@ -198,6 +198,7 @@ export function registerDefaultCommands(reg) {
 
     // 军团
     .register("legion_getinfo")
+    .register("legion_applyjoin")
     .register("legion_signin")
     .register("legion_getwarrank")
     .register("legionwar_getdetails")
@@ -1124,6 +1125,7 @@ export class XyzwWebSocketClient {
       bottlehelper_startresp: "bottlehelper_start",
       bottlehelper_stopresp: "bottlehelper_stop",
       legion_signinresp: "legion_signin",
+      legion_applyjoinresp: "legion_applyjoin",
       fight_startbossresp: "fight_startboss",
       fight_startlegionbossresp: "fight_startlegionboss",
       fight_startareaarenaresp: "fight_startareaarena",

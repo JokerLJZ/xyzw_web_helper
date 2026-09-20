@@ -563,6 +563,23 @@ export class GameCommands {
   }
 
   /**
+   * 申请加入俱乐部
+   */
+  legion_applyjoin(ack = 0, seq = 0, params = {}) {
+    return {
+      ack,
+      body: this.g_utils.bon.encode({
+        legionId: params.legionId,
+        reason: "",
+        ...params,
+      }),
+      cmd: "legion_applyjoin",
+      seq,
+      time: Date.now(),
+    };
+  }
+
+  /**
    * 军团匹配角色报名
    *
    * @param {number} ack 确认号

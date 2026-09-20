@@ -706,6 +706,14 @@
               <n-space>
                 <n-button
                   size="small"
+                  @click="batchJoinLegion"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="俱乐部号请在任务设置中填写"
+                >
+                  批量加入俱乐部
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchTopUpGoldFish"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -2408,6 +2416,21 @@
                   :step="10"
                   size="small"
                   style="width: 100px"
+                />
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">小号加入俱乐部号</label>
+                <n-input-number
+                  v-model:value="batchSettings.legionId"
+                  :min="1"
+                  :precision="0"
+                  clearable
+                  placeholder="俱乐部号"
+                  size="small"
+                  style="width: 140px"
                 />
               </div>
               <div
@@ -4268,6 +4291,7 @@ for (const merchantId in goldItemsConfig) {
 }
 
 const batchSettings = reactive({
+  legionId: null,
   dreamPurchaseList: defaultDreamPurchaseList,
   redemptionCodeMode: "default",
   customRedemptionCodes: "",
@@ -4639,6 +4663,7 @@ const taskGroupDefinitions = [
     name: "small-account",
     label: "小号任务",
     tasks: [
+      "batchJoinLegion",
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
       "batchAdjustEarlyMainLevelFormation",
@@ -7641,6 +7666,7 @@ const { batcharenafight, batchTopUpFish, batchTopUpGoldFish, batchTopUpArena } =
 
 const tasksStore = createTasksStore(createTaskDeps());
 const {
+  batchJoinLegion,
   legion_storebuygoods,
   legionStoreBuyWhiteJade,
   legionStoreBuySkinCoins,

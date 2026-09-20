@@ -34,6 +34,90 @@ export function createTasksStore(deps) {
     delayConfig,
   } = deps;
 
+  /** 使用批量设置中的俱乐部号，为所选账号申请加入俱乐部。 */
+  const batchJoinLegion = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const legionId = Number(batchSettings.legionId);
+    if (!Number.isSafeInteger(legionId) || legionId <= 0) {
+      message.warning("请先在任务设置中填写有效的俱乐部号");
+      return;
+    }
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始加入俱乐部 ${legionId}: ${tokenName} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        const result = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "legion_applyjoin",
+          { legionId, reason: "" },
+          5000,
+        );
+        const resultMessage = result?.msg || result?.error || "";
+
+        if (result?.code !== undefined && result.code !== 0) {
+          if (resultMessage.includes("已经加入")) {
+            tokenStatus.value[tokenId] = "completed";
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 已加入俱乐部，跳过申请`,
+              type: "info",
+            });
+          } else {
+            throw new Error(resultMessage || `服务器返回错误码 ${result.code}`);
+          }
+        } else if (result?.error) {
+          throw new Error(result.error);
+        } else {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 已申请加入俱乐部 ${legionId}`,
+            type: "success",
+          });
+        }
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 加入俱乐部失败: ${error.message || "未知错误"}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+  };
+
   const purchaseSingleLegionStoreGood = async ({ goodsId, itemName }) => {
     if (selectedTokens.value.length === 0) return;
 
@@ -527,6 +611,7 @@ export function createTasksStore(deps) {
   };
 
   return {
+    batchJoinLegion,
     legion_storebuygoods,
     legionStoreBuyWhiteJade,
     legionStoreBuySkinCoins,
