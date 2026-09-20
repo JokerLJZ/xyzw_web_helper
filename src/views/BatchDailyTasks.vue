@@ -480,7 +480,7 @@
                 <n-button
                   size="small"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  @click="batchApexGuess(apexScheduleId)"
+                  @click="batchApexGuess()"
                 >
                   逐鹿盐山竞猜
                 </n-button>
@@ -7625,9 +7625,6 @@ const { batchApexGuess } = tasksApex;
 
 const tasksXuanwuBlessing = createTasksXuanwuBlessing(createTaskDeps());
 const { batchXuanwuBlessing } = tasksXuanwuBlessing;
-
-// 逐鹿盐山竞猜配置
-const apexScheduleId = ref(46);
 
 // 盐杯竞猜 pick 选择
 const footballPick = ref(3);
