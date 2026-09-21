@@ -46,6 +46,91 @@ export function createTasksItem(deps) {
 
   const fishNames = { 1: "普通鱼竿", 2: "黄金鱼竿" };
 
+  /** 使用精铁一键升级指定武将的全部装备。 */
+  const batchUpgradeEquipment = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const heroId = Number(batchSettings.equipmentUpgradeHeroId || 107);
+    if (!Number.isSafeInteger(heroId) || !HERO_DICT[heroId]) {
+      message.warning("请先在全局任务设置中选择装备升级武将");
+      return;
+    }
+
+    const heroName = HERO_DICT[heroId].name;
+    const retryDelayMs = 6000;
+    const maxRetries = 3;
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      tokenStatus.value[tokenId] = "running";
+
+      try {
+        await ensureConnection(tokenId);
+        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+          try {
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "equipment_batchupgradelevel",
+              { heroId },
+              HELPER_COMMAND_TIMEOUT_MS,
+            );
+            tokenStatus.value[tokenId] = "completed";
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 已使用精铁一键升级${heroName}装备`,
+              type: "success",
+            });
+            break;
+          } catch (error) {
+            const errorMessage = getErrorMessage(error);
+            if (/400010|物品数量不足|精铁不足/.test(errorMessage)) {
+              tokenStatus.value[tokenId] = "completed";
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} ${heroName}装备升级停止：精铁不足或装备已无法继续升级`,
+                type: "warning",
+              });
+              break;
+            }
+            const isTransient =
+              /200020|200050|200400|操作太快|未知错误|重启游戏/.test(
+                errorMessage,
+              );
+            if (!isTransient || attempt >= maxRetries) throw error;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 一键升级${heroName}装备触发临时错误，等待6秒后进行第${attempt + 1}次重试：${errorMessage}`,
+              type: "warning",
+            });
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+          }
+        }
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 精铁一键升级${heroName}装备失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("精铁一键升级装备任务结束");
+  };
+
   /** 升级指定武将的梦魇水晶，直到资源不足或服务器拒绝继续升级。 */
   const batchUpgradeCrystal = async () => {
     if (selectedTokens.value.length === 0) return;
@@ -4167,6 +4252,7 @@ export function createTasksItem(deps) {
   return {
     batchMaxWarriorLegionTech,
     batchUpgradeCrystal,
+    batchUpgradeEquipment,
     batchOpenBox,
     batchOpenBoxByPoints,
     batchClaimBoxPointReward,

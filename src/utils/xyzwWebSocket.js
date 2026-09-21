@@ -200,6 +200,7 @@ export function registerDefaultCommands(reg) {
     .register("legion_getinfo")
     .register("legion_applyjoin")
     .register("trump_upgrade")
+    .register("equipment_batchupgradelevel", { heroId: 107 })
     .register("legion_signin")
     .register("legion_getwarrank")
     .register("legionwar_getdetails")
@@ -1128,6 +1129,7 @@ export class XyzwWebSocketClient {
       legion_signinresp: "legion_signin",
       legion_applyjoinresp: "legion_applyjoin",
       trump_upgraderesp: "trump_upgrade",
+      equipment_batchupgradelevelresp: "equipment_batchupgradelevel",
       fight_startbossresp: "fight_startboss",
       fight_startlegionbossresp: "fight_startlegionboss",
       fight_startareaarenaresp: "fight_startareaarena",

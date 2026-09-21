@@ -722,6 +722,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchUpgradeEquipment"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="使用精铁一键升级全局设置中所选武将的全部装备"
+                >
+                  精铁一键升级装备
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchMaxWarriorLegionTech"
                   :disabled="isRunning || selectedTokens.length === 0"
                   title="按101至114顺序，每项一次升级到当前最高等级"
@@ -2430,6 +2438,19 @@
               >
                 <label class="setting-label">锁定当前水晶属性</label>
                 <n-switch v-model:value="batchSettings.crystalLockAttribute" />
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">装备升级武将</label>
+                <n-select
+                  v-model:value="batchSettings.equipmentUpgradeHeroId"
+                  :options="heroLevelUpgradeHeroOptions"
+                  filterable
+                  size="small"
+                  style="width: 180px"
+                />
               </div>
               <div
                 class="setting-item"
@@ -4355,6 +4376,7 @@ const batchSettings = reactive({
   legionId: null,
   crystalHeroId: 107,
   crystalLockAttribute: true,
+  equipmentUpgradeHeroId: 107,
   useUniversalRed: true,
   useUniversalOrange: true,
   universalRedPrimaryHeroId: 107,
@@ -4443,6 +4465,11 @@ const normalizeWarehouseItemSettings = () => {
   batchSettings.useUniversalOrange = batchSettings.useUniversalOrange !== false;
 };
 
+const normalizeEquipmentUpgradeSettings = () => {
+  const heroId = Number(batchSettings.equipmentUpgradeHeroId);
+  batchSettings.equipmentUpgradeHeroId = HERO_DICT[heroId] ? heroId : 107;
+};
+
 watch(
   () => batchSettings.universalRedPrimaryHeroId,
   (primaryHeroId) => {
@@ -4476,6 +4503,7 @@ const loadBatchSettings = () => {
     batchSettings.customRedemptionCodes =
       normalizedRedemptionCodes.customRedemptionCodes;
     normalizeWarehouseItemSettings();
+    normalizeEquipmentUpgradeSettings();
     delete batchSettings.blackMarketPurchaseMode;
   } catch (error) {
     console.error("Failed to load batch settings:", error);
@@ -4497,6 +4525,7 @@ const saveBatchSettings = () => {
     batchSettings.customRedemptionCodes =
       normalizedRedemptionCodes.customRedemptionCodes;
     normalizeWarehouseItemSettings();
+    normalizeEquipmentUpgradeSettings();
     delete batchSettings.blackMarketPurchaseMode;
     localStorage.setItem("batchSettings", JSON.stringify(batchSettings));
     message.success("全局任务设置已保存");
@@ -7751,6 +7780,7 @@ const {
   batchClaimPeachTasks,
   batchGenieSweep,
   batchUpgradeCrystal,
+  batchUpgradeEquipment,
   batchMaxWarriorLegionTech,
 } = tasksItem;
 

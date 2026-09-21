@@ -595,6 +595,20 @@ export class GameCommands {
     };
   }
 
+  /** 使用精铁一键升级指定武将的全部装备。 */
+  equipment_batchupgradelevel(ack = 0, seq = 0, params = {}) {
+    return {
+      ack,
+      body: this.g_utils.bon.encode({
+        heroId: params.heroId,
+        ...params,
+      }),
+      cmd: "equipment_batchupgradelevel",
+      seq,
+      time: Date.now(),
+    };
+  }
+
   /**
    * 军团匹配角色报名
    *
