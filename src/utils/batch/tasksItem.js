@@ -1055,23 +1055,24 @@ export function createTasksItem(deps) {
     message.success(`批量升级${heroNames.join("、")}结束`);
   };
 
-  const getPresetTeamHeroes = (presetTeamResult) => {
-    const teamInfo = presetTeamResult?.presetTeamInfo;
-    const teams = teamInfo?.presetTeamInfo || teamInfo?.teams || {};
-    const activeTeamId = teamInfo?.useTeamId;
-    const activeTeam =
-      teams?.[activeTeamId] || teams?.[String(activeTeamId)] || teams;
-    const activeTeamHeroes = activeTeam?.teamInfo || activeTeam;
-
-    return Object.entries(activeTeamHeroes || {})
+  const getRoleTeamHeroes = (roleInfoResult) => {
+    const role =
+      roleInfoResult?.role ||
+      roleInfoResult?.data?.role ||
+      roleInfoResult?.body?.role ||
+      {};
+    return Object.entries(role.heroes || {})
       .map(([key, hero]) => ({
-        heroId: Number(hero?.heroId ?? hero?.id),
-        slot: Number(hero?.battleTeamSlot ?? hero?.position ?? key),
+        heroId: Number(hero?.heroId ?? hero?.id ?? key),
+        slot: Number(hero?.battleTeamSlot),
         level: Number(hero?.level) || 1,
         order: Number(hero?.order) || 0,
       }))
       .filter(
-        (hero) => Number.isFinite(hero.heroId) && Number.isFinite(hero.slot),
+        (hero) =>
+          Number.isFinite(hero.heroId) &&
+          Number.isFinite(hero.slot) &&
+          hero.slot >= 0,
       );
   };
 
@@ -1114,14 +1115,14 @@ export function createTasksItem(deps) {
     formationName,
     recycleSlots = new Set(),
   }) => {
-    const currentTeamResult = await runFormationCommand(
+    const currentRoleInfo = await runFormationCommand(
       tokenId,
       tokenName,
-      "presetteam_getinfo",
+      "role_getroleinfo",
       {},
-      "查询当前阵容",
+      "查询当前战斗阵容",
     );
-    const currentHeroes = getPresetTeamHeroes(currentTeamResult);
+    const currentHeroes = getRoleTeamHeroes(currentRoleInfo);
 
     for (const target of targetHeroes) {
       const targetCurrent = currentHeroes.find(
@@ -1200,14 +1201,15 @@ export function createTasksItem(deps) {
       }
     }
 
-    const verifiedTeamResult = await runFormationCommand(
+    await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+    const verifiedRoleInfo = await runFormationCommand(
       tokenId,
       tokenName,
-      "presetteam_getinfo",
+      "role_getroleinfo",
       {},
       `校验${formationName}`,
     );
-    const verifiedHeroes = getPresetTeamHeroes(verifiedTeamResult);
+    const verifiedHeroes = getRoleTeamHeroes(verifiedRoleInfo);
     const invalidTarget = targetHeroes.find(
       (target) =>
         !verifiedHeroes.some(
