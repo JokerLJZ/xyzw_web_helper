@@ -14,7 +14,7 @@
  * ⚠️ 排队耗时不计入响应超时
  * 上层 sendMessageWithPromise 的超时是从「被调用那一刻」起算的，而排队发生在此之前
  * （本模块的冷却等待 + WebSocket 发送队列积压）。若不处理，排在队尾的请求会带着
- * 已被吃光的时间预算发出，还没等到响应就报「请求超时」，表现为「连接不稳定」。
+ * 已被吃光的时间预算发出，还没等到响应就报「请求超时」——这正是「连接不稳定」的成因。
  * 因此 task 会收到第二个参数 queuedMs：调用方应把它叠加到自己的超时上。
  */
 
@@ -28,20 +28,20 @@ export const ApexAction = {
 /** 各动作间隔估计值下限（ms）：低于此值基本必被服务器打回 */
 const EST_FLOOR = { read: 300, guess: 1200, vote: 1200 };
 
-/** 间隔估计值上限（ms）：超过 30s 多为全局异常，不再无脑拉长 */
-const EST_CEIL = 30000;
+/** 间隔估计值上限（ms）：超过 15s 多为异常/全局限流，不再无脑拉长 */
+const EST_CEIL = 15000;
 
-/** 间隔估计初始值（ms）：偏保守，收敛后会自动下调 */
-const EST_DEFAULT = { read: 600, guess: 2500, vote: 2500 };
+/** 间隔估计初始值（ms）：对齐服务器实测冷却窗口（约 3~5s），收敛后会自动下调 */
+const EST_DEFAULT = { read: 600, guess: 3000, vote: 3000 };
 
 /** 排期余量（ms）：避免贴边触发 200400 */
 const EST_MARGIN = 200;
 
 /** 200400 后的乘性放大系数 */
-const EST_GROW = 1.6;
+const EST_GROW = 1.5;
 
 /** 连续成功后每次下调的步长（ms） */
-const EST_SHRINK = 150;
+const EST_SHRINK = 200;
 
 /** 连续成功多少次才下调一次（避免在边界上反复抖动） */
 const OK_BEFORE_SHRINK = 3;
@@ -53,7 +53,7 @@ const MIN_CMD_GAP_MS = 200;
 const MAX_RETRY = 3;
 
 /** 估计值持久化键（跨会话沿用学习结果） */
-const STORE_KEY = "apex:estCooldown";
+const STORE_KEY = "apex:estCooldown:v2";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -178,27 +178,46 @@ const serialize = (task) => {
 };
 
 /**
- * 发送一条 apex 命令：自动等待冷却，被 200400 打回时放大间隔并退避重试。
+ * 发送一条 apex 命令。
+ *
+ * 两种模式：
+ *  · 默认（批量/轮询）：进入全局串行链，先等自适应冷却再发，被 200400 打回则放大间隔重试。
+ *    用于分页拉取、30s 轮询、批量任务——这些是「我们自己发起」的，串行化能消除并发突发。
+ *  · immediate（用户手动点击）：**不等冷却、不进串行链**，立即发送，让服务器的冷却窗口
+ *    自己裁决。只有真被 200400 打回时才退避重试。手动操作本来就受服务器 3~5s 冷却限制，
+ *    客户端再叠加一层排队只会让点击「没反应」，而不会让服务器放得更快。
  *
  * @param {string} key 动作类型（ApexAction）
- * @param {Function} task 实际发送函数，返回 Promise
+ * @param {Function} task 实际发送函数，返回 Promise；入参为 queuedMs（排队耗时）
  * @param {object} [opt] 选项
  * @param {number} [opt.maxRetry] 200400 最大自动重试次数
  * @param {Function} [opt.onWait] 等待冷却时的回调，参数为等待毫秒数（用于 UI 倒计时 / 日志）
+ * @param {boolean} [opt.immediate] 用户手动触发：跳过排队与冷却等待，直接发送
  * @returns {Promise<*>} task 的返回值
  * @throws {Error} 重试耗尽或遇到非限流错误时抛出原始异常
  */
-export const runApexAction = async (key, task, { maxRetry = MAX_RETRY, onWait } = {}) =>
-  serialize(async () => {
+export const runApexAction = async (
+  key,
+  task,
+  { maxRetry, onWait, immediate = false } = {},
+) => {
+  // 手动操作只自动重试 1 次：多试几次会让点击「卡住」很久，不如明确告知用户稍后再点
+  const retries = maxRetry ?? (immediate ? 1 : MAX_RETRY);
+  const run = async () => {
     for (let attempt = 0; ; attempt += 1) {
-      const wait = apexCooldownLeft(key);
-      if (wait > 0) {
-        onWait?.(wait);
-        await sleep(wait);
+      // 记录本次排队实际耗时（冷却等待 + 进入串行链的等待）
+      const queuedAt = Date.now();
+      if (!immediate) {
+        const wait = apexCooldownLeft(key);
+        if (wait > 0) {
+          onWait?.(wait);
+          await sleep(wait);
+        }
       }
+      const waitedMs = Date.now() - queuedAt;
       lastSentAt = Date.now();
       try {
-        const res = await task();
+        const res = await task(waitedMs);
         onSuccess(key);
         scheduleNext(key);
         return res;
@@ -211,9 +230,19 @@ export const runApexAction = async (key, task, { maxRetry = MAX_RETRY, onWait } 
         // 服务器冷却自「上次放行」起算，本次被打回后从当前时刻重新排期
         onRateLimited(key);
         scheduleNext(key);
-        if (attempt >= maxRetry) {
+        if (attempt >= retries) {
           throw e;
+        }
+        // 手动模式下退避一段时间再试，避免连续硬撞服务器冷却窗口
+        if (immediate) {
+          const backoff = Math.min(est[key] + EST_MARGIN, EST_CEIL);
+          onWait?.(backoff);
+          await sleep(backoff);
         }
       }
     }
-  });
+  };
+
+  // 手动操作不进串行链：用户点击应立即发出，不与后台轮询/分页争抢队列
+  return immediate ? run() : serialize(run);
+};

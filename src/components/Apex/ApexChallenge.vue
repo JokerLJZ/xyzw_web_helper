@@ -699,6 +699,8 @@ const confStale = computed(
 const betList = ref([]); // 历史竞猜对阵（仅本人参与的场次）
 const scheduleGroups = ref([]); // 历史赛程：期 -> 阶段 -> 场次
 const currentVoteBoard = ref([]); // 当前期助威榜
+/** 助威榜是否已完整拉取（被限流截断时为 false，下一次轮询自动补齐） */
+const voteBoardComplete = ref(true);
 const currentBets = ref([]); // 当前期竞猜：按淘汰赛阶段分组
 
 /** 可查看的期号（真实规则） */
@@ -1104,24 +1106,28 @@ const fetchPagedList = async ({
   if (!token) return { rows: [], last: true };
   const rows = [];
   let last = false;
+  // 是否因被限流而提前退出：此时数据是「没拉完」，绝不能当成拉完
+  let cutByLimit = false;
   for (let p = 0; p < maxPages && !last; p++) {
     let res;
     try {
       // 走自适应限流器：页面轮询 / 首屏并发拉取都不会突发打爆服务器
       res = await runApexAction(
         ApexAction.READ,
-        () =>
+        // 排队耗时补偿进超时：否则队尾请求会带着被吃光的预算发出而误报超时
+        (queuedMs) =>
           tokenStore.sendMessageWithPromise(
             token.id,
             cmd,
             { ...params, idx: startIdx + rows.length },
-            timeout,
+            timeout + queuedMs,
           ),
         { maxRetry: 1 },
       );
     } catch (e) {
-      // 被限流：保留已加载的行，last 保持 false，交给下一次轮询续拉
+      // 被限流：保留已加载的行，标记为「未拉完」，交给下一次轮询续拉
       if (isApexRateLimited(e)) {
+        cutByLimit = true;
         break;
       }
       throw e;
@@ -1131,7 +1137,12 @@ const fetchPagedList = async ({
     rows.push(...list);
     last = res?.last === true || rows.length >= maxRows;
   }
-  return { rows, last: last || rows.length < maxRows };
+  // 只有「没被限流截断」时才允许 maxRows 参与终止判定：
+  // 否则 rows.length < maxRows 会把中途失败误报成 last=true，导致调用方不再续拉。
+  if (!cutByLimit && rows.length >= maxRows) {
+    last = true;
+  }
+  return { rows, last };
 };
 
 /**
@@ -1144,12 +1155,12 @@ const fetchRoleInfo = async () => {
   try {
     const res = await runApexAction(
       ApexAction.READ,
-      () =>
+      (queuedMs) =>
         tokenStore.sendMessageWithPromise(
           token.id,
           "apex_getroleinfo",
           {},
-          TIMEOUT_READ,
+          TIMEOUT_READ + queuedMs,
         ),
       { maxRetry: 1 },
     );
@@ -1249,10 +1260,16 @@ const fetchMatchesPage = async (grp) => {
     grp.hasMore = !last && rows.length > 0;
     // 服务端可能在仍有数据时就返回 last=true，因此另用 exhausted 标记「确实拉不到新行」
     if (!rows.length) grp.exhausted = true;
-  } catch {
-    // 该阶段未开放或参数错误：停止继续分页
-    grp.hasMore = false;
-    grp.exhausted = true;
+  } catch (e) {
+    // 被限流：只是「这次没拉到」，保留翻页能力，交给下一次轮询 / 翻页重试。
+    // 若在此处标记 exhausted，一次 200400 就会永久关闭该阶段分页。
+    if (isApexRateLimited(e)) {
+      grp.hasMore = true;
+    } else {
+      // 该阶段未开放或参数错误：停止继续分页
+      grp.hasMore = false;
+      grp.exhausted = true;
+    }
   } finally {
     grp.loading = false;
     fetchingStages.delete(grp.scheduleId);
@@ -1468,12 +1485,12 @@ const fetchScheduleHistory = async () => {
         try {
           const res = await runApexAction(
             ApexAction.READ,
-            () =>
+            (queuedMs) =>
               tokenStore.sendMessageWithPromise(
                 tokenStore.selectedToken.id,
                 "apex_get64oppomap",
                 { scheduleId: sid, groupId: Number(roleInfo.value.group?.[String(sid)] ?? 1) },
-                TIMEOUT_QUERY,
+                TIMEOUT_QUERY + queuedMs,
               ),
             { maxRetry: 1 },
           );
@@ -1565,13 +1582,16 @@ const fetchVoteBoard = async () => {
   if (!round || season.value <= 0 || !tokenStore.selectedToken) return;
   const groupId = getSupportGroupId(roleInfo.value.group, voteScheduleId.value);
   try {
-    const { rows } = await fetchPagedList({
+    const { rows, last } = await fetchPagedList({
       cmd: "apex_getvotelist",
       params: { groupId, round },
       listKey: "apexVoteList",
       timeout: TIMEOUT_READ,
       maxRows: VOTE_BOARD_MAX,
     });
+    // last=true 表示列表确实拉完；未拉完（含被限流截断）时保留已有结果，
+    // 下一次轮询会继续补齐，避免界面停在半截数据上。
+    voteBoardComplete.value = last;
     currentVoteBoard.value = rows.map((t, i) => ({
       rank: i + 1,
       teamId: t.teamId || "-",
@@ -1584,7 +1604,7 @@ const fetchVoteBoard = async () => {
       round,
     }));
   } catch {
-    // 当前轮无助威榜：保持空列表
+    // 请求失败（含限流）：保留上一次已加载的榜单，不清空，避免界面闪空
   }
 };
 
@@ -1616,17 +1636,20 @@ const doGuess = async (teamId, row, grp) => {
   const name = row.team1Id === teamId ? row.team1Name : row.team2Name;
   pendingGuessTeamId.value = teamId;
   try {
-    // 被 200400 打回时由限流器放大间隔并自动退避重试，重试耗尽才提示用户
+    // 手动竞猜走 immediate：不排队、不等冷却，直接发；被 200400 打回才退避重试
     await runApexAction(
       ApexAction.GUESS,
-      () =>
+      (queuedMs) =>
         tokenStore.sendMessageWithPromise(
           token.id,
           "apex_guess",
           { teamId },
-          TIMEOUT_ACTION,
+          TIMEOUT_ACTION + queuedMs,
         ),
-      { onWait: (ms) => startActionCooldown("guess", ms) },
+      {
+        immediate: true,
+        onWait: (ms) => startActionCooldown("guess", ms),
+      },
     );
     // 业务错误码由 xyzwWebSocket.js 直接 reject，成功分支即 resolve
     message.success(`已竞猜 ${name}，等待开赛结果`);
@@ -1666,6 +1689,9 @@ const voteChangeNum = (delta) => {
 /**
  * 确认助威（真实接口 apex_vote）。
  * 前置校验与客户端一致：checkSupportInTime 通过且持有道具充足。
+ *
+ * 冷却仅用于「刚被服务器打回」后的短暂提示：正常点击直接放行，
+ * 由服务器自己的冷却窗口裁决，客户端不额外制造等待。
  */
 const doVote = async () => {
   const token = tokenStore.selectedToken;
@@ -1688,16 +1714,20 @@ const doVote = async () => {
   }
   voteLoading.value = true;
   try {
+    // 手动助威同样走 immediate：立即发出，由服务器的冷却窗口裁决
     await runApexAction(
       ApexAction.VOTE,
-      () =>
+      (queuedMs) =>
         tokenStore.sendMessageWithPromise(
           token.id,
           "apex_vote",
           { teamId: voteTargetTeamId.value, round: voteRound.value, voteCnt: voteCnt.value },
-          TIMEOUT_ACTION,
+          TIMEOUT_ACTION + queuedMs,
         ),
-      { onWait: (ms) => startActionCooldown("vote", ms) },
+      {
+        immediate: true,
+        onWait: (ms) => startActionCooldown("vote", ms),
+      },
     );
     message.success(`已为 ${voteTargetName.value} 助威 ${voteCnt.value} 次`);
     voteDialogVisible.value = false;
@@ -1782,6 +1812,7 @@ const stopPolling = () => {
 watch(selectedRound, (round, old) => {
   if (!round || round === old) return;
   currentVoteBoard.value = [];
+  voteBoardComplete.value = true;
   currentBets.value = [];
   refreshCurrentBets();
   fetchVoteBoard();
