@@ -1061,15 +1061,181 @@ export function createTasksItem(deps) {
     const activeTeamId = teamInfo?.useTeamId;
     const activeTeam =
       teams?.[activeTeamId] || teams?.[String(activeTeamId)] || teams;
+    const activeTeamHeroes = activeTeam?.teamInfo || activeTeam;
 
-    return Object.entries(activeTeam || {})
+    return Object.entries(activeTeamHeroes || {})
       .map(([key, hero]) => ({
         heroId: Number(hero?.heroId ?? hero?.id),
         slot: Number(hero?.battleTeamSlot ?? hero?.position ?? key),
+        level: Number(hero?.level) || 1,
+        order: Number(hero?.order) || 0,
       }))
       .filter(
         (hero) => Number.isFinite(hero.heroId) && Number.isFinite(hero.slot),
       );
+  };
+
+  const runFormationCommand = async (
+    tokenId,
+    tokenName,
+    command,
+    params,
+    actionName,
+  ) => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await tokenStore.sendMessageWithPromise(
+          tokenId,
+          command,
+          params,
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+      } catch (error) {
+        const errorMessage = getErrorMessage(error);
+        const transientError =
+          /200020|200050|200400|操作太快|未知错误|重启游戏/.test(
+            errorMessage,
+          );
+        if (!transientError || attempt >= 3) throw error;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} ${actionName}触发临时错误，等待6秒后进行第${attempt + 1}次重试：${errorMessage}`,
+          type: "warning",
+        });
+        await new Promise((resolve) => setTimeout(resolve, 6000));
+      }
+    }
+  };
+
+  const applyTargetFormation = async ({
+    tokenId,
+    tokenName,
+    targetHeroes,
+    formationName,
+    recycleSlots = new Set(),
+  }) => {
+    const currentTeamResult = await runFormationCommand(
+      tokenId,
+      tokenName,
+      "presetteam_getinfo",
+      {},
+      "查询当前阵容",
+    );
+    const currentHeroes = getPresetTeamHeroes(currentTeamResult);
+
+    for (const target of targetHeroes) {
+      const targetCurrent = currentHeroes.find(
+        (hero) => hero.heroId === target.heroId,
+      );
+      if (targetCurrent?.slot === target.slot) continue;
+
+      if (targetCurrent) {
+        await runFormationCommand(
+          tokenId,
+          tokenName,
+          "hero_gobackbattle",
+          { slot: targetCurrent.slot },
+          `${HERO_DICT[target.heroId]?.name || target.heroId}从${targetCurrent.slot + 1}号位下阵`,
+        );
+        currentHeroes.splice(currentHeroes.indexOf(targetCurrent), 1);
+        await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+      }
+
+      const currentAtTargetSlot = currentHeroes.find(
+        (hero) => hero.slot === target.slot,
+      );
+      if (currentAtTargetSlot) {
+        await runFormationCommand(
+          tokenId,
+          tokenName,
+          "hero_exchange",
+          {
+            heroId: currentAtTargetSlot.heroId,
+            targetHeroId: target.heroId,
+          },
+          `${HERO_DICT[currentAtTargetSlot.heroId]?.name || currentAtTargetSlot.heroId}更换为${HERO_DICT[target.heroId]?.name || target.heroId}`,
+        );
+        currentAtTargetSlot.heroId = target.heroId;
+      } else {
+        await runFormationCommand(
+          tokenId,
+          tokenName,
+          "hero_gointobattle",
+          { heroId: target.heroId, slot: target.slot },
+          `${HERO_DICT[target.heroId]?.name || target.heroId}上阵`,
+        );
+        currentHeroes.push({ heroId: target.heroId, slot: target.slot });
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+    }
+
+    const targetHeroIds = new Set(targetHeroes.map((hero) => hero.heroId));
+    for (const hero of [...currentHeroes]) {
+      if (targetHeroIds.has(hero.heroId)) continue;
+      await runFormationCommand(
+        tokenId,
+        tokenName,
+        "hero_gobackbattle",
+        { slot: hero.slot },
+        `${hero.slot + 1}号位多余武将下阵`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+      if (
+        recycleSlots.has(hero.slot) &&
+        (hero.level > 1 || hero.order > 0)
+      ) {
+        await runFormationCommand(
+          tokenId,
+          tokenName,
+          "hero_rebirth",
+          { heroId: hero.heroId },
+          `${HERO_DICT[hero.heroId]?.name || hero.heroId}资源回收`,
+        );
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 已回收${hero.slot + 1}号位${HERO_DICT[hero.heroId]?.name || hero.heroId}的培养资源`,
+          type: "success",
+        });
+        await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+      }
+    }
+
+    const verifiedTeamResult = await runFormationCommand(
+      tokenId,
+      tokenName,
+      "presetteam_getinfo",
+      {},
+      `校验${formationName}`,
+    );
+    const verifiedHeroes = getPresetTeamHeroes(verifiedTeamResult);
+    const invalidTarget = targetHeroes.find(
+      (target) =>
+        !verifiedHeroes.some(
+          (hero) =>
+            hero.heroId === target.heroId && hero.slot === target.slot,
+        ),
+    );
+    if (invalidTarget) {
+      throw new Error(
+        `${HERO_DICT[invalidTarget.heroId]?.name || invalidTarget.heroId}未处于${invalidTarget.slot + 1}号位`,
+      );
+    }
+    const extraHero = verifiedHeroes.find(
+      (hero) => !targetHeroIds.has(hero.heroId),
+    );
+    if (extraHero) {
+      throw new Error(
+        `${extraHero.slot + 1}号位仍有多余武将${HERO_DICT[extraHero.heroId]?.name || extraHero.heroId}`,
+      );
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} ${formationName}已调整：${targetHeroes
+        .map((hero) => `${hero.slot + 1}号位${HERO_DICT[hero.heroId]?.name}`)
+        .join("、")}`,
+      type: "success",
+    });
   };
 
   const adjustMainLevelFormation = async (tokenId, tokenName) => {
@@ -1080,50 +1246,17 @@ export function createTasksItem(deps) {
       ),
     );
     const targetHeroes = [
-      { heroId: 107, slot: 0 }, // 吕布
-      { heroId: 110, slot: 1 }, // 黄月英
-      { heroId: 104, slot: 2 }, // 诸葛亮
-      { heroId: 106, slot: 3 }, // 太史慈
-      {
-        heroId: ownedHeroIds.has(223) ? 223 : 204, // 蔡文姬，否则张飞
-        slot: 4,
-      },
+      { heroId: 107, slot: 0 },
+      { heroId: 110, slot: 1 },
+      { heroId: 104, slot: 2 },
+      { heroId: 106, slot: 3 },
+      { heroId: ownedHeroIds.has(223) ? 223 : 204, slot: 4 },
     ].filter((target) => ownedHeroIds.has(target.heroId));
-
-    const currentTeamResult = await tokenStore.sendMessageWithPromise(
+    await applyTargetFormation({
       tokenId,
-      "presetteam_getinfo",
-      {},
-      5000,
-    );
-    const currentHeroes = getPresetTeamHeroes(currentTeamResult);
-
-    for (const hero of currentHeroes) {
-      await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "hero_gobackbattle",
-        { slot: hero.slot },
-        5000,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
-    }
-
-    for (const target of targetHeroes) {
-      await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "hero_gointobattle",
-        { heroId: target.heroId, slot: target.slot },
-        5000,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
-    }
-
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: `${tokenName} 推图默认阵容已调整：${targetHeroes
-        .map((hero) => `${hero.slot + 1}号位${HERO_DICT[hero.heroId]?.name}`)
-        .join("、")}`,
-      type: "success",
+      tokenName,
+      targetHeroes,
+      formationName: "推图默认阵容",
     });
   };
 
@@ -1132,69 +1265,18 @@ export function createTasksItem(deps) {
     tokenName,
     ownedHeroIds,
   ) => {
-    const runFormationCommand = async (command, params, actionName) => {
-      for (let attempt = 0; ; attempt += 1) {
-        try {
-          return await tokenStore.sendMessageWithPromise(
-            tokenId,
-            command,
-            params,
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
-        } catch (error) {
-          const errorMessage = getErrorMessage(error);
-          const transientError =
-            /200020|200050|200400|操作太快|未知错误|重启游戏/.test(
-              errorMessage,
-            );
-          if (!transientError || attempt >= 3) throw error;
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} ${actionName}触发临时错误，等待6秒后进行第${attempt + 1}次重试：${errorMessage}`,
-            type: "warning",
-          });
-          await new Promise((resolve) => setTimeout(resolve, 6000));
-        }
-      }
-    };
     const supportHeroId = ownedHeroIds.has(223) ? 223 : 204;
     const targetHeroes = [
-      { heroId: 107, slot: 0 }, // 吕布是前期阵容的必要条件
-      { heroId: supportHeroId, slot: 2 }, // 优先蔡文姬，否则张飞
-      { heroId: 106, slot: 3 }, // 太史慈
+      { heroId: 107, slot: 0 },
+      { heroId: supportHeroId, slot: 2 },
+      { heroId: 106, slot: 3 },
     ].filter((target) => ownedHeroIds.has(target.heroId));
-
-    const currentTeamResult = await runFormationCommand(
-      "presetteam_getinfo",
-      {},
-      "查询当前阵容",
-    );
-    const currentHeroes = getPresetTeamHeroes(currentTeamResult);
-
-    for (const hero of currentHeroes) {
-      await runFormationCommand(
-        "hero_gobackbattle",
-        { slot: hero.slot },
-        `${hero.slot + 1}号位武将下阵`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
-    }
-
-    for (const target of targetHeroes) {
-      await runFormationCommand(
-        "hero_gointobattle",
-        { heroId: target.heroId, slot: target.slot },
-        `${HERO_DICT[target.heroId]?.name || target.heroId}上阵`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
-    }
-
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: `${tokenName} 前期推图阵容已调整：${targetHeroes
-        .map((hero) => `${hero.slot + 1}号位${HERO_DICT[hero.heroId]?.name}`)
-        .join("、")}`,
-      type: "success",
+    await applyTargetFormation({
+      tokenId,
+      tokenName,
+      targetHeroes,
+      formationName: "前期推图阵容",
+      recycleSlots: new Set([1, 4]),
     });
   };
 
