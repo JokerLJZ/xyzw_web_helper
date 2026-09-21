@@ -786,23 +786,11 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="batchUseWarehouseItems(warehouseItemSettings)"
+                  @click="batchUseWarehouseItems"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   使用仓库物品
                 </n-button>
-                <n-checkbox
-                  v-model:checked="warehouseItemSettings.useUniversalRed"
-                  size="small"
-                >
-                  使用万能红碎
-                </n-checkbox>
-                <n-checkbox
-                  v-model:checked="warehouseItemSettings.useUniversalOrange"
-                  size="small"
-                >
-                  使用万能橙碎
-                </n-checkbox>
                 <n-button
                   size="small"
                   @click="batchRedeemCodes"
@@ -2267,8 +2255,7 @@
           <div
             v-if="
               hasSmartBoxWeeklySelected ||
-              hasSmartRecruitWeeklySelected ||
-              taskForm.selectedTasks.includes('batchUseWarehouseItems')
+              hasSmartRecruitWeeklySelected
             "
             class="setting-item"
           >
@@ -2329,31 +2316,6 @@
                 />
               </n-space>
             </div>
-            <div
-              v-if="taskForm.selectedTasks.includes('batchUseWarehouseItems')"
-              style="margin-top: 12px"
-            >
-              <div style="margin-bottom: 6px; color: #4b5563">
-                仓库物品使用
-              </div>
-              <n-space>
-                <n-checkbox
-                  v-model:checked="
-                    taskForm.taskConfig.batchUseWarehouseItems.useUniversalRed
-                  "
-                >
-                  自动使用万能红碎
-                </n-checkbox>
-                <n-checkbox
-                  v-model:checked="
-                    taskForm.taskConfig.batchUseWarehouseItems
-                      .useUniversalOrange
-                  "
-                >
-                  自动使用万能橙碎
-                </n-checkbox>
-              </n-space>
-            </div>
           </div>
           <div class="setting-item" v-if="hasLegacyTaskSelected">
             <div
@@ -2405,7 +2367,7 @@
     <n-modal
       v-model:show="showBatchSettingsModal"
       preset="card"
-      title="任务设置"
+      title="全局任务设置"
       style="width: 90%; max-width: 820px"
     >
       <div class="settings-content">
@@ -2468,6 +2430,62 @@
               >
                 <label class="setting-label">锁定当前水晶属性</label>
                 <n-switch v-model:value="batchSettings.crystalLockAttribute" />
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">使用万能红碎</label>
+                <n-switch v-model:value="batchSettings.useUniversalRed" />
+              </div>
+              <div
+                v-if="batchSettings.useUniversalRed"
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">红将第一优先</label>
+                <n-select
+                  v-model:value="batchSettings.universalRedPrimaryHeroId"
+                  :options="redFragmentPrimaryHeroOptions"
+                  filterable
+                  size="small"
+                  style="width: 180px"
+                />
+              </div>
+              <div
+                v-if="batchSettings.useUniversalRed"
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">红将第二优先</label>
+                <n-select
+                  v-model:value="batchSettings.universalRedSecondaryHeroId"
+                  :options="redFragmentSecondaryHeroOptions"
+                  filterable
+                  size="small"
+                  style="width: 180px"
+                />
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">使用万能橙碎</label>
+                <n-switch v-model:value="batchSettings.useUniversalOrange" />
+              </div>
+              <div
+                v-if="batchSettings.useUniversalOrange"
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">橙将优先武将</label>
+                <n-select
+                  v-model:value="batchSettings.universalOrangeHeroId"
+                  :options="orangeFragmentHeroOptions"
+                  filterable
+                  size="small"
+                  style="width: 180px"
+                />
               </div>
               <div
                 class="setting-item"
@@ -4224,10 +4242,6 @@ const smartBoxWeeklySettings = reactive({
   smartBoxTypes: [2002, 2003, 2004],
   smartBoxGroupCount: 1,
 });
-const warehouseItemSettings = reactive({
-  useUniversalRed: true,
-  useUniversalOrange: true,
-});
 
 const showHeroLevelUpgradeModal = ref(false);
 const heroLevelUpgradeForm = reactive({
@@ -4239,6 +4253,17 @@ const heroLevelUpgradeHeroOptions = Object.entries(HERO_DICT).map(
     label: `${hero.name} (${hero.type})`,
     value: Number(heroId),
   }),
+);
+const redFragmentPrimaryHeroOptions = heroLevelUpgradeHeroOptions.filter(
+  (option) => option.value >= 101 && option.value < 200,
+);
+const redFragmentSecondaryHeroOptions = computed(() =>
+  redFragmentPrimaryHeroOptions.filter(
+    (option) => option.value !== batchSettings.universalRedPrimaryHeroId,
+  ),
+);
+const orangeFragmentHeroOptions = heroLevelUpgradeHeroOptions.filter(
+  (option) => option.value >= 201 && option.value < 300,
 );
 const heroLevelUpgradeFactionOptions = [
   { label: "魏国", value: "魏国" },
@@ -4330,6 +4355,11 @@ const batchSettings = reactive({
   legionId: null,
   crystalHeroId: 107,
   crystalLockAttribute: true,
+  useUniversalRed: true,
+  useUniversalOrange: true,
+  universalRedPrimaryHeroId: 107,
+  universalRedSecondaryHeroId: 106,
+  universalOrangeHeroId: 210,
   dreamPurchaseList: defaultDreamPurchaseList,
   redemptionCodeMode: "default",
   customRedemptionCodes: "",
@@ -4378,6 +4408,54 @@ const batchSettings = reactive({
   smartDepartureMatchAll: false,
 });
 
+const normalizeWarehouseItemSettings = () => {
+  const redHeroIds = redFragmentPrimaryHeroOptions.map((option) => option.value);
+  const orangeHeroIds = orangeFragmentHeroOptions.map((option) => option.value);
+  if (!redHeroIds.includes(Number(batchSettings.universalRedPrimaryHeroId))) {
+    batchSettings.universalRedPrimaryHeroId = 107;
+  } else {
+    batchSettings.universalRedPrimaryHeroId = Number(
+      batchSettings.universalRedPrimaryHeroId,
+    );
+  }
+  if (
+    !redHeroIds.includes(Number(batchSettings.universalRedSecondaryHeroId)) ||
+    Number(batchSettings.universalRedSecondaryHeroId) ===
+      batchSettings.universalRedPrimaryHeroId
+  ) {
+    batchSettings.universalRedSecondaryHeroId =
+      [106, 107, ...redHeroIds].find(
+        (heroId) => heroId !== batchSettings.universalRedPrimaryHeroId,
+      ) || batchSettings.universalRedPrimaryHeroId;
+  } else {
+    batchSettings.universalRedSecondaryHeroId = Number(
+      batchSettings.universalRedSecondaryHeroId,
+    );
+  }
+  if (!orangeHeroIds.includes(Number(batchSettings.universalOrangeHeroId))) {
+    batchSettings.universalOrangeHeroId = 210;
+  } else {
+    batchSettings.universalOrangeHeroId = Number(
+      batchSettings.universalOrangeHeroId,
+    );
+  }
+  batchSettings.useUniversalRed = batchSettings.useUniversalRed !== false;
+  batchSettings.useUniversalOrange = batchSettings.useUniversalOrange !== false;
+};
+
+watch(
+  () => batchSettings.universalRedPrimaryHeroId,
+  (primaryHeroId) => {
+    if (batchSettings.universalRedSecondaryHeroId !== primaryHeroId) return;
+    batchSettings.universalRedSecondaryHeroId =
+      [
+        106,
+        107,
+        ...redFragmentPrimaryHeroOptions.map((option) => option.value),
+      ].find((heroId) => heroId !== primaryHeroId) || primaryHeroId;
+  },
+);
+
 // Load batch settings from localStorage
 const loadBatchSettings = () => {
   try {
@@ -4397,6 +4475,7 @@ const loadBatchSettings = () => {
       normalizedRedemptionCodes.redemptionCodeMode;
     batchSettings.customRedemptionCodes =
       normalizedRedemptionCodes.customRedemptionCodes;
+    normalizeWarehouseItemSettings();
     delete batchSettings.blackMarketPurchaseMode;
   } catch (error) {
     console.error("Failed to load batch settings:", error);
@@ -4417,9 +4496,10 @@ const saveBatchSettings = () => {
       normalizedRedemptionCodes.redemptionCodeMode;
     batchSettings.customRedemptionCodes =
       normalizedRedemptionCodes.customRedemptionCodes;
+    normalizeWarehouseItemSettings();
     delete batchSettings.blackMarketPurchaseMode;
     localStorage.setItem("batchSettings", JSON.stringify(batchSettings));
-    message.success("定时批量任务设置已保存");
+    message.success("全局任务设置已保存");
     showBatchSettingsModal.value = false;
   } catch (error) {
     console.error("Failed to save batch settings:", error);
@@ -4494,11 +4574,6 @@ const createScheduledTaskConfig = (config = {}) => ({
         ),
       ),
     ),
-  },
-  batchUseWarehouseItems: {
-    useUniversalRed: config.batchUseWarehouseItems?.useUniversalRed !== false,
-    useUniversalOrange:
-      config.batchUseWarehouseItems?.useUniversalOrange !== false,
   },
 });
 
@@ -6182,7 +6257,6 @@ const executeScheduledTask = async (task) => {
         [
           "batchSmartBoxWeekly",
           "batchSmartRecruitWeekly",
-          "batchUseWarehouseItems",
         ].includes(taskName)
       ) {
         await taskFunction(task.taskConfig?.[taskName] || {});

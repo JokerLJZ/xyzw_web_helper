@@ -2987,7 +2987,7 @@ export function createTasksItem(deps) {
   };
 
   /** 小号任务：按规则消耗仓库内可使用物品。 */
-  const batchUseWarehouseItems = async (taskConfig = {}) => {
+  const batchUseWarehouseItems = async () => {
     if (selectedTokens.value.length === 0) return;
 
     const MAX_USE_PER_REQUEST = 999;
@@ -3002,11 +3002,15 @@ export function createTasksItem(deps) {
       3001, 3002, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 35011,
     ];
     const EXCLUDED_ACTIVITY_ITEM_IDS = new Set([5054, 5095, 6001]);
-    const LVBU_ID = 107;
-    const TAISHICI_ID = 106;
-    const DIAOCHAN_ID = 210;
-    const useUniversalRed = taskConfig.useUniversalRed !== false;
-    const useUniversalOrange = taskConfig.useUniversalOrange !== false;
+    const useUniversalRed = batchSettings.useUniversalRed !== false;
+    const useUniversalOrange = batchSettings.useUniversalOrange !== false;
+    const redPrimaryHeroId = Number(
+      batchSettings.universalRedPrimaryHeroId || 107,
+    );
+    const redSecondaryHeroId = Number(
+      batchSettings.universalRedSecondaryHeroId || 106,
+    );
+    const orangeHeroId = Number(batchSettings.universalOrangeHeroId || 210);
     const actionDelayMs = Math.max(
       MIN_ACTION_DELAY_MS,
       Number(delayConfig.action) || 0,
@@ -3365,9 +3369,9 @@ export function createTasksItem(deps) {
             tokenId,
             universalItemId: UNIVERSAL_RED_ITEM_ID,
             resolveTargetHeroId: (latestRoleInfo) =>
-              getHeroStar(getHeroes(latestRoleInfo), LVBU_ID) < 30
-                ? LVBU_ID
-                : TAISHICI_ID,
+              getHeroStar(getHeroes(latestRoleInfo), redPrimaryHeroId) < 30
+                ? redPrimaryHeroId
+                : redSecondaryHeroId,
             tokenName,
           });
         } else if (!useUniversalRed && redQuantity > 0) {
@@ -3383,7 +3387,7 @@ export function createTasksItem(deps) {
           await useUniversalFragments({
             tokenId,
             universalItemId: UNIVERSAL_ORANGE_ITEM_ID,
-            resolveTargetHeroId: () => DIAOCHAN_ID,
+            resolveTargetHeroId: () => orangeHeroId,
             tokenName,
           });
         } else if (!useUniversalOrange && orangeQuantity > 0) {
