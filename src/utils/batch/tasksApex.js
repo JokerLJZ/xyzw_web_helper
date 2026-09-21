@@ -38,7 +38,7 @@ const READ_MAX_RETRY = 1;
  * 服务器对 apex_* 有频控（200400「操作太快」），固定 sleep 无法适配真实冷却，
  * 统一走 utils/apexRateLimit.js：串行排队 + AIMD 自适应间隔。
  * @param {string} action 动作类型（ApexAction）
- * @param {Function} task 实际发送函数
+ * @param {Function} task 实际发送函数；入参为排队耗时（ms），应叠加到响应超时上
  * @param {number} [maxRetry] 200400 自动重试次数
  * @returns {Promise<*>} 命令响应
  */
@@ -122,12 +122,14 @@ export function createTasksApex(deps) {
         // 1. 获取角色信息（resetTime.day 用于服务端时间校准）
         const roleResp = await sendApex(
           ApexAction.READ,
-          () =>
+          // 排队耗时补偿进超时：本命令排在串行链尾时，冷却等待会吃掉预算，
+          // 不补偿就会出现「还没等到响应先报超时」的假故障
+          (queuedMs) =>
             tokenStore.sendMessageWithPromise(
               tokenId,
               "apex_getroleinfo",
               {},
-              TIMEOUT_MS,
+              TIMEOUT_MS + queuedMs,
             ),
           READ_MAX_RETRY,
         );
@@ -183,12 +185,13 @@ export function createTasksApex(deps) {
             if (shouldStop.value) break;
             const resp = await sendApex(
               ApexAction.READ,
-              () =>
+              // 同上：分页循环每页都要重新等冷却，补偿后才不会误判超时
+              (queuedMs) =>
                 tokenStore.sendMessageWithPromise(
                   tokenId,
                   "apex_getguesslist",
                   { scheduleId: tab.scheduleId, idx: allGroups.length },
-                  TIMEOUT_MS,
+                  TIMEOUT_MS + queuedMs,
                 ),
               READ_MAX_RETRY,
             );
@@ -239,12 +242,12 @@ export function createTasksApex(deps) {
             try {
               await runApexAction(
                 ApexAction.GUESS,
-                () =>
+                (queuedMs) =>
                   tokenStore.sendMessageWithPromise(
                     tokenId,
                     "apex_guess",
                     { teamId: pick.teamId },
-                    TIMEOUT_MS,
+                    TIMEOUT_MS + queuedMs,
                   ),
                 {
                   // 等待服务器冷却时给出可见反馈，避免界面像卡死
