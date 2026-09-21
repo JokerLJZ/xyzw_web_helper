@@ -168,6 +168,7 @@ export function registerDefaultCommands(reg) {
     .register("task_claimdailypoint", { taskId: 1 })
     .register("task_claimdailyreward", { rewardId: 0 })
     .register("task_claimweekreward", { rewardId: 0 })
+    .register("task_claimachievement", { achievementId: 0 })
 
     // 好友/招募
     .register("friend_batch", { friendId: 0 })
@@ -1242,6 +1243,7 @@ export class XyzwWebSocketClient {
       // 特殊响应映射 - 有些命令有独立响应，有些用同步响应
       task_claimdailyrewardresp: "task_claimdailyreward",
       task_claimweekrewardresp: "task_claimweekreward",
+      task_claimachievementresp: "task_claimachievement",
 
       // 同步响应映射（优先级低）
 

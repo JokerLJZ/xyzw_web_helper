@@ -738,6 +738,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchClaimAchievementRewards"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  领取成就奖励
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchTopUpGoldFish"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -4808,6 +4815,7 @@ const taskGroupDefinitions = [
       "batchJoinLegion",
       "batchUpgradeCrystal",
       "batchMaxWarriorLegionTech",
+      "batchClaimAchievementRewards",
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
       "batchAdjustEarlyMainLevelFormation",
@@ -7782,6 +7790,7 @@ const {
   batchUpgradeCrystal,
   batchUpgradeEquipment,
   batchMaxWarriorLegionTech,
+  batchClaimAchievementRewards,
 } = tasksItem;
 
 const confirmUpgradeLordTo6000 = () => {

@@ -68,6 +68,7 @@ export const availableTasks = [
   { label: "批量加入俱乐部", value: "batchJoinLegion" },
   { label: "水晶升级至资源不足", value: "batchUpgradeCrystal" },
   { label: "战士科技依次升满", value: "batchMaxWarriorLegionTech" },
+  { label: "领取成就奖励", value: "batchClaimAchievementRewards" },
   { label: "一键竞技场补齐", value: "batchTopUpArena" },
   { label: "一键换皮闯关", value: "skinChallenge" },
   { label: "一键购买四圣碎片", value: "legion_storebuygoods" },

@@ -17,6 +17,7 @@ import {
   getWarriorResearchCost,
   isAttackTrump,
 } from "@/utils/upgradeResourcePlanner";
+import { getClaimableAchievementIds } from "@/utils/achievementRewards";
 
 // EquipmentLvConf.lvSpend，区间表示装备从当前等级继续升级所需的精铁。
 const EQUIPMENT_IRON_COST_RANGES = [
@@ -92,6 +93,92 @@ export function createTasksItem(deps) {
   };
 
   const fishNames = { 1: "普通鱼竿", 2: "黄金鱼竿" };
+
+  /** 查询角色成就进度，并领取所有当前已经达成的奖励。 */
+  const batchClaimAchievementRewards = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      let claimed = 0;
+
+      try {
+        tokenStatus.value[tokenId] = "running";
+        await ensureConnection(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const role =
+          roleInfo?.role ||
+          roleInfo?.data?.role ||
+          roleInfo?.body?.role ||
+          roleInfo?.data?.body?.role ||
+          {};
+        const claimableIds = getClaimableAchievementIds(
+          role.achievement || {},
+        );
+
+        if (claimableIds.length === 0) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 当前没有可领取的成就奖励`,
+            type: "info",
+          });
+          return;
+        }
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 检测到${claimableIds.length}个可领取的成就奖励`,
+          type: "info",
+        });
+
+        for (const achievementId of claimableIds) {
+          if (shouldStop.value) break;
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "task_claimachievement",
+            { achievementId },
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          claimed += 1;
+          await new Promise((resolve) =>
+            setTimeout(resolve, delayConfig.command),
+          );
+        }
+
+        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 成就奖励领取完成，共领取${claimed}个`,
+          type: claimed > 0 ? "success" : "warning",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 成就奖励领取失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+    message.success("成就奖励领取任务结束");
+  };
 
   /** 使用精铁一键升级指定武将的全部装备。 */
   const batchUpgradeEquipment = async () => {
@@ -4519,6 +4606,7 @@ export function createTasksItem(deps) {
   };
 
   return {
+    batchClaimAchievementRewards,
     batchMaxWarriorLegionTech,
     batchUpgradeCrystal,
     batchUpgradeEquipment,
