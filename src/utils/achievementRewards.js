@@ -36,12 +36,14 @@ export function getClaimableAchievementIds(achievement = {}) {
     }
 
     for (let index = startIndex; index < steps.length; index += 1) {
-      const [id, requiredValue] = steps[index];
+      const [, requiredValue] = steps[index];
       const completed = type === 14
         ? completeValue > 0 && completeValue <= requiredValue
         : completeValue >= requiredValue;
       if (!completed) break;
-      claimable.push(id);
+      // 服务端参数 achievementId 指成就类别，而不是阶段配置 ID。
+      // 同一类别连续多档已达成时，需要重复领取该类别。
+      claimable.push(type);
     }
   }
 

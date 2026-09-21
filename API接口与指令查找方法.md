@@ -80,7 +80,7 @@ rg -n "claimAchievement|Achievement|achievementId" <解密后的目录>
 这次在客户端成就界面中找到的调用形式是：
 
 ```javascript
-TaskService.claimAchievement({ achievementId: config.id });
+TaskService.claimAchievement({ achievementId: achievement.gotoConfig.id });
 ```
 
 它能确认：
@@ -88,7 +88,8 @@ TaskService.claimAchievement({ achievementId: config.id });
 - 服务：`TaskService`；
 - 方法：`claimAchievement`；
 - 参数名：`achievementId`；
-- 参数值：成就配置项的 `id`。
+- 参数值：成就类别配置 `AchievementConf` 的 `id`，不是阶段配置
+  `AchievementTaskList.id`。
 
 根据当前客户端的 Service 到协议命名规则，再确认实际 WebSocket 指令为：
 
@@ -97,6 +98,169 @@ task_claimachievement
 ```
 
 不能只凭命名习惯猜接口。至少还要在协议注册、网络消息或实际响应中完成一次交叉验证。
+
+### 4. 一个完整的具体例子：查找“成就奖励领取”接口
+
+下面不再只讲原则，而是按这次实际分析的顺序走一遍。
+
+#### 第一步：先从界面动作推测搜索词
+
+目标动作是“点击成就页面中的领取按钮”。暂时不知道接口名，只知道它与“成就”和“领取”有关，所以先在解密后的客户端代码中搜索：
+
+```bash
+rg -n "achievement|Achievement|成就" <客户端代码目录>
+```
+
+如果结果太多，再增加“领取”相关词缩小范围：
+
+```bash
+rg -n "claimAchievement|achievementId" <客户端代码目录>
+```
+
+最终在成就界面的按钮回调附近看到类似代码：
+
+```javascript
+TaskService.claimAchievement({ achievementId: e.gotoConfig.id });
+```
+
+这行代码可以直接读成：
+
+> 用户点击领取按钮时，客户端调用 `TaskService` 的 `claimAchievement` 方法，并把该成就类别的 ID 放进 `achievementId` 字段。
+
+到这里已经确认了请求参数不是 `taskId`、`id` 或 `rewardId`，而是：
+
+```javascript
+{ achievementId: 具体成就ID }
+```
+
+#### 第二步：从 Service 方法定位协议指令
+
+继续查看 `TaskService.claimAchievement` 的生成或注册位置，并对照同一服务中的已知方法。例如：
+
+```text
+TaskService.claimDailyReward  -> task_claimdailyreward
+TaskService.claimWeekReward   -> task_claimweekreward
+TaskService.claimAchievement  -> task_claimachievement
+```
+
+再用协议注册或实际消息进行交叉确认后，得到最终指令：
+
+```text
+task_claimachievement
+```
+
+因此项目中的单次领取请求等价于：
+
+```javascript
+await tokenStore.sendMessageWithPromise(
+  tokenId,
+  "task_claimachievement",
+  { achievementId: 2 },
+);
+```
+
+这里必须传成就类别 ID `2`。阶段配置 ID `12` 只用于判断该阶段是否已经领取，不能作为领取请求参数。
+
+#### 第三步：找出领取前应该查询什么
+
+仅知道领取指令还不够，因为我们不知道哪个 ID 已完成、哪个已经领过。于是继续从成就页面“刷新列表”的代码往回查，发现它读取：
+
+```javascript
+role.achievement
+```
+
+假设角色信息接口返回了下面这段数据：
+
+```javascript
+{
+  role: {
+    achievement: {
+      2: {
+        completeValue: 420,
+        lastClaimId: 11,
+      },
+    },
+  },
+}
+```
+
+它表达的是：
+
+- `2`：第 2 类成就；
+- `completeValue: 420`：该类成就当前累计完成值为 420；
+- `lastClaimId: 11`：最后已经领取的是配置 ID 11。
+
+这就是为什么功能执行时先调用角色信息查询，而不是直接尝试一批 ID。
+
+#### 第四步：用配置表把状态翻译成可领取 ID
+
+从 `AchievementTaskList` 中取出第 2 类成就，会看到类似阶段：
+
+| 成就类型 | 配置 ID | 要求完成值 |
+| --- | ---: | ---: |
+| 2 | 11 | 50 |
+| 2 | 12 | 100 |
+| 2 | 13 | 300 |
+| 2 | 14 | 500 |
+| 2 | 15 | 1000 |
+
+现在把角色状态代入：
+
+```text
+当前完成值 = 420
+最后已领取 ID = 11
+```
+
+逐项判断如下：
+
+1. ID 11 已经领取，跳过。
+2. ID 12 要求 100，`420 >= 100`，可以领取。
+3. ID 13 要求 300，`420 >= 300`，可以领取。
+4. ID 14 要求 500，`420 < 500`，不能领取。
+5. 后续阶段要求更高，因此这一类到此停止。
+
+最终计算结果是“第 2 类成就可以连续领取两档”。发送给服务器的领取计划为：
+
+```javascript
+[2, 2]
+```
+
+#### 第五步：按顺序真正领取
+
+程序会串行发送两次请求：
+
+```javascript
+await claim({ achievementId: 2 });
+await wait(commandDelay);
+await claim({ achievementId: 2 });
+```
+
+第一次请求领取第 2 类的当前阶段（阶段 ID 12）；服务器推进该类别的领奖进度后，第二次仍发送类别 ID 2，领取下一个阶段（阶段 ID 13）。不会发送阶段 ID 11，因为它已经领过；也不会尝试阶段 ID 14，因为进度还不够。
+
+把完整过程连起来就是：
+
+```text
+查询角色信息
+  -> 得到第2类进度420、最后领取ID 11
+  -> 查询本地成就配置
+  -> 算出阶段12、13均已达成
+  -> 发送成就类别ID 2，领取当前阶段
+  -> 等待指令间隔
+  -> 再次发送成就类别ID 2，领取下一阶段
+  -> 完成
+```
+
+#### 第六步：为什么不直接遍历 1 到 200
+
+直接尝试所有 ID 看似简单，但会产生几个问题：
+
+- 已领取的 ID 会被重复请求；
+- 未达到条件的 ID 会导致服务器报错；
+- 阶段 ID 不保证连续，而且服务端领取参数本来就不是阶段 ID；
+- 大量无效请求容易触发 `200400 操作太快`；
+- 无法区分“没有奖励”和“接口失败”。
+
+所以本功能采用“先查询状态、再用配置判断、最后只领取符合条件的 ID”的方式。
 
 ## 四、查清业务判断，而不只是找到领取指令
 

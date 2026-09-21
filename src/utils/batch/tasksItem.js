@@ -142,6 +142,11 @@ export function createTasksItem(deps) {
 
         for (const achievementId of claimableIds) {
           if (shouldStop.value) break;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 正在领取成就类别${achievementId}的当前阶段奖励`,
+            type: "info",
+          });
           await tokenStore.sendMessageWithPromise(
             tokenId,
             "task_claimachievement",
