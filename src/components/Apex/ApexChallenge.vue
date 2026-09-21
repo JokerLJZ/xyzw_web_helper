@@ -155,52 +155,6 @@
         </n-card>
 
         <n-grid :cols="4" :x-gap="12" :y-gap="12" style="margin-top: 12px">
-          <n-grid-item>
-            <div class="stat-card sc-red">
-              <div class="stat-icon">🎯</div>
-              <div class="stat-info">
-                <div class="stat-label">竞猜场次</div>
-                <div class="stat-value2">{{ betList.length }} <span class="unit">场</span></div>
-              </div>
-            </div>
-          </n-grid-item>
-          <n-grid-item>
-            <div class="stat-card sc-green">
-              <div class="stat-icon">✅</div>
-              <div class="stat-info">
-                <div class="stat-label">竞猜命中</div>
-                <div class="stat-value2">
-                  {{ betList.filter((b) => b.myWin === true).length }} <span class="unit">场</span>
-                </div>
-              </div>
-            </div>
-          </n-grid-item>
-          <n-grid-item>
-            <div class="stat-card sc-orange">
-              <div class="stat-icon">❌</div>
-              <div class="stat-info">
-                <div class="stat-label">竞猜未中</div>
-                <div class="stat-value2">
-                  {{ betList.filter((b) => b.myWin === false).length }} <span class="unit">场</span>
-                </div>
-              </div>
-            </div>
-          </n-grid-item>
-          <n-grid-item>
-            <div class="stat-card sc-purple">
-              <div class="stat-icon">🛒</div>
-              <div class="stat-info">
-                <div class="stat-label">商店已购</div>
-                <div class="stat-value2">
-                  {{ Object.values(roleInfo.buyRecord || {}).reduce((a, b) => a + (Number(b) || 0), 0) }}
-                  <span class="unit">次</span>
-                </div>
-              </div>
-            </div>
-          </n-grid-item>
-        </n-grid>
-
-        <n-grid :cols="4" :x-gap="12" :y-gap="12" style="margin-top: 12px">
           <n-grid-item v-for="rs in resetCards" :key="rs.label">
             <div class="stat-card" :class="rs.color">
               <div class="stat-icon">{{ rs.icon }}</div>
@@ -2129,16 +2083,6 @@ watch(
   font-weight: 800;
   font-family: "DIN", "Helvetica Neue", sans-serif;
 }
-.unit {
-  font-size: 12px;
-  font-weight: 400;
-  opacity: 0.8;
-  margin-left: 2px;
-}
-.sc-red { background: linear-gradient(135deg, #ff6b6b, #ee5a24); }
-.sc-green { background: linear-gradient(135deg, #26de81, #20bf6b); }
-.sc-orange { background: linear-gradient(135deg, #ffa502, #f39c12); }
-.sc-purple { background: linear-gradient(135deg, #9b59b6, #6c5ce7); }
 .sc-blue { background: linear-gradient(135deg, #54a0ff, #2e86de); }
 .sc-cyan { background: linear-gradient(135deg, #00d2d3, #0abde3); }
 .sc-pink { background: linear-gradient(135deg, #f368e0, #d63031); }
