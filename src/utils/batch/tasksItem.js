@@ -6,6 +6,17 @@ import {
   getItemQuantity,
   runInventoryVerifiedGameCommand,
 } from "@/utils/helperTaskRunner";
+import {
+  getAffordableLevelCount,
+  getHeroLevelCost,
+  getHeroOrderCost,
+  getLordLevelCost,
+  getLordOrderCost,
+  getTrumpTransformCost,
+  getTrumpUpgradeCost,
+  getWarriorResearchCost,
+  isAttackTrump,
+} from "@/utils/upgradeResourcePlanner";
 
 // EquipmentLvConf.lvSpend，区间表示装备从当前等级继续升级所需的精铁。
 const EQUIPMENT_IRON_COST_RANGES = [
@@ -231,12 +242,106 @@ export function createTasksItem(deps) {
         });
         await ensureConnection(tokenId);
 
-        while (!shouldStop.value && upgraded < maxUpgradeAttempts) {
+        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let role = roleInfo?.role || {};
+        let hero = getHeroFromRoleInfo(roleInfo, heroId);
+        if (!hero) {
+          stopReason = `尚未拥有${heroName}`;
+        }
+        const heroLevel = Number(hero?.level) || 0;
+        if (!stopReason && heroLevel < 701) {
+          stopReason = `${heroName}当前${heroLevel}级，未达到水晶升级所需的701级`;
+        }
+        let trumpId = Number(hero?.trumpId) || 0;
+        let gold = Math.max(0, Number(role.gold) || 0);
+        let diamonds = Math.max(0, Number(role.diamond) || 0);
+        let crystalItems = getItemQuantity(roleInfo, 1016);
+        if (!stopReason && trumpId <= 0) {
+          stopReason = `${heroName}尚未解锁水晶`;
+        }
+
+        let transformed = 0;
+        const maxTransformAttempts = 100;
+        while (
+          !stopReason &&
+          !shouldStop.value &&
+          !isAttackTrump(trumpId) &&
+          transformed < maxTransformAttempts
+        ) {
+          const transformCost = getTrumpTransformCost(trumpId);
+          if (
+            !transformCost ||
+            gold < transformCost.gold ||
+            crystalItems < transformCost.items
+          ) {
+            stopReason = `转换攻击水晶资源不足（金币${gold}/${transformCost?.gold ?? "未知"}，水晶材料${crystalItems}/${transformCost?.items ?? "未知"}）`;
+            break;
+          }
+
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "trump_upgrade",
+            { heroId, isLocked: false, isTrans: true },
+            10000,
+          );
+          transformed += 1;
+          await new Promise((resolve) =>
+            setTimeout(resolve, delayConfig.command),
+          );
+
+          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          role = roleInfo?.role || {};
+          hero = getHeroFromRoleInfo(roleInfo, heroId);
+          if (!hero) {
+            stopReason = `转换后未获取到${heroName}信息`;
+            break;
+          }
+          trumpId = Number(hero.trumpId) || 0;
+          gold = Math.max(0, Number(role.gold) || 0);
+          diamonds = Math.max(0, Number(role.diamond) || 0);
+          crystalItems = getItemQuantity(roleInfo, 1016);
+        }
+
+        if (
+          !stopReason &&
+          !isAttackTrump(trumpId) &&
+          transformed >= maxTransformAttempts
+        ) {
+          stopReason = `转换攻击水晶达到安全上限${maxTransformAttempts}次`;
+        }
+        if (!stopReason && transformed > 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${heroName}已转换为攻击水晶，共转换${transformed}次，开始锁定升级`,
+            type: "success",
+          });
+        }
+        const lockUpgrade = isLocked || transformed > 0;
+
+        while (
+          !stopReason &&
+          !shouldStop.value &&
+          upgraded < maxUpgradeAttempts
+        ) {
+          const cost = getTrumpUpgradeCost(trumpId, lockUpgrade);
+          if (!cost) {
+            stopReason = "水晶已达到最高等级";
+            break;
+          }
+          if (
+            gold < cost.gold ||
+            crystalItems < cost.items ||
+            diamonds < cost.diamonds
+          ) {
+            stopReason = `资源不足（金币${gold}/${cost.gold}，水晶材料${crystalItems}/${cost.items}${lockUpgrade ? `，金砖${diamonds}/${cost.diamonds}` : ""}）`;
+            break;
+          }
+
           try {
             const result = await tokenStore.sendMessageWithPromise(
               tokenId,
               "trump_upgrade",
-              { heroId, isLocked, isTrans: false },
+              { heroId, isLocked: lockUpgrade, isTrans: false },
               10000,
             );
             const resultMessage = result?.msg || result?.message || result?.error || "";
@@ -244,6 +349,10 @@ export function createTasksItem(deps) {
               throw new Error(resultMessage || `服务器返回错误码 ${result.code}`);
             }
             upgraded += 1;
+            trumpId += 1;
+            gold -= cost.gold;
+            crystalItems -= cost.items;
+            diamonds -= cost.diamonds;
 
             if (upgraded % 10 === 0) {
               addLog({
@@ -257,7 +366,7 @@ export function createTasksItem(deps) {
               setTimeout(resolve, delayConfig.command),
             );
           } catch (error) {
-            stopReason = getErrorMessage(error) || "资源不足或无法继续升级";
+            stopReason = getErrorMessage(error) || "升级接口执行失败";
             break;
           }
         }
@@ -321,13 +430,84 @@ export function createTasksItem(deps) {
         });
         await ensureConnection(tokenId);
 
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const role = roleInfo?.role || {};
+        if (!role.legionId) {
+          stopReason = "尚未加入俱乐部";
+        }
+        let gold = Math.max(0, Number(role.gold) || 0);
+        const currentResearch = role.legionResearch || {};
+        let legionCoins = 0;
+        if (!stopReason) {
+          const legionResult = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "legion_getinfo",
+            {},
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          const legionInfo =
+            legionResult?.info ||
+            legionResult?.body?.info ||
+            legionResult?.data?.info ||
+            legionResult?.data?.body?.info ||
+            {};
+          const member =
+            legionInfo.members?.[role.roleId] ??
+            legionInfo.members?.[String(role.roleId)];
+          legionCoins = Math.max(
+            0,
+            Number(member?.custom?.legion_coin_cnt) || 0,
+          );
+        }
+
         for (const researchId of researchIds) {
-          if (shouldStop.value) {
-            stopReason = "用户停止任务";
+          if (stopReason || shouldStop.value) {
+            if (shouldStop.value) stopReason = "用户停止任务";
             break;
           }
 
           const techName = LEGION_TECH_NAME[researchId] || `科技${researchId}`;
+          const currentLevel =
+            Number(
+              currentResearch[researchId] ??
+                currentResearch[String(researchId)] ??
+                0,
+            ) || 0;
+          let plannedLevel = currentLevel;
+          let plannedGold = 0;
+          let plannedLegionCoins = 0;
+          for (let level = currentLevel + 1; ; level += 1) {
+            const cost = getWarriorResearchCost(researchId, level);
+            if (!cost) break;
+            if (
+              plannedGold + cost.gold > gold ||
+              plannedLegionCoins + cost.legionCoins > legionCoins
+            ) {
+              break;
+            }
+            plannedGold += cost.gold;
+            plannedLegionCoins += cost.legionCoins;
+            plannedLevel = level;
+          }
+
+          const nextCost = getWarriorResearchCost(
+            researchId,
+            currentLevel + 1,
+          );
+          if (!nextCost) {
+            completed += 1;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${techName}（${researchId}）已经满级，继续下一项`,
+              type: "info",
+            });
+            continue;
+          }
+          if (plannedLevel === currentLevel) {
+            stopReason = `${techName}（${researchId}）资源不足：金币${gold}/${nextCost.gold}，科技点${legionCoins}/${nextCost.legionCoins}`;
+            break;
+          }
+
           try {
             const result = await tokenStore.sendMessageWithPromise(
               tokenId,
@@ -341,9 +521,12 @@ export function createTasksItem(deps) {
             }
 
             completed += 1;
+            gold -= plannedGold;
+            legionCoins -= plannedLegionCoins;
+            currentResearch[researchId] = plannedLevel;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${tokenName} ${techName}（${researchId}）已升级到当前最高等级`,
+              message: `${tokenName} ${techName}（${researchId}）已从${currentLevel}级升级至${plannedLevel}级，消耗金币${plannedGold}、科技点${plannedLegionCoins}`,
               type: "success",
             });
           } catch (error) {
@@ -646,14 +829,6 @@ export function createTasksItem(deps) {
     return text.includes("200400") || text.includes("操作太快");
   };
 
-  const getLatestHero = async (tokenId, heroId, response) => {
-    const responseHero = getHeroFromRoleInfo(response, heroId);
-    if (responseHero) return responseHero;
-
-    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-    return getHeroFromRoleInfo(roleInfo, heroId);
-  };
-
   /**
    * 批量英雄升星
    */
@@ -805,6 +980,10 @@ export function createTasksItem(deps) {
 
     let currentLevel = Number(hero.level) || 0;
     let currentOrder = Number(hero.order) || 0;
+    let remainingGold = Math.max(0, Number(roleInfo?.role?.gold) || 0);
+    let remainingStones = getItemQuantity(roleInfo, 1003);
+    let performedActions = 0;
+    let stopReason = "";
 
     if (currentLevel >= targetLevel) {
       addLog({
@@ -821,6 +1000,11 @@ export function createTasksItem(deps) {
       );
 
       if (nextOrder && currentLevel >= nextOrder.level) {
+        const orderCost = getHeroOrderCost(currentOrder);
+        if (!orderCost || remainingStones < orderCost.stones) {
+          stopReason = `进阶石不足：当前${remainingStones}个，进阶需要${orderCost?.stones ?? "未知"}个`;
+          break;
+        }
         const result = await tokenStore.sendMessageWithPromise(
           tokenId,
           "hero_heroupgradeorder",
@@ -832,14 +1016,9 @@ export function createTasksItem(deps) {
           throw new Error(`进阶失败（当前${currentLevel}级）`);
         }
 
-        hero = await getLatestHero(tokenId, heroId, result);
-        const updatedOrder = Number(hero?.order);
-        if (!hero || !Number.isFinite(updatedOrder) || updatedOrder <= currentOrder) {
-          throw new Error("进阶后未获取到最新武将阶数");
-        }
-
-        currentOrder = updatedOrder;
-        currentLevel = Number(hero.level) || currentLevel;
+        remainingStones -= orderCost.stones;
+        currentOrder += 1;
+        performedActions += 1;
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${tokenName} ${heroName}已自动进阶至${currentOrder}阶（${currentLevel}级）`,
@@ -857,10 +1036,19 @@ export function createTasksItem(deps) {
         targetLevel,
         nextOrder?.level || targetLevel,
       );
-      const upgradeNum = Math.min(50, levelBoundary - currentLevel);
+      const affordable = getAffordableLevelCount({
+        currentLevel,
+        maximumLevel: levelBoundary,
+        maximumCount: 50,
+        gold: remainingGold,
+        getCost: getHeroLevelCost,
+      });
+      const upgradeNum = affordable.count;
 
       if (upgradeNum <= 0) {
-        throw new Error(`无法继续升级（当前${currentLevel}级，${currentOrder}阶）`);
+        const nextCost = getHeroLevelCost(currentLevel);
+        stopReason = `金币不足：当前${remainingGold}，升至下一级需要${nextCost ?? "未知"}`;
+        break;
       }
 
       const result = await tokenStore.sendMessageWithPromise(
@@ -877,14 +1065,9 @@ export function createTasksItem(deps) {
         throw new Error(`升级${upgradeNum}级失败（当前${currentLevel}级）`);
       }
 
-      hero = await getLatestHero(tokenId, heroId, result);
-      const updatedLevel = Number(hero?.level);
-      if (!hero || !Number.isFinite(updatedLevel) || updatedLevel <= currentLevel) {
-        throw new Error("升级后未获取到最新武将等级");
-      }
-
-      currentLevel = updatedLevel;
-      currentOrder = Number(hero.order) || currentOrder;
+      remainingGold -= affordable.goldCost;
+      currentLevel += upgradeNum;
+      performedActions += 1;
       addLog({
         time: new Date().toLocaleTimeString(),
         message: `${tokenName} ${heroName}升级至${currentLevel}级`,
@@ -893,107 +1076,111 @@ export function createTasksItem(deps) {
       await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
     }
 
+    if (performedActions > 0 && !shouldStop.value) {
+      const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+      const latestHero = getHeroFromRoleInfo(latestRoleInfo, heroId);
+      if (latestHero) {
+        currentLevel = Number(latestHero.level) || currentLevel;
+        currentOrder = Number(latestHero.order) || currentOrder;
+      }
+    }
+
     addLog({
       time: new Date().toLocaleTimeString(),
       message: shouldStop.value
         ? `${tokenName} ${heroName}升级任务已停止，当前${currentLevel}级`
-        : `${tokenName} ${heroName}已完成至${currentLevel}级`,
-      type: shouldStop.value ? "warning" : "success",
+        : stopReason
+          ? `${tokenName} ${heroName}升级停止：${stopReason}，当前${currentLevel}级/${currentOrder}阶`
+          : `${tokenName} ${heroName}已完成至${currentLevel}级`,
+      type: shouldStop.value || stopReason ? "warning" : "success",
     });
   };
 
   const upgradeLordToLevel = async (tokenId, tokenName, targetLevel) => {
-    const maxTransientRetries = 3;
-    const transientRetryDelayMs = 6000;
-    const isTransientLordUpgradeError = (error) =>
-      /200020|200050|200400|操作太快|未知错误|重启游戏/.test(
-        getErrorMessage(error),
-      );
-    const runLordCommand = async (command, params, actionName) => {
-      for (let attempt = 0; ; attempt += 1) {
-        try {
-          return await tokenStore.sendMessageWithPromise(
-            tokenId,
-            command,
-            params,
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
-        } catch (error) {
-          if (
-            !isTransientLordUpgradeError(error) ||
-            attempt >= maxTransientRetries
-          ) {
-            throw error;
-          }
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} ${actionName}触发临时错误，等待6秒后进行第${attempt + 1}次重试：${getErrorMessage(error)}`,
-            type: "warning",
-          });
-          await new Promise((resolve) =>
-            setTimeout(resolve, transientRetryDelayMs),
-          );
-        }
-      }
-    };
-
-    let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
     let lord = roleInfo?.role?.lord;
     if (!lord) throw new Error("未获取到主公信息");
 
     let currentLevel = Number(lord.level) || 0;
     let currentOrder = Number(lord.order) || 0;
+    let remainingGold = Math.max(0, Number(roleInfo?.role?.gold) || 0);
+    let remainingStones = getItemQuantity(roleInfo, 1003);
+    let performedActions = 0;
+    let stopReason = "";
     while (!shouldStop.value && currentLevel < targetLevel) {
       const nextOrder = heroLevelOrderThresholds.find(
         (item) => item.order > currentOrder,
       );
 
       if (nextOrder && currentLevel >= nextOrder.level) {
-        await runLordCommand(
+        const orderCost = getLordOrderCost(currentOrder);
+        if (!orderCost || remainingStones < orderCost.stones) {
+          stopReason = `进阶石不足：当前${remainingStones}个，主公进阶需要${orderCost?.stones ?? "未知"}个`;
+          break;
+        }
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
           "hero_lordupgradeorder",
           {},
-          `主公${currentOrder + 1}阶进阶`,
+          HELPER_COMMAND_TIMEOUT_MS,
         );
+        remainingStones -= orderCost.stones;
+        currentOrder += 1;
+        performedActions += 1;
       } else {
         const levelBoundary = Math.min(
           targetLevel,
           nextOrder?.level || targetLevel,
         );
-        const upgradeNum = Math.min(50, levelBoundary - currentLevel);
+        const affordable = getAffordableLevelCount({
+          currentLevel,
+          maximumLevel: levelBoundary,
+          maximumCount: 50,
+          gold: remainingGold,
+          getCost: getLordLevelCost,
+        });
+        const upgradeNum = affordable.count;
         if (upgradeNum <= 0) {
-          throw new Error(`主公无法继续升级（当前${currentLevel}级，${currentOrder}阶）`);
+          const nextCost = getLordLevelCost(currentLevel);
+          stopReason = `金币不足：当前${remainingGold}，主公升至下一级需要${nextCost ?? "未知"}`;
+          break;
         }
-        await runLordCommand(
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
           "hero_lordupgradelevel",
           { upgradeNum },
-          `主公升级${upgradeNum}级`,
+          HELPER_COMMAND_TIMEOUT_MS,
         );
+        remainingGold -= affordable.goldCost;
+        currentLevel += upgradeNum;
+        performedActions += 1;
       }
 
       await new Promise((resolve) =>
         setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
       );
-      roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-      lord = roleInfo?.role?.lord;
-      const updatedLevel = Number(lord?.level);
-      const updatedOrder = Number(lord?.order);
-      if (
-        !lord ||
-        !Number.isFinite(updatedLevel) ||
-        !Number.isFinite(updatedOrder) ||
-        (updatedLevel <= currentLevel && updatedOrder <= currentOrder)
-      ) {
-        throw new Error("主公升级后等级和阶数均未变化");
-      }
-      currentLevel = updatedLevel;
-      currentOrder = updatedOrder;
+    }
+
+    if (performedActions > 0 && !shouldStop.value) {
+      const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+      lord = latestRoleInfo?.role?.lord;
+      currentLevel = Number(lord?.level) || currentLevel;
+      currentOrder = Number(lord?.order) || currentOrder;
     }
 
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `${tokenName} 主公已升级至${currentLevel}级（${currentOrder}阶）`,
-      type: "success",
+      message: stopReason
+        ? `${tokenName} 主公升级停止：${stopReason}，当前${currentLevel}级（${currentOrder}阶）`
+        : `${tokenName} 主公已升级至${currentLevel}级（${currentOrder}阶）`,
+      type: stopReason ? "warning" : "success",
     });
+    return {
+      reachedTarget: currentLevel >= targetLevel,
+      currentLevel,
+      currentOrder,
+      stopReason,
+    };
   };
 
   const upgradeLordAndLuBu = async (tokenId, tokenName) => {
@@ -1019,6 +1206,16 @@ export function createTasksItem(deps) {
 
       if (lordOrder > luBuOrder || luBuLevel < lordLevel) {
         if (luBuLevel >= lordLevel && luBuOrder < lordOrder) {
+          const orderCost = getHeroOrderCost(luBuOrder);
+          const stones = getItemQuantity(roleInfo, 1003);
+          if (!orderCost || stones < orderCost.stones) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 吕布进阶石不足：当前${stones}个，需要${orderCost?.stones ?? "未知"}个，停止主公和吕布升级`,
+              type: "warning",
+            });
+            break;
+          }
           await tokenStore.sendMessageWithPromise(
             tokenId,
             "hero_heroupgradeorder",
@@ -1073,7 +1270,11 @@ export function createTasksItem(deps) {
           type: "info",
         });
         await ensureConnection(tokenId);
-        await upgradeLordToLevel(tokenId, tokenName, 6000);
+        const upgradeResult = await upgradeLordToLevel(
+          tokenId,
+          tokenName,
+          6000,
+        );
         tokenStatus.value[tokenId] = shouldStop.value
           ? "stopped"
           : "completed";
@@ -1081,8 +1282,13 @@ export function createTasksItem(deps) {
           time: new Date().toLocaleTimeString(),
           message: shouldStop.value
             ? `${tokenName} 主公升级任务已停止`
-            : `${tokenName} 主公升级至6000级任务完成`,
-          type: shouldStop.value ? "warning" : "success",
+            : upgradeResult.reachedTarget
+              ? `${tokenName} 主公升级至6000级任务完成`
+              : `${tokenName} 主公升级已跳过后续操作：${upgradeResult.stopReason || `当前${upgradeResult.currentLevel}级，资源不足`}`,
+          type:
+            shouldStop.value || !upgradeResult.reachedTarget
+              ? "warning"
+              : "success",
         });
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";
