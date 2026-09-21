@@ -7,6 +7,42 @@ import {
   runInventoryVerifiedGameCommand,
 } from "@/utils/helperTaskRunner";
 
+// EquipmentLvConf.lvSpend，区间表示装备从当前等级继续升级所需的精铁。
+const EQUIPMENT_IRON_COST_RANGES = [
+  [1, 199, 1], [200, 200, 200], [201, 999, 1], [1000, 1000, 1000],
+  [1001, 1841, 4], [1842, 1947, 5], [1948, 1999, 6], [2000, 2000, 2700],
+  [2001, 2037, 6], [2038, 2117, 7], [2118, 2189, 8], [2190, 2254, 9],
+  [2255, 2314, 10], [2315, 2370, 11], [2371, 2422, 12], [2423, 2471, 13],
+  [2472, 2517, 14], [2518, 2560, 15], [2561, 2602, 16], [2603, 2642, 17],
+  [2643, 2680, 18], [2681, 2716, 19], [2717, 2751, 20], [2752, 2785, 21],
+  [2786, 2817, 22], [2818, 2849, 23], [2850, 2879, 24], [2880, 2908, 25],
+  [2909, 2937, 26], [2938, 2965, 27], [2966, 2992, 28], [2993, 2999, 29],
+  [3000, 3000, 8000], [3001, 3018, 29], [3019, 3044, 30], [3045, 3069, 31],
+  [3070, 3093, 32], [3094, 3117, 33], [3118, 3140, 34], [3141, 3163, 35],
+  [3164, 3186, 36], [3187, 3207, 37], [3208, 3229, 38], [3230, 3250, 39],
+  [3251, 3270, 40], [3271, 3291, 41], [3292, 3311, 42], [3312, 3330, 43],
+  [3331, 3349, 44], [3350, 3368, 45], [3369, 3387, 46], [3388, 3405, 47],
+  [3406, 3423, 48], [3424, 3440, 49], [3441, 3458, 50], [3459, 3475, 51],
+  [3476, 3492, 52], [3493, 3508, 53], [3509, 3525, 54], [3526, 3541, 55],
+  [3542, 3557, 56], [3558, 3573, 57], [3574, 3588, 58], [3589, 3604, 59],
+  [3605, 3619, 60], [3620, 3634, 61], [3635, 3649, 62], [3650, 3663, 63],
+  [3664, 3678, 64], [3679, 3692, 65], [3693, 3706, 66], [3707, 3720, 67],
+  [3721, 3734, 68], [3735, 3747, 69], [3748, 3761, 70], [3762, 3774, 71],
+  [3775, 3787, 72], [3788, 3800, 73], [3801, 3813, 74], [3814, 3826, 75],
+  [3827, 3839, 76], [3840, 3851, 77], [3852, 3864, 78], [3865, 3876, 79],
+  [3877, 3888, 80], [3889, 3900, 81], [3901, 3912, 82], [3913, 3924, 83],
+  [3925, 3936, 84], [3937, 3948, 85], [3949, 3959, 86], [3960, 3971, 87],
+  [3972, 3982, 88], [3983, 3993, 89], [3994, 3999, 90], [4000, 4000, 100],
+];
+
+const getEquipmentIronCost = (level) => {
+  const currentLevel = Math.max(1, Number(level) || 1);
+  if (currentLevel >= 4000) return null;
+  return EQUIPMENT_IRON_COST_RANGES.find(
+    ([start, end]) => currentLevel >= start && currentLevel <= end,
+  )?.[2] ?? null;
+};
+
 /**
  * 开箱、钓鱼、招募类任务
  * 包含: batchOpenBox, batchSmartBoxWeekly, batchClaimBoxPointReward, batchFish, batchRecruit
@@ -57,8 +93,13 @@ export function createTasksItem(deps) {
     }
 
     const heroName = HERO_DICT[heroId].name;
-    const retryDelayMs = 6000;
-    const maxRetries = 3;
+    const ironItemId = 1006;
+    const getRole = (result) =>
+      result?.role ||
+      result?.data?.role ||
+      result?.body?.role ||
+      result?.data?.body?.role ||
+      {};
     isRunning.value = true;
     shouldStop.value = false;
     selectedTokens.value.forEach((id) => {
@@ -73,45 +114,67 @@ export function createTasksItem(deps) {
 
       try {
         await ensureConnection(tokenId);
-        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-          try {
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "equipment_batchupgradelevel",
-              { heroId },
-              HELPER_COMMAND_TIMEOUT_MS,
-            );
-            tokenStatus.value[tokenId] = "completed";
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 已使用精铁一键升级${heroName}装备`,
-              type: "success",
-            });
-            break;
-          } catch (error) {
-            const errorMessage = getErrorMessage(error);
-            if (/400010|物品数量不足|精铁不足/.test(errorMessage)) {
-              tokenStatus.value[tokenId] = "completed";
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${tokenName} ${heroName}装备升级停止：精铁不足或装备已无法继续升级`,
-                type: "warning",
-              });
-              break;
-            }
-            const isTransient =
-              /200020|200050|200400|操作太快|未知错误|重启游戏/.test(
-                errorMessage,
-              );
-            if (!isTransient || attempt >= maxRetries) throw error;
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 一键升级${heroName}装备触发临时错误，等待6秒后进行第${attempt + 1}次重试：${errorMessage}`,
-              type: "warning",
-            });
-            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-          }
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const ironQuantity = getItemQuantity(roleInfo, ironItemId);
+        const role = getRole(roleInfo);
+        const heroes = role.heroes || {};
+        const hero = heroes[heroId] ?? heroes[String(heroId)];
+
+        if (!hero) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 尚未拥有${heroName}，跳过装备升级`,
+            type: "warning",
+          });
+          return;
         }
+
+        const equipment = hero?.equipment || {};
+        const parts = [1, 2, 3, 4]
+          .map((position) => equipment[position] ?? equipment[String(position)])
+          .filter(Boolean);
+
+        if (parts.length !== 4) {
+          throw new Error(`未获取到${heroName}的完整四件装备信息`);
+        }
+
+        const upgradeCosts = parts
+          .map((part) => getEquipmentIronCost(part.level))
+          .filter((cost) => Number.isFinite(cost));
+        if (upgradeCosts.length === 0) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${heroName}的四件装备均已满级，跳过升级`,
+            type: "warning",
+          });
+          return;
+        }
+
+        const minimumIronCost = Math.min(...upgradeCosts);
+        if (ironQuantity < minimumIronCost) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 当前精铁${ironQuantity}个，四件装备中最低升级需要${minimumIronCost}个，跳过${heroName}装备升级`,
+            type: "warning",
+          });
+          return;
+        }
+
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "equipment_batchupgradelevel",
+          { heroId },
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 当前精铁${ironQuantity}个，最低升级消耗${minimumIronCost}个，已一键升级${heroName}装备`,
+          type: "success",
+        });
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
