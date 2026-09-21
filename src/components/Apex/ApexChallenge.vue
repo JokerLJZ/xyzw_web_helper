@@ -73,8 +73,10 @@
     <n-alert v-if="confStale" type="error" style="margin-bottom: 12px">
       <template #header>配置与当前赛季不匹配</template>
       服务端赛季为第 {{ roleSeason }} 赛季，但本地配置快照未覆盖当前时间（不处于任何赛季窗口）。
-      请按 <code>未解密.md</code> 的版本更新 SOP 重新生成
-      <code>src/utils/apexStageMap.js</code>（执行 <code>python3 scratch/gen_apex_stage_map.py</code>）。
+      请以服务端最新配置重新生成 <code>src/utils/apexStageMap.js</code>：
+      先拉取 <code>data/version.json</code> 取得版本号，再下载
+      <code>data/&lt;版本号&gt;/config.json</code> 存为 <code>/tmp/xyzw_config.json</code>，
+      然后重跑随附的生成脚本刷新快照。
     </n-alert>
 
     <!-- 空状态 -->
@@ -575,6 +577,7 @@ import {
   getRoundPhase,
   getRoundSchedules,
   getScheduleConf,
+  getScheduleIdByStage,
   getSeasonConf,
   getStageInfoByRound,
   getStageName,
@@ -1533,13 +1536,34 @@ const fetchScheduleHistory = async () => {
 };
 
 /**
+ * 助威榜所属阶段的 scheduleId（等价客户端 apexScheduleData.currentScheduleId）：
+ * 淘汰赛段优先，其次正式赛段；两者都没配置时用竞猜页签里的首个阶段兜底。
+ */
+const voteScheduleId = computed(() => {
+  const round = selectedRound.value;
+  if (!round || season.value <= 0) {
+    return -1;
+  }
+  const info = stageInfo.value;
+  if (info?.[ApexStageType.TaoTai]?.isEnable) {
+    return getScheduleIdByStage(ApexStageType.TaoTai, round, season.value);
+  }
+  if (info?.[ApexStageType.ZhengShi]?.isEnable) {
+    return getScheduleIdByStage(ApexStageType.ZhengShi, round, season.value);
+  }
+  const tabs = getGuessTabs(round, season.value, serverNowMs.value);
+  return tabs.length ? tabs[0].scheduleId : -1;
+});
+
+/**
  * 当前期助威榜（真实接口 apex_getvotelist）。
- * groupId 遵循客户端规则：淘汰赛段用 0，其余用常规组号。
+ * groupId 取自客户端 currentTeamVsGroupId：即 apexRoleInfo.group 中「本期我的分组号」，
+ * 缺数据回退 1；不是按阶段写死 0/1。
  */
 const fetchVoteBoard = async () => {
   const round = selectedRound.value;
   if (!round || season.value <= 0 || !tokenStore.selectedToken) return;
-  const groupId = getSupportGroupId(stageInfo.value?.[ApexStageType.TaoTai]?.isEnable);
+  const groupId = getSupportGroupId(roleInfo.value.group, voteScheduleId.value);
   try {
     const { rows } = await fetchPagedList({
       cmd: "apex_getvotelist",

@@ -126,25 +126,51 @@ const formatMonthDay = (ms) => {
  *
  * resetTime 只提供 day / week / month / season，无时分秒，因此按「日偏差」校准：
  * 时分秒沿用本地时钟。lockTime 与 fightTime 恒相差 1 小时（配置 312/312 一致），
- * 日级校准足以支撑锁定与开赛判定；day 缺失时原样返回本地时间。
+ * 日级校准足以支撑锁定与开赛判定。
+ *
+ * day 的格式判定严格对齐客户端 RolePetShop._isCurrentResetPeriod：
+ *   ① 必须是「6 位纯数字」（客户端 `/^\d{6}$/` 测试）——长度不足、含空格 / 斜杠 /
+ *      字母、或长度超过 6 位一律视为不可用；
+ *   ② 解析出的时间戳必须是有限值（客户端 `Number.isFinite` 守卫）。
+ * 任一不满足即退回本地时间，**绝不返回 NaN**。这一点很关键：本函数的返回值在视图里
+ * 直接充当 serverNowMs，一旦为 NaN，getCurrentSeason 会返回 -1、getCurrentRounds
+ * 会把全部期都当成进行中、getHistoryRounds 会清空、getScheduleStatus 会把每一场都
+ * 判成已完成，界面整体失真。
+ *
+ * 注：`Number.isFinite` 守卫不能省。new Date(2000+yy, mm-1, dd) 对 yy 为 NaN 时
+ * 返回 Invalid Date（getTime() = NaN），而 yy 来自 day.slice(0, 2)，因此只有
+ * 「6 位纯数字」的先决条件才能保证 yy/mm/dd 三个 Number() 都是有限数。
  *
  * @param {number} localNowMs 本地当前时间（毫秒）
- * @param {string} dayStr 服务端 resetTime.day，形如 "260915"
- * @returns {number} 校准后的服务端当前时间（毫秒）
+ * @param {string|number} dayStr 服务端 resetTime.day，形如 "260915" 或 260915
+ * @returns {number} 校准后的服务端当前时间（毫秒）；day 不可用时原样返回 localNowMs
  */
 export function calibrateServerTime(localNowMs, dayStr) {
-  const day = String(dayStr || "");
-  if (day.length < 6) return localNowMs;
-  const now = new Date(localNowMs);
+  const day = String(dayStr ?? "");
+  // ① 客户端同款格式闸门：严格 6 位纯数字
+  if (!/^\d{6}$/.test(day)) {
+    return localNowMs;
+  }
+
+  const yy = Number(day.slice(0, 2));
+  const mm = Number(day.slice(2, 4));
+  const dd = Number(day.slice(4, 6));
+
   const serverToday = new Date(
-    2000 + Number(day.slice(0, 2)),
-    Number(day.slice(2, 4)) - 1,
-    Number(day.slice(4, 6)),
+    2000 + yy,
+    mm - 1,
+    dd,
     0,
     0,
     0,
     0,
   ).getTime();
+  // ② 客户端同款有限性闸门
+  if (!Number.isFinite(serverToday)) {
+    return localNowMs;
+  }
+
+  const now = new Date(localNowMs);
   const localToday = new Date(
     now.getFullYear(),
     now.getMonth(),
@@ -773,9 +799,42 @@ export function getSupportLevel(cheerCnt) {
 }
 
 /**
- * 助威榜分组号（等价客户端 ApexSupportDialog._getCommonSupportTab）：
- * 淘汰赛段开启时用 groupId 0（淘汰赛榜），否则用常规组号。
- * @param {boolean} taotaiStageEnabled
- * @returns {number} 助威榜分组号（淘汰赛段开启为 0，否则为 1）
+ * 助威榜「全部」页分组号（逐行等价客户端 ApexUtil.getMyTeamVSGroupId 与 `|| 1` 的组合）。
+ *
+ * 客户端：
+ *   getMyTeamVSGroupId(sid) { const g = apexRoleInfo.group.get(sid); return g != null ? g : 0 }
+ *   currentTeamVsGroupId = getMyTeamVSGroupId(currentScheduleId) || 1
+ *   ApexSupportDialog: this._groupId = apexScheduleData.currentTeamVsGroupId
+ * 即：取「本期我在哪个分组」（1 基，随期变化）；无值或 0 时由 `|| 1` 落为 1。
+ *
+ * 说明：客户端另有合法性闸门 `0 < g && g <= teamMatchNum`
+ * （ApexMatchPage._refreshTeamInfo），与本函数的下界判定一致；
+ * 服务端该字段为数值型，此处的数值校验仅作合约保险，不改变合法输入的取值。
+ *
+ * 注：客户端还有一个「淘汰赛」页（sendGetTaotaiVoteList，groupId 恒传 0），
+ * 本工具只呈现「全部」页，故不涉及该分支。
+ *
+ * @param {{[scheduleId:number|string]:number}|null|undefined} groupMap apexRoleInfo.group
+ * @param {number} scheduleId 当前期的 scheduleId
+ * @returns {number} 助威榜分组号（合法时原样返回，0 / 缺失 / NaN 时回退 1）
  */
-export const getSupportGroupId = (taotaiStageEnabled) => (taotaiStageEnabled ? 0 : 1);
+export function getSupportGroupId(groupMap, scheduleId) {
+  const raw = groupMap ? groupMap[String(scheduleId)] : undefined;
+  // 对齐客户端 `g != null ? g : 0`：null / undefined 视为 0
+  const mine = raw == null ? 0 : raw;
+  // 对齐客户端 `0 || 1`：0 / NaN 一律回退 1
+  return mine || 1;
+}
+
+/**
+ * 取指定阶段在某期的 scheduleId（等价客户端 ApexScheduleData.getScheduleIdByStage）。
+ * 客户端 currentScheduleId 即由此类查询得到，助威榜分组号依赖它。
+ * @param {number} stage ApexStage
+ * @param {number} round 期号
+ * @param {number} season 赛季号
+ * @returns {number} 该阶段的 scheduleId；缺失时返回 -1（与客户端一致）
+ */
+export function getScheduleIdByStage(stage, round, season) {
+  const conf = getRoundSchedules(round, season).find((c) => c.stage === stage);
+  return conf ? conf.id : -1;
+}

@@ -16,10 +16,11 @@
  *     · advanceNum 该阶段晋级/可押名额（0 表示不可竞猜）
  *
  * 规则引擎见 `src/utils/apexRules.js`（getScheduleStatus / checkSupportInTime 等）。
- * 版本或赛季更新后重跑 `python3 scratch/gen_apex_stage_map.py` 即可整体刷新。
+ * 版本或赛季更新后，重新拉取远端 config.json 并重跑随附的生成脚本即可整体刷新。
+ * 数据源：data/version.json 取版本号 -> data/<版本号>/config.json。
  */
 
-// 本文件由 scratch/gen_apex_stage_map.py 自动生成（紧凑 JSON 快照，禁止手工编辑/格式化），
+// 本文件由随附的生成脚本自动生成（紧凑 JSON 快照，禁止手工编辑/格式化），
 // 因此整体不参与 ESLint / Prettier 风格检查。
 /* eslint-disable */
 export const APEX_TAOTAI_STAGES = [4, 5, 6, 7, 8, 9, 10];
