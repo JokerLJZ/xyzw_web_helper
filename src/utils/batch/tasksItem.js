@@ -1,4 +1,4 @@
-import { HERO_DICT, LEGION_TECH_NAME } from "@/utils/HeroList";
+import { FishMap, HERO_DICT, LEGION_TECH_NAME } from "@/utils/HeroList";
 import { PEACH_TASKS } from "@/utils/PeachTaskIds";
 import {
   HELPER_COMMAND_TIMEOUT_MS,
@@ -22,6 +22,10 @@ import {
   HERO_STAR_FRAGMENT_COSTS,
   planHeroStarUpgrade,
 } from "@/utils/heroStarPlanner";
+import {
+  planFishArtifactUpgrades,
+  planFishBookUpgrades,
+} from "@/utils/fishArtifactPlanner";
 import {
   IRON_ITEM_ID,
   SHOE_TOY_ID,
@@ -1064,6 +1068,7 @@ export function createTasksItem(deps) {
       result &&
         (result.role?.heroes ||
           result.role?.book ||
+          result.role?.artifactBooks ||
           result.code === 0 ||
           result.success === true ||
           result.result === 0),
@@ -1087,6 +1092,24 @@ export function createTasksItem(deps) {
       error?.response?.code,
     ].join(" ");
     return text.includes("200400") || text.includes("操作太快");
+  };
+
+  const isHeroSynthesisRetryableError = (error) => {
+    const text = [
+      getErrorMessage(error),
+      error?.code,
+      error?.body?.code,
+      error?.data?.code,
+      error?.response?.code,
+    ].join(" ");
+    return (
+      isHeroStarRateLimitError(error) ||
+      text.includes("200020") ||
+      text.includes("200050") ||
+      text.includes("-10006") ||
+      text.includes("超时") ||
+      text.toLowerCase().includes("timeout")
+    );
   };
 
   /** 武将升星完成后，继续同步图鉴星级并领取全部可领取奖励。 */
@@ -1159,7 +1182,7 @@ export function createTasksItem(deps) {
                 break;
               } catch (error) {
                 if (
-                  !isHeroStarRateLimitError(error) ||
+                  !isHeroSynthesisRetryableError(error) ||
                   attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
                 ) {
                   addLog({
@@ -1227,6 +1250,48 @@ export function createTasksItem(deps) {
             setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
           );
           roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+
+          let synthesisReconciled = false;
+          for (const { heroId, needsSynthesis } of starUpgradePlan) {
+            if (!needsSynthesis || shouldStop.value) continue;
+            if (getHeroFromRoleInfo(roleInfo, heroId)) continue;
+            const latestPlan = getHeroStarUpgradeCount(roleInfo, heroId);
+            if (!latestPlan.needsSynthesis) continue;
+
+            const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
+            try {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} ${heroName}首次合成未生效，等待6秒后补发合成`,
+                type: "warning",
+              });
+              await new Promise((resolve) =>
+                setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
+              );
+              await waitForHeroStarInterval(tokenId);
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "hero_synthetic",
+                { itemId: heroId },
+                HELPER_COMMAND_TIMEOUT_MS,
+              );
+              synthesisReconciled = true;
+            } catch (error) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} ${heroName}补发合成仍失败：${getErrorMessage(error)}`,
+                type: "warning",
+              });
+            }
+          }
+
+          if (synthesisReconciled && !shouldStop.value) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+            );
+            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          }
+
           for (const { heroId, currentStar, upgradeCount, needsSynthesis } of starUpgradePlan) {
             const latestHero = getHeroFromRoleInfo(roleInfo, heroId);
             const latestStar = Number(latestHero?.star) || 0;
@@ -1242,6 +1307,132 @@ export function createTasksItem(deps) {
                   : "warning",
             });
           }
+        }
+
+        if (!shouldStop.value) {
+          const fishUpgradePlan = planFishArtifactUpgrades(roleInfo);
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message:
+              fishUpgradePlan.length > 0
+                ? `${token.name} 开始自动合成鱼灵：共计划${fishUpgradePlan.length}次（优先处理高星鱼灵）`
+                : `${token.name} 当前没有可合成的鱼灵`,
+            type: "info",
+          });
+
+          let fishUpgraded = 0;
+          const failedFishIds = new Set();
+          for (const operation of fishUpgradePlan) {
+            if (shouldStop.value) break;
+            if (failedFishIds.has(operation.fishId)) continue;
+            const fishName = FishMap[operation.fishId]?.name || `鱼灵${operation.fishId}`;
+            let completed = false;
+            for (
+              let attempt = 0;
+              attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
+              attempt += 1
+            ) {
+              try {
+                await waitForHeroStarInterval(tokenId);
+                await tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "artifact_upgradestar",
+                  { heroId: operation.heroId, itemId: operation.itemId },
+                  HELPER_COMMAND_TIMEOUT_MS,
+                );
+                completed = true;
+                fishUpgraded += 1;
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} ${fishName}：${operation.star}星 → ${operation.star + 1}星`,
+                  type: "success",
+                });
+                break;
+              } catch (error) {
+                if (
+                  !isHeroStarRateLimitError(error) ||
+                  attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
+                ) {
+                  addLog({
+                    time: new Date().toLocaleTimeString(),
+                    message: `${token.name} ${fishName}${operation.star}星合成失败，已跳过：${getErrorMessage(error)}`,
+                    type: "warning",
+                  });
+                  break;
+                }
+                await new Promise((resolve) =>
+                  setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
+                );
+              }
+            }
+            if (!completed) failedFishIds.add(operation.fishId);
+          }
+
+          if (fishUpgradePlan.length > 0 && !shouldStop.value) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+            );
+            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          }
+
+          const fishBookPlan = planFishBookUpgrades(roleInfo);
+          let fishBookUpgraded = 0;
+          if (fishBookPlan.length > 0) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 开始鱼灵图鉴升星：${fishBookPlan.length}种鱼灵，共${fishBookPlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次`,
+              type: "info",
+            });
+          }
+          for (const { fishId, upgradeCount } of fishBookPlan) {
+            if (shouldStop.value) break;
+            for (let index = 0; index < upgradeCount && !shouldStop.value; index += 1) {
+              let completed = false;
+              for (
+                let attempt = 0;
+                attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
+                attempt += 1
+              ) {
+                try {
+                  await waitForBookActionInterval(tokenId);
+                  const result = await tokenStore.sendMessageWithPromise(
+                    tokenId,
+                    "book_bookupgradestar",
+                    { artifactId: fishId },
+                    HELPER_COMMAND_TIMEOUT_MS,
+                  );
+                  if (!isSuccessfulBookCommand(result)) {
+                    throw new Error(`鱼灵${fishId}图鉴升星响应未确认成功`);
+                  }
+                  completed = true;
+                  fishBookUpgraded += 1;
+                  break;
+                } catch (error) {
+                  if (
+                    !isHeroStarRateLimitError(error) ||
+                    attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
+                  ) {
+                    addLog({
+                      time: new Date().toLocaleTimeString(),
+                      message: `${token.name} ${FishMap[fishId]?.name || `鱼灵${fishId}`}图鉴升星失败，已跳过：${getErrorMessage(error)}`,
+                      type: "warning",
+                    });
+                    break;
+                  }
+                  await new Promise((resolve) =>
+                    setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
+                  );
+                }
+              }
+              if (!completed) break;
+            }
+          }
+
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 鱼灵合成${fishUpgraded}次，鱼灵图鉴升星${fishBookUpgraded}次`,
+            type: "success",
+          });
         }
 
         if (!shouldStop.value) {

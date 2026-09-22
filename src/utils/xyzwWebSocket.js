@@ -286,6 +286,8 @@ export function registerDefaultCommands(reg) {
     // 钓鱼
     .register("artifact_lottery", { lotteryNumber: 1, newFree: true, type: 1 })
     .register("artifact_exchange")
+    .register("artifact_upgradestar", { heroId: -1, itemId: 0 })
+    .register("book_bookupgradestar", { artifactId: 0 })
 
     // 灯神相关
     .register("genie_sweep", { genieId: 1 })

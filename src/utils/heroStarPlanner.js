@@ -13,8 +13,15 @@ const HERO_SYNTHESIS_FRAGMENT_COSTS = {
   3: 1, // 紫将
 };
 
+// 少数武将的实际品质不遵循编号段；优先使用明确配置。
+const HERO_SYNTHESIS_COST_OVERRIDES = {
+  313: 4, // 祝融夫人：橙将
+};
+
 /** 根据武将编号对应的品质，返回首次合成需要的碎片数。 */
 export function getHeroSynthesisFragmentCost(heroId) {
+  const overrideCost = HERO_SYNTHESIS_COST_OVERRIDES[Number(heroId)];
+  if (overrideCost) return overrideCost;
   const quality = Math.floor((Number(heroId) || 0) / 100);
   return HERO_SYNTHESIS_FRAGMENT_COSTS[quality] || HERO_STAR_FRAGMENT_COSTS[0];
 }

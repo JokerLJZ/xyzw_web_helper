@@ -60,3 +60,15 @@ test("红橙紫武将只使用不同的合成碎片消耗", () => {
     { heroId: 302, currentStar: 0, needsSynthesis: true, upgradeCount: 1 },
   );
 });
+
+test("祝融夫人按实际橙色品质使用4片合成", () => {
+  assert.equal(getHeroSynthesisFragmentCost(313), 4);
+  assert.deepEqual(
+    planHeroStarUpgrade({ heroId: 313, hero: null, fragmentQuantity: 1 }),
+    { heroId: 313, currentStar: 0, needsSynthesis: false, upgradeCount: 0 },
+  );
+  assert.deepEqual(
+    planHeroStarUpgrade({ heroId: 313, hero: null, fragmentQuantity: 4 }),
+    { heroId: 313, currentStar: 0, needsSynthesis: true, upgradeCount: 0 },
+  );
+});
