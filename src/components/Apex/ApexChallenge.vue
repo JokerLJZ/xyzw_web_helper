@@ -1045,7 +1045,7 @@ const rateLimitText = computed(() => {
  * @param {number} [opt.startIdx] 起始 idx
  * @param {number} [opt.maxPages] 最大页数
  * @param {number} [opt.maxRows] 最大行数
- * @returns {Promise<{rows: Array, last: boolean}>} 分页结果；请求失败时为空列表
+ * @returns {Promise<{rows: Array, last: boolean, interrupted: boolean}>} 分页结果
  */
 const fetchPagedList = async ({
   cmd,
@@ -1057,7 +1057,7 @@ const fetchPagedList = async ({
   maxRows = Infinity,
 }) => {
   const token = tokenStore.selectedToken;
-  if (!token) return { rows: [], last: true };
+  if (!token) return { rows: [], last: true, interrupted: false };
   const rows = [];
   let last = false;
   // 是否因被限流而提前退出：此时数据是「没拉完」，绝不能当成拉完
@@ -1096,7 +1096,7 @@ const fetchPagedList = async ({
   if (!cutByLimit && rows.length >= maxRows) {
     last = true;
   }
-  return { rows, last };
+  return { rows, last, interrupted: cutByLimit };
 };
 
 /**
@@ -1201,7 +1201,7 @@ const fetchMatchesPage = async (grp) => {
   fetchingStages.add(grp.scheduleId);
   grp.loading = true;
   try {
-    const { rows, last } = await fetchPagedList({
+    const { rows, last, interrupted } = await fetchPagedList({
       cmd: "apex_getguesslist",
       params: { scheduleId: grp.scheduleId },
       listKey: "apexGuessList",
@@ -1210,19 +1210,22 @@ const fetchMatchesPage = async (grp) => {
       maxPages: FIRST_PAGES,
     });
     grp.matches.push(...rows.map(toMatchRow));
+    grp.lastFetchInterrupted = interrupted;
     // 服务端「还有下一页」信号：为 false 即不再续拉（与 exhausted 互补）
     grp.hasMore = !last && rows.length > 0;
     // 服务端可能在仍有数据时就返回 last=true，因此另用 exhausted 标记「确实拉不到新行」
-    if (!rows.length) grp.exhausted = true;
+    if (!rows.length && !interrupted) grp.exhausted = true;
   } catch (e) {
     // 被限流：只是「这次没拉到」，保留翻页能力，交给下一次轮询 / 翻页重试。
     // 若在此处标记 exhausted，一次 200400 就会永久关闭该阶段分页。
     if (isApexRateLimited(e)) {
       grp.hasMore = true;
+      grp.lastFetchInterrupted = true;
     } else {
       // 该阶段未开放或参数错误：停止继续分页
       grp.hasMore = false;
       grp.exhausted = true;
+      grp.lastFetchInterrupted = false;
     }
   } finally {
     grp.loading = false;
@@ -1271,10 +1274,11 @@ const ensureBetRows = async (grp, need) => {
   while (grp.matches.length < need && !grp.exhausted && guard < MAX_PAGES) {
     const before = grp.matches.length;
     await fetchMatchesPage(grp);
-    if (grp.matches.length === before) {
+    if (grp.matches.length === before && !grp.lastFetchInterrupted) {
       grp.exhausted = true;
       break;
     }
+    if (grp.lastFetchInterrupted) break;
     guard += 1;
   }
 };
@@ -1336,6 +1340,7 @@ const refreshCurrentBets = () => {
       // 当前查看的页码（0 起），切换期/阶段时随分组重建归零
       page: prev?.page ?? 0,
       loading: false,
+      lastFetchInterrupted: false,
     };
     if (grp.state === ApexScheduleStatus.None) {
       // 该阶段尚未解锁：不会有对阵数据，直接标记无更多页，避免后续误触发分页
@@ -1536,7 +1541,7 @@ const fetchVoteBoard = async () => {
   if (!round || season.value <= 0 || !tokenStore.selectedToken) return;
   const groupId = getSupportGroupId(roleInfo.value.group, voteScheduleId.value);
   try {
-    const { rows, last } = await fetchPagedList({
+    const { rows, last, interrupted } = await fetchPagedList({
       cmd: "apex_getvotelist",
       params: { groupId, round },
       listKey: "apexVoteList",
@@ -1545,7 +1550,8 @@ const fetchVoteBoard = async () => {
     });
     // last=true 表示列表确实拉完；未拉完（含被限流截断）时保留已有结果，
     // 下一次轮询会继续补齐，避免界面停在半截数据上。
-    voteBoardComplete.value = last;
+    voteBoardComplete.value = last && !interrupted;
+    if (!voteBoardComplete.value) return;
     currentVoteBoard.value = rows.map((t, i) => ({
       rank: i + 1,
       teamId: t.teamId || "-",

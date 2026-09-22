@@ -52,20 +52,30 @@ const sendApex = (action, task, maxRetry) => runApexAction(action, task, { maxRe
  * （例：第 5 期报名中、第 4 期淘汰赛已开押）。期号与阶段全部由配置推导。
  *
  * @param {number} nowMs 服务端时间
- * @returns {{season: number, round: number, tabs: Array}|null} 无开放场次时为 null
+ * @returns {Array<{season: number, round: number, tabs: Array}>} 所有存在开放场次的期次
  */
-const resolveOpenGuesses = (nowMs) => {
-  const season = getCurrentSeason(nowMs);
-  if (season <= 0) return null;
-  for (const round of getCurrentRounds(season, nowMs)) {
-    const tabs = getGuessTabs(round, season, nowMs).filter(
+export const collectOpenGuessRounds = (season, rounds, nowMs, resolveTabs) => {
+  const openRounds = [];
+  for (const round of rounds) {
+    const tabs = resolveTabs(round, season, nowMs).filter(
       (t) =>
         t.state === ApexScheduleStatus.Unlocked ||
         t.state === ApexScheduleStatus.Locked,
     );
-    if (tabs.length) return { season, round, tabs };
+    if (tabs.length) openRounds.push({ season, round, tabs });
   }
-  return null;
+  return openRounds;
+};
+
+export const resolveOpenGuessRounds = (nowMs) => {
+  const season = getCurrentSeason(nowMs);
+  if (season <= 0) return [];
+  return collectOpenGuessRounds(
+    season,
+    getCurrentRounds(season, nowMs),
+    nowMs,
+    getGuessTabs,
+  );
 };
 
 /**
@@ -137,10 +147,10 @@ export function createTasksApex(deps) {
         const guessMap = apexInfo.guessMap || {};
 
         // 2. 依据真实规则解析当前开放的竞猜阶段
-        const open = resolveOpenGuesses(
+        const openRounds = resolveOpenGuessRounds(
           calibrateServerTime(Date.now(), apexInfo.resetTime?.day),
         );
-        if (!open) {
+        if (openRounds.length === 0) {
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 当前无开放的竞猜阶段（竞猜仅在淘汰赛段开放）`,
@@ -149,22 +159,23 @@ export function createTasksApex(deps) {
           tokenStatus.value[tokenId] = "completed";
           return;
         }
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 第${open.season}赛季 第${open.round}期，开放竞猜 ${open.tabs.length} 个阶段`,
-          type: "info",
-        });
-
-        // 3. 逐阶段分页拉取对阵并竞猜
+        // 3. 逐期、逐阶段分页拉取对阵并竞猜，避免重叠期次漏押。
         let successCount = 0;
         let skipCount = 0;
         let failCount = 0;
         /** 连续被 200400 打回后置位：中止该账号剩余竞猜，避免持续轰炸服务器 */
         let abortedByRateLimit = false;
 
-        for (const tab of open.tabs) {
-          if (shouldStop.value) break;
-          if (abortedByRateLimit) break;
+        for (const open of openRounds) {
+          if (shouldStop.value || abortedByRateLimit) break;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 第${open.season}赛季 第${open.round}期，开放竞猜 ${open.tabs.length} 个阶段`,
+            type: "info",
+          });
+
+          for (const tab of open.tabs) {
+            if (shouldStop.value || abortedByRateLimit) break;
 
           const advanceNum = getAdvanceNum(open.round, open.season, tab.stage);
           const guessedTeamIds = new Set(guessMap[tab.scheduleId] || []);
@@ -283,6 +294,7 @@ export function createTasksApex(deps) {
                 });
               }
             }
+          }
           }
         }
 
