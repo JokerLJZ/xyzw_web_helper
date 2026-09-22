@@ -1183,6 +1183,38 @@ export function createTasksItem(deps) {
     );
   };
 
+  const getRoleInfoWithStarRateLimitRetry = async (
+    tokenId,
+    tokenName,
+    operationName,
+  ) => {
+    for (
+      let attempt = 0;
+      attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
+      attempt += 1
+    ) {
+      try {
+        return await tokenStore.sendGetRoleInfo(tokenId);
+      } catch (error) {
+        if (
+          !isHeroStarRateLimitError(error) ||
+          attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
+        ) {
+          throw error;
+        }
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} ${operationName}触发200400，等待6秒后进行第${attempt + 1}次重试`,
+          type: "warning",
+        });
+        await new Promise((resolve) =>
+          setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
+        );
+      }
+    }
+    return null;
+  };
+
   /** 武将升星完成后，继续同步图鉴星级并领取全部可领取奖励。 */
   const batchAutoStarBook = async () => {
     if (selectedTokens.value.length === 0) return;
@@ -1381,7 +1413,7 @@ export function createTasksItem(deps) {
         }
 
         if (!shouldStop.value) {
-          let fishUpgradePlan = planFishArtifactUpgrades(roleInfo);
+          const fishUpgradePlan = planFishArtifactUpgrades(roleInfo);
           addLog({
             time: new Date().toLocaleTimeString(),
             message:
@@ -1393,11 +1425,9 @@ export function createTasksItem(deps) {
 
           let fishUpgraded = 0;
           const failedFishIds = new Set();
-          while (!shouldStop.value) {
-            const operation = fishUpgradePlan.find(
-              ({ fishId }) => !failedFishIds.has(fishId),
-            );
-            if (!operation) break;
+          for (const operation of fishUpgradePlan) {
+            if (shouldStop.value) break;
+            if (failedFishIds.has(operation.fishId)) continue;
             const fishName = FishMap[operation.fishId]?.name || `鱼灵${operation.fishId}`;
             let completed = false;
             for (
@@ -1440,16 +1470,18 @@ export function createTasksItem(deps) {
             }
             if (!completed) {
               failedFishIds.add(operation.fishId);
-              continue;
             }
+          }
 
-            // 每次升级后以服务器最新数据重新规划，避免库存、装备状态或
-            // 服务端实际消耗与本地推算不一致时继续执行错误计划。
+          if (fishUpgradePlan.length > 0 && !shouldStop.value) {
             await new Promise((resolve) =>
               setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
             );
-            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-            fishUpgradePlan = planFishArtifactUpgrades(roleInfo);
+            roleInfo = await getRoleInfoWithStarRateLimitRetry(
+              tokenId,
+              token.name,
+              "鱼灵升星完成后查询状态",
+            );
           }
 
           const fishBookPlan = planFishBookUpgrades(roleInfo);

@@ -44,8 +44,8 @@ export function isUpgradeableFishItem(itemId) {
  * 根据一次角色查询生成“当前真实存在”的鱼灵升级计划。
  *
  * itemId 表示待升级鱼灵的当前星级；每次升级实际消耗的材料始终是
- * 同种鱼灵的 1 星道具（fishId * 10 + 1）。这里不会把本地推算出的
- * 升级产物再次加入库存，后续星级必须等服务器返回最新角色数据后再规划。
+ * 同种鱼灵的 1 星道具（fishId * 10 + 1）。先升级已装备的鱼灵，再按
+ * 星级从高到低处理未装备鱼灵，并在本地连续推算到材料不足或达到五星。
  */
 export function planFishArtifactUpgrades(roleInfo) {
   const role = getRole(roleInfo);
@@ -72,33 +72,63 @@ export function planFishArtifactUpgrades(roleInfo) {
   }
 
   for (const [itemId, quantity] of inventory) {
-    if (!isUpgradeableFishItem(itemId)) continue;
+    if (!isUpgradeableFishItem(itemId) || getFishStar(itemId) === 1) continue;
     for (let index = 0; index < quantity; index += 1) {
       targets.push({ itemId, heroId: -1, source: "inventory" });
     }
   }
 
-  targets.sort((left, right) => {
-    const starDiff = getFishStar(right.itemId) - getFishStar(left.itemId);
-    if (starDiff) return starDiff;
-    if (left.source !== right.source) return left.source === "equipped" ? -1 : 1;
-    return left.itemId - right.itemId;
-  });
-
   const operations = [];
-  for (const target of targets) {
+  while (true) {
+    const candidates = targets
+      .filter((target) => {
+        const fishId = getFishBaseId(target.itemId);
+        const materialItemId = fishId * 10 + 1;
+        return (
+          isUpgradeableFishItem(target.itemId) &&
+          (inventory.get(materialItemId) || 0) >= getFishMergeCost(target.itemId)
+        );
+      })
+      .sort((left, right) => {
+        if (left.source !== right.source) {
+          return left.source === "equipped" ? -1 : 1;
+        }
+        const starDiff = getFishStar(right.itemId) - getFishStar(left.itemId);
+        return starDiff || left.itemId - right.itemId;
+      });
+
+    for (const [itemId, quantity] of inventory) {
+      if (getFishStar(itemId) !== 1 || !isUpgradeableFishItem(itemId)) continue;
+      const cost = getFishMergeCost(itemId);
+      if (quantity >= cost + 1) {
+        candidates.push({ itemId, heroId: -1, source: "new-inventory" });
+      }
+    }
+
+    candidates.sort((left, right) => {
+      const leftEquipped = left.source === "equipped";
+      const rightEquipped = right.source === "equipped";
+      if (leftEquipped !== rightEquipped) return leftEquipped ? -1 : 1;
+      const starDiff = getFishStar(right.itemId) - getFishStar(left.itemId);
+      return starDiff || left.itemId - right.itemId;
+    });
+
+    const target = candidates[0];
+    if (!target) break;
+
     const fishId = getFishBaseId(target.itemId);
     const materialItemId = fishId * 10 + 1;
     const cost = getFishMergeCost(target.itemId);
-    const materialQuantity = inventory.get(materialItemId) || 0;
-    const targetQuantity = inventory.get(target.itemId) || 0;
+    const currentStar = getFishStar(target.itemId);
+    const isNewInventoryTarget = target.source === "new-inventory";
 
-    if (target.source === "inventory" && targetQuantity <= 0) continue;
-    if (materialQuantity < cost) continue;
-
-    inventory.set(materialItemId, materialQuantity - cost);
-    if (target.source === "inventory" && target.itemId !== materialItemId) {
-      inventory.set(target.itemId, targetQuantity - 1);
+    inventory.set(
+      materialItemId,
+      (inventory.get(materialItemId) || 0) - cost - (isNewInventoryTarget ? 1 : 0),
+    );
+    if (isNewInventoryTarget) {
+      target.source = "inventory";
+      targets.push(target);
     }
 
     operations.push({
@@ -106,10 +136,11 @@ export function planFishArtifactUpgrades(roleInfo) {
       itemId: target.itemId,
       nextItemId: target.itemId + 1,
       materialItemId,
-      star: getFishStar(target.itemId),
+      star: currentStar,
       heroId: target.heroId,
       cost,
     });
+    target.itemId += 1;
   }
 
   return operations;
