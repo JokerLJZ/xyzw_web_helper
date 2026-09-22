@@ -145,6 +145,14 @@ test("鱼灵图鉴按实际最高星与已领取星级之差规划", () => {
         },
       },
     }),
-    [{ fishId: 1304, actualStar: 5, claimedStar: 2, upgradeCount: 3 }],
+    [
+      {
+        fishId: 1304,
+        actualStar: 5,
+        claimedStar: 2,
+        upgradeArtifactIds: [13043, 13044, 13045],
+        upgradeCount: 3,
+      },
+    ],
   );
 });

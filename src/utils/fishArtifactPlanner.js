@@ -154,11 +154,16 @@ export function planFishBookUpgrades(roleInfo) {
       const artifactId = Number(book?.artifactId) || 0;
       const actualStar = getFishStar(artifactId);
       const claimedStar = Math.max(0, Number(book?.claimedStar) || 0);
+      const upgradeArtifactIds = Array.from(
+        { length: Math.max(0, actualStar - claimedStar) },
+        (_, index) => fishId * 10 + claimedStar + index + 1,
+      );
       return {
         fishId,
         actualStar,
         claimedStar,
-        upgradeCount: Math.max(0, actualStar - claimedStar),
+        upgradeArtifactIds,
+        upgradeCount: upgradeArtifactIds.length,
       };
     })
     .filter(({ fishId, upgradeCount }) =>

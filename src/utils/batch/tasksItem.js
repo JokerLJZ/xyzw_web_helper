@@ -1493,9 +1493,10 @@ export function createTasksItem(deps) {
               type: "info",
             });
           }
-          for (const { fishId, upgradeCount } of fishBookPlan) {
+          for (const { fishId, upgradeArtifactIds } of fishBookPlan) {
             if (shouldStop.value) break;
-            for (let index = 0; index < upgradeCount && !shouldStop.value; index += 1) {
+            for (const artifactId of upgradeArtifactIds) {
+              if (shouldStop.value) break;
               let completed = false;
               for (
                 let attempt = 0;
@@ -1507,11 +1508,11 @@ export function createTasksItem(deps) {
                   const result = await tokenStore.sendMessageWithPromise(
                     tokenId,
                     "book_bookupgradestar",
-                    { artifactId: fishId },
+                    { artifactId },
                     HELPER_COMMAND_TIMEOUT_MS,
                   );
                   if (!isSuccessfulBookCommand(result)) {
-                    throw new Error(`鱼灵${fishId}图鉴升星响应未确认成功`);
+                    throw new Error(`鱼灵图鉴物品${artifactId}升星响应未确认成功`);
                   }
                   completed = true;
                   fishBookUpgraded += 1;
