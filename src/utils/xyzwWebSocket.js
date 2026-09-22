@@ -310,6 +310,13 @@ export function registerDefaultCommands(reg) {
     .register("artifact_load")
     .register("artifact_unload")
     .register("lordweapon_changedefaultweapon")
+    .register("lordweapon_get")
+    .register("lordweapon_unlock", { weaponId: 2 })
+    .register("lordweapon_upgradeactiveskilllevel", { weaponId: 2 })
+    .register("lordweapon_upgradepassiveskilllevel", {
+      weaponId: 2,
+      skillId: 5,
+    })
     .register("pearl_replaceskill")
     .register("pearl_exchangeskill")
     .register("pearl_unloadskill")
@@ -1098,6 +1105,8 @@ export class XyzwWebSocketClient {
       fight_levelresp: "fight_level",
       studyresp: "study_startgame",
       role_getroleinforesp: "role_getroleinfo",
+      lordweapon_getresp: "lordweapon_get",
+      lordweapon_unlockresp: "lordweapon_unlock",
       apex_getroleinforesp: "apex_getroleinfo",
       apex_getguesslistresp: "apex_getguesslist",
       apex_guessresp: "apex_guess",
@@ -1227,6 +1236,10 @@ export class XyzwWebSocketClient {
         "hero_gointobattle",
         "hero_gobackbattle",
         "lordweapon_changedefaultweapon",
+        "lordweapon_get",
+        "lordweapon_unlock",
+        "lordweapon_upgradeactiveskilllevel",
+        "lordweapon_upgradepassiveskilllevel",
       ],
       syncrewardresp: [
         "activity_commonbuygoods",

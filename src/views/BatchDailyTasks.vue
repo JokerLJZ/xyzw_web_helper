@@ -683,6 +683,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchUpgradeShoeToy"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="主公达到4001级后，领取免费扳手并升级皮鞋玩具和已开放被动技能"
+                >
+                  自动升级皮鞋玩具
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchMaxWarriorLegionTech"
                   :disabled="isRunning || selectedTokens.length === 0"
                   title="按101至114顺序，每项一次升级到当前最高等级"
@@ -7568,6 +7576,7 @@ const {
   batchGenieSweep,
   batchUpgradeCrystal,
   batchUpgradeEquipment,
+  batchUpgradeShoeToy,
   batchMaxWarriorLegionTech,
   batchClaimAchievementRewards,
 } = tasksItem;
