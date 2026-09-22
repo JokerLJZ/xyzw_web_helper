@@ -1061,9 +1061,16 @@ export function createTasksItem(deps) {
   /**
    * 将单个武将升级并自动进阶到目标等级。
    */
-  const upgradeSingleHero = async (tokenId, tokenName, heroId, targetLevel) => {
+  const upgradeSingleHero = async (
+    tokenId,
+    tokenName,
+    heroId,
+    targetLevel,
+    initialRoleInfo = null,
+  ) => {
     const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
-    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+    const roleInfo =
+      initialRoleInfo || (await tokenStore.sendGetRoleInfo(tokenId));
     let hero = getHeroFromRoleInfo(roleInfo, heroId);
 
     if (!hero) {
@@ -1083,7 +1090,12 @@ export function createTasksItem(deps) {
         message: `${tokenName} ${heroName}当前${currentLevel}级，已达到目标，跳过操作`,
         type: "info",
       });
-      return;
+      return {
+        reachedTarget: true,
+        currentLevel,
+        currentOrder,
+        stopReason: "",
+      };
     }
 
     while (!shouldStop.value) {
@@ -1186,10 +1198,22 @@ export function createTasksItem(deps) {
           : `${tokenName} ${heroName}已完成至${currentLevel}级`,
       type: shouldStop.value || stopReason ? "warning" : "success",
     });
+    return {
+      reachedTarget: currentLevel >= targetLevel,
+      currentLevel,
+      currentOrder,
+      stopReason,
+    };
   };
 
-  const upgradeLordToLevel = async (tokenId, tokenName, targetLevel) => {
-    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+  const upgradeLordToLevel = async (
+    tokenId,
+    tokenName,
+    targetLevel,
+    initialRoleInfo = null,
+  ) => {
+    const roleInfo =
+      initialRoleInfo || (await tokenStore.sendGetRoleInfo(tokenId));
     let lord = roleInfo?.role?.lord;
     if (!lord) throw new Error("未获取到主公信息");
 
@@ -1319,7 +1343,14 @@ export function createTasksItem(deps) {
           );
           continue;
         }
-        await upgradeSingleHero(tokenId, tokenName, LU_BU_ID, lordLevel);
+        const upgradeResult = await upgradeSingleHero(
+          tokenId,
+          tokenName,
+          LU_BU_ID,
+          lordLevel,
+          roleInfo,
+        );
+        if (upgradeResult.stopReason) break;
         continue;
       }
 
@@ -1334,7 +1365,13 @@ export function createTasksItem(deps) {
         });
         break;
       }
-      await upgradeLordToLevel(tokenId, tokenName, nextLordLevel);
+      const upgradeResult = await upgradeLordToLevel(
+        tokenId,
+        tokenName,
+        nextLordLevel,
+        roleInfo,
+      );
+      if (upgradeResult.stopReason) break;
     }
   };
 
@@ -1800,6 +1837,10 @@ export function createTasksItem(deps) {
         }
 
         if (!shouldStop.value) {
+          // 即使资源预判后没有发送升级指令，也与后续阵容查询保持间隔。
+          await new Promise((resolve) =>
+            setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+          );
           await adjustEarlyMainLevelFormation(
             tokenId,
             tokenName,
@@ -1908,6 +1949,10 @@ export function createTasksItem(deps) {
         }
 
         if (!shouldStop.value) {
+          // 主公/吕布资源不足时升级会直接结束；等待后再查询并调整阵容。
+          await new Promise((resolve) =>
+            setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+          );
           await adjustMainLevelFormation(tokenId, tokenName);
         }
         tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
