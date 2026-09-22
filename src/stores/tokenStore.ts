@@ -96,7 +96,6 @@ export const useTokenStore = defineStore("tokens", () => {
     roleInfo: null,
     legionInfo: null,
     commonActivityInfo: null, // 消耗活动进度
-    bossTowerInfo: null, //宝库
     evoTowerInfo: null, //怪异塔
     presetTeam: null,
     battleVersion: null as number | null, // 战斗版本号

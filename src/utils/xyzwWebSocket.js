@@ -30,8 +30,6 @@ const errorCodeMap = {
   1500020: "能量不足",
   2300070: "未加入俱乐部",
   3500020: "没有可领取的奖励",
-  12000050: "今日发车次数已达上限",
-  12000060: "不在发车时间内",
   400190: "没有可领取的签到奖励",
   1000020: "今天已经领取过奖励了",
   3300050: "购买数量超出限制",
@@ -324,6 +322,7 @@ export function registerDefaultCommands(reg) {
     .register("hero_rebirth") //武将重新birth
 
     // 升星相关
+    .register("hero_synthetic", { itemId: 107 })
     .register("hero_heroupgradestar")
     .register("book_upgrade")
     .register("book_claimpointreward")
@@ -334,7 +333,6 @@ export function registerDefaultCommands(reg) {
     // 梦魇相关
     .register("nightmare_getroleinfo")
     .register("dungeon_selecthero")
-    .register("bosstower_gethelprank")
     .register("dungeon_buymerchant")
     // 活动/任务
     .register("activity_get")
@@ -372,16 +370,6 @@ export function registerDefaultCommands(reg) {
     // 扭蛋相关
     .register("gacha_drawreward", { num: 1, isGroup: false })
     
-    // 车辆相关
-    .register("car_getrolecar")
-    .register("car_refresh", { carId: 0 })
-    .register("car_claim", { carId: 0 })
-    .register("car_send", { carId: 0, helperId: 0, text: "" })
-    .register("car_getmemberhelpingcnt")
-    .register("car_getmemberrank")
-    .register("car_research")
-    .register("car_claimpartconsumereward")
-
     // 功法
     .register("legacy_getinfo")
     .register("legacy_claimhangup")
@@ -418,11 +406,7 @@ export function registerDefaultCommands(reg) {
       isLocked: false,
     })
 
-    // 咸王宝库
     .register("matchteam_getroleteaminfo")
-    .register("bosstower_getinfo")
-    .register("bosstower_startboss")
-    .register("bosstower_startbox")
     .register("discount_getdiscountinfo")
 
     // 换皮闯关相关
@@ -1186,13 +1170,10 @@ export class XyzwWebSocketClient {
       pearl_replaceskillresp: "pearl_replaceskill",
       pearl_exchangeskillresp: "pearl_exchangeskill",
       pearl_unloadskillresp: "pearl_unloadskill",
-      // 咸王宝库
       matchteam_getroleteaminforesp: "matchteam_getroleteaminfo",
-      bosstower_getinforesp: "bosstower_getinfo",
-      bosstower_startbossresp: "bosstower_startboss",
-      bosstower_startboxresp: "bosstower_startbox",
       discount_getdiscountinforesp: "discount_getdiscountinfo",
       // 升星相关响应映射
+      hero_syntheticresp: "hero_synthetic",
       hero_heroupgradestarresp: "hero_heroupgradestar",
       hero_lordupgradelevelresp: "hero_lordupgradelevel",
       hero_lordupgradeorderresp: "hero_lordupgradeorder",
@@ -1203,15 +1184,6 @@ export class XyzwWebSocketClient {
       // 军团信息
       legion_getinforesp: "legion_getinfo",
       legion_getinforresp: "legion_getinfo",
-      // 车辆相关响应映射
-      car_getrolecarresp: "car_getrolecar",
-      car_refreshresp: "car_refresh",
-      car_claimresp: "car_claim",
-      car_sendresp: "car_send",
-      car_getmemberhelpingcntresp: "car_getmemberhelpingcnt",
-      car_getmemberrankresp: "car_getmemberrank",
-      car_researchresp: "car_research",
-      car_claimpartconsumerewardresp: "car_claimpartconsumereward",
       role_gettargetteamresp: "role_gettargetteam",
       // 玄武赐福活动响应映射
       activity_warordergetresp: "activity_warorderget",
@@ -1224,7 +1196,6 @@ export class XyzwWebSocketClient {
       activity_lotteryresp: "activity_lottery",
       activity_rewardresp: "activity_claimsignreward",
       arena_getarearankresp: "arena_getarearank",
-      bosstower_gethelprankresp: "bosstower_gethelprank",
       // 功法相关响应映射
       legacy_getinforesp: "legacy_getinfo",
       legacy_claimhangupresp: "legacy_claimhangup",
@@ -1252,6 +1223,7 @@ export class XyzwWebSocketClient {
         "system_mysharecallback",
         "task_claimdailypoint",
         "role_commitpassword",
+        "hero_synthetic",
         "hero_gointobattle",
         "hero_gobackbattle",
         "lordweapon_changedefaultweapon",

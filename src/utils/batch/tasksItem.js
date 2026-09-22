@@ -18,6 +18,10 @@ import {
   isAttackTrump,
 } from "@/utils/upgradeResourcePlanner";
 import { getClaimableAchievementIds } from "@/utils/achievementRewards";
+import {
+  HERO_STAR_FRAGMENT_COSTS,
+  planHeroStarUpgrade,
+} from "@/utils/heroStarPlanner";
 
 // EquipmentLvConf.lvSpend，区间表示装备从当前等级继续升级所需的精铁。
 const EQUIPMENT_IRON_COST_RANGES = [
@@ -783,14 +787,7 @@ export function createTasksItem(deps) {
   };
 
   const heroIds = Object.keys(HERO_DICT).map(Number);
-  const starFragmentCosts = [
-    8, 8, 8, 8, 8,
-    40, 40, 40, 40, 40,
-    80, 80, 80, 80, 80,
-    200, 200, 200, 200, 200,
-    400, 400, 400, 400, 400,
-    400, 400, 400, 400, 400,
-  ];
+  const starFragmentCosts = HERO_STAR_FRAGMENT_COSTS;
   const HERO_STAR_ACTION_DELAY_MS = 3000;
   const HERO_STAR_RATE_LIMIT_DELAY_MS = 6000;
   const HERO_STAR_MAX_RATE_LIMIT_RETRIES = 4;
@@ -866,19 +863,12 @@ export function createTasksItem(deps) {
     });
 
   const getHeroStarUpgradeCount = (roleInfo, heroId) => {
-    const currentStar =
-      Number(getHeroFromRoleInfo(roleInfo, heroId)?.star) || 0;
-    let fragments = getItemQuantity(roleInfo, heroId);
-    let upgradeCount = 0;
-
-    for (let star = currentStar; star < 30; star += 1) {
-      const fragmentCost = Number(starFragmentCosts[star]) || 0;
-      if (fragmentCost <= 0 || fragments < fragmentCost) break;
-      fragments -= fragmentCost;
-      upgradeCount += 1;
-    }
-
-    return { heroId, currentStar, upgradeCount };
+    const hero = getHeroFromRoleInfo(roleInfo, heroId);
+    return planHeroStarUpgrade({
+      heroId,
+      hero,
+      fragmentQuantity: getItemQuantity(roleInfo, heroId),
+    });
   };
 
   const getBookUpgradePlan = (roleInfo) =>
@@ -951,19 +941,65 @@ export function createTasksItem(deps) {
         let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         const starUpgradePlan = heroIds
           .map((heroId) => getHeroStarUpgradeCount(roleInfo, heroId))
-          .filter(({ upgradeCount }) => upgradeCount > 0);
+          .filter(({ upgradeCount, needsSynthesis }) =>
+            needsSynthesis || upgradeCount > 0,
+          );
+        const synthesisCount = starUpgradePlan.filter(
+          ({ needsSynthesis }) => needsSynthesis,
+        ).length;
         addLog({
           time: new Date().toLocaleTimeString(),
           message:
             starUpgradePlan.length > 0
-              ? `${token.name} 检测到${starUpgradePlan.length}名可升星武将，共计划升星${starUpgradePlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次：${starUpgradePlan.map(({ heroId, upgradeCount }) => `${HERO_DICT[heroId]?.name || heroId}${upgradeCount}次`).join("、")}`
+              ? `${token.name} 检测到${starUpgradePlan.length}名可处理武将${synthesisCount > 0 ? `，其中${synthesisCount}名需要先合成` : ""}，共计划升星${starUpgradePlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次：${starUpgradePlan.map(({ heroId, upgradeCount, needsSynthesis }) => `${HERO_DICT[heroId]?.name || heroId}${needsSynthesis ? "合成后" : ""}${upgradeCount}次`).join("、")}`
               : `${token.name} 当前没有可升星武将`,
           type: "info",
         });
 
-        for (const { heroId, upgradeCount } of starUpgradePlan) {
+        for (const { heroId, upgradeCount, needsSynthesis } of starUpgradePlan) {
           if (shouldStop.value) break;
           const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
+          if (needsSynthesis) {
+            let synthesized = false;
+            for (
+              let attempt = 0;
+              attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
+              attempt += 1
+            ) {
+              try {
+                await waitForHeroStarInterval(tokenId);
+                await tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "hero_synthetic",
+                  { itemId: heroId },
+                  HELPER_COMMAND_TIMEOUT_MS,
+                );
+                synthesized = true;
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} ${heroName}合成成功`,
+                  type: "success",
+                });
+                break;
+              } catch (error) {
+                if (
+                  !isHeroStarRateLimitError(error) ||
+                  attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
+                ) {
+                  addLog({
+                    time: new Date().toLocaleTimeString(),
+                    message: `${token.name} ${heroName}合成失败，已跳过升星：${getErrorMessage(error)}`,
+                    type: "warning",
+                  });
+                  break;
+                }
+                await new Promise((resolve) =>
+                  setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
+                );
+              }
+            }
+            if (!synthesized) continue;
+          }
           for (let index = 0; index < upgradeCount && !shouldStop.value; index += 1) {
             let commandCompleted = false;
             for (
@@ -1015,17 +1051,17 @@ export function createTasksItem(deps) {
             setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
           );
           roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-          for (const { heroId, currentStar, upgradeCount } of starUpgradePlan) {
-            const latestStar =
-              Number(getHeroFromRoleInfo(roleInfo, heroId)?.star) || 0;
+          for (const { heroId, currentStar, upgradeCount, needsSynthesis } of starUpgradePlan) {
+            const latestHero = getHeroFromRoleInfo(roleInfo, heroId);
+            const latestStar = Number(latestHero?.star) || 0;
             addLog({
               time: new Date().toLocaleTimeString(),
               message:
-                latestStar >= currentStar + upgradeCount
+                latestHero && latestStar >= currentStar + upgradeCount
                   ? `${token.name} ${HERO_DICT[heroId]?.name || heroId}：${currentStar}星 → ${latestStar}星`
-                  : `${token.name} ${HERO_DICT[heroId]?.name || heroId}计划升星${upgradeCount}次，实际${currentStar}星 → ${latestStar}星`,
+                  : `${token.name} ${HERO_DICT[heroId]?.name || heroId}${needsSynthesis ? "计划先合成并" : "计划"}升星${upgradeCount}次，实际${latestHero ? `${currentStar}星 → ${latestStar}星` : "未合成"}`,
               type:
-                latestStar >= currentStar + upgradeCount
+                latestHero && latestStar >= currentStar + upgradeCount
                   ? "success"
                   : "warning",
             });
@@ -3643,8 +3679,52 @@ export function createTasksItem(deps) {
       return amount;
     };
     const executeHeroStarPlan = async (tokenId, tokenName, plan) => {
-      for (const { heroId, upgradeCount } of plan) {
+      for (const { heroId, upgradeCount, needsSynthesis } of plan) {
         const heroName = HERO_DICT[heroId]?.name || `武将${heroId}`;
+        if (needsSynthesis) {
+          let synthesized = false;
+          for (
+            let attempt = 0;
+            attempt <= MAX_RATE_LIMIT_RETRIES;
+            attempt += 1
+          ) {
+            try {
+              await waitForHeroStarInterval(tokenId);
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "hero_synthetic",
+                { itemId: heroId },
+                HELPER_COMMAND_TIMEOUT_MS,
+              );
+              synthesized = true;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} ${heroName}碎片已合成为武将`,
+                type: "success",
+              });
+              break;
+            } catch (error) {
+              if (
+                !isRateLimitError(error) ||
+                attempt >= MAX_RATE_LIMIT_RETRIES
+              ) {
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${tokenName} ${heroName}合成失败，跳过该武将升星：${getErrorMessage(error)}`,
+                  type: "warning",
+                });
+                break;
+              }
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} ${heroName}合成触发200400，等待6秒后进行第${attempt + 1}次重试`,
+                type: "warning",
+              });
+              await sleep(RATE_LIMIT_RETRY_DELAY_MS);
+            }
+          }
+          if (!synthesized) continue;
+        }
         for (
           let index = 0;
           index < upgradeCount && !shouldStop.value;
@@ -3685,7 +3765,7 @@ export function createTasksItem(deps) {
     const upgradeHeroStars = async (tokenId, heroId, tokenName) => {
       const roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
       const planItem = getHeroStarUpgradeCount(roleInfo, heroId);
-      if (planItem.upgradeCount <= 0) return 0;
+      if (!planItem.needsSynthesis && planItem.upgradeCount <= 0) return 0;
 
       await executeHeroStarPlan(tokenId, tokenName, [planItem]);
       await sleep(HERO_STAR_ACTION_DELAY_MS);
@@ -3951,12 +4031,17 @@ export function createTasksItem(deps) {
         roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         const starUpgradePlan = heroIds
           .map((heroId) => getHeroStarUpgradeCount(roleInfo, heroId))
-          .filter(({ upgradeCount }) => upgradeCount > 0);
+          .filter(({ upgradeCount, needsSynthesis }) =>
+            needsSynthesis || upgradeCount > 0,
+          );
+        const synthesisCount = starUpgradePlan.filter(
+          ({ needsSynthesis }) => needsSynthesis,
+        ).length;
         addLog({
           time: new Date().toLocaleTimeString(),
           message:
             starUpgradePlan.length > 0
-              ? `${tokenName} 仓库物品处理完成，检测到${starUpgradePlan.length}名可升星武将，共计划升星${starUpgradePlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次：${starUpgradePlan.map(({ heroId, upgradeCount }) => `${HERO_DICT[heroId]?.name || heroId}${upgradeCount}次`).join("、")}`
+              ? `${tokenName} 仓库物品处理完成，检测到${starUpgradePlan.length}名可处理武将${synthesisCount > 0 ? `，其中${synthesisCount}名需要先合成` : ""}，共计划升星${starUpgradePlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次：${starUpgradePlan.map(({ heroId, upgradeCount, needsSynthesis }) => `${HERO_DICT[heroId]?.name || heroId}${needsSynthesis ? "合成后" : ""}${upgradeCount}次`).join("、")}`
               : `${tokenName} 仓库物品处理完成，当前没有可升星武将`,
           type: "info",
         });
@@ -3966,15 +4051,20 @@ export function createTasksItem(deps) {
           await executeHeroStarPlan(tokenId, tokenName, starUpgradePlan);
           await sleep(HERO_STAR_ACTION_DELAY_MS);
           const latestRoleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-          for (const { heroId, currentStar, upgradeCount } of starUpgradePlan) {
+          for (const { heroId, currentStar, upgradeCount, needsSynthesis } of starUpgradePlan) {
+            const latestHero = getHeroes(latestRoleInfo)[heroId] ??
+              getHeroes(latestRoleInfo)[String(heroId)];
             const latestStar = getHeroStar(getHeroes(latestRoleInfo), heroId);
             const upgraded = Math.max(0, latestStar - currentStar);
             if (upgraded > 0) upgradedHeroCount += 1;
             upgradedStarCount += upgraded;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${tokenName} ${HERO_DICT[heroId]?.name || heroId}计划升星${upgradeCount}次，实际${currentStar}星 → ${latestStar}星`,
-              type: upgraded >= upgradeCount ? "success" : "warning",
+              message: `${tokenName} ${HERO_DICT[heroId]?.name || heroId}${needsSynthesis ? "计划先合成并" : "计划"}升星${upgradeCount}次，实际${latestHero ? `${currentStar}星 → ${latestStar}星` : "未合成"}`,
+              type:
+                latestHero && upgraded >= upgradeCount
+                  ? "success"
+                  : "warning",
             });
           }
         }

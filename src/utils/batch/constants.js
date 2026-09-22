@@ -43,8 +43,6 @@ export const availableTasks = [
   { label: "一键领取罐子", value: "batchlingguanzi" },
   { label: "一键爬塔", value: "climbTower" },
   { label: "一键怪异塔", value: "batchWeirdTower" },
-  { label: "智能发车", value: "batchSmartSendCar" },
-  { label: "一键收车", value: "batchClaimCars" },
   { label: "批量开箱", value: "batchOpenBox" },
   { label: "按积分开箱", value: "batchOpenBoxByPoints" },
   { label: "领取宝箱积分", value: "batchClaimBoxPointReward" },
@@ -56,8 +54,6 @@ export const availableTasks = [
   { label: "自动兑换码", value: "batchRedeemCodes" },
   { label: "批量钓鱼", value: "batchFish" },
   { label: "批量招募", value: "batchRecruit" },
-  { label: "一键宝库前3层", value: "batchbaoku13" },
-  { label: "一键宝库4,5层", value: "batchbaoku45" },
   { label: "自动梦境", value: "batchmengjing" },
   { label: "一键俱乐部签到", value: "batchclubsign" },
   { label: "一键盐场报名", value: "batchSaltSignup" },
@@ -86,14 +82,6 @@ export const availableTasks = [
   { label: "小号前期推图阵容", value: "batchAdjustEarlyMainLevelFormation" },
   { label: "小号推图默认阵容调整", value: "batchAdjustMainLevelFormation" },
   { label: "一键玄武赐福", value: "batchXuanwuBlessing" },
-];
-
-// 车辆研究消耗表
-export const CarresearchItem = [
-  20, 21, 22, 23, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 47, 50, 53, 56,
-  59, 62, 65, 68, 71, 74, 78, 82, 86, 90, 94, 99, 104, 109, 114, 119, 126, 133,
-  140, 147, 154, 163, 172, 181, 190, 199, 210, 221, 232, 243, 369, 393, 422,
-  457, 498, 548, 607, 678, 763, 865, 1011,
 ];
 
 // 月度任务目标
@@ -172,14 +160,12 @@ export const defaultBatchSettings = {
   defaultFishType: 1,
   receiverId: "",
   password: "",
-  useGoldRefreshFallback: false,
   blackMarketDiscounts: { ...DEFAULT_BLACK_MARKET_DISCOUNTS },
   blackMarketRefreshCount: DEFAULT_BLACK_MARKET_REFRESH_COUNT,
   tokenListColumns: 2,
   commandDelay: 500,
   taskDelay: 500,
   maxActive: 2,
-  carMinColor: 4,
   connectionTimeout: 10000,
   reconnectDelay: 1000,
   maxLogEntries: 1000,
@@ -196,12 +182,6 @@ export const defaultBatchSettings = {
   wxpusherUids: "",
   pushplusEnabled: false,
   pushplusToken: "",
-  // 智能发车阈值设置
-  smartDepartureGoldThreshold: 0,
-  smartDepartureRecruitThreshold: 0,
-  smartDepartureJadeThreshold: 0,
-  smartDepartureTicketThreshold: 0,
-  smartDepartureMatchAll: false,
 };
 
 // 默认模板
