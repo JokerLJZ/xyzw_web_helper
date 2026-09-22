@@ -4243,80 +4243,6 @@ export function createTasksItem(deps) {
       });
       return upgraded;
     };
-    const executeBookCommand = async (tokenId, command, params) => {
-      for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
-        try {
-          await waitForBookActionInterval(tokenId);
-          const result = await tokenStore.sendMessageWithPromise(
-            tokenId,
-            command,
-            params,
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
-          if (!isSuccessfulBookCommand(result)) {
-            throw new Error(`${command}执行失败`);
-          }
-          return result;
-        } catch (error) {
-          if (!isRateLimitError(error) || attempt >= MAX_RATE_LIMIT_RETRIES) {
-            throw error;
-          }
-          await sleep(RATE_LIMIT_RETRY_DELAY_MS);
-        }
-      }
-      return null;
-    };
-    const upgradeHeroBooks = async (tokenId, tokenName) => {
-      const roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-      const upgradePlan = getBookUpgradePlan(roleInfo);
-      let upgraded = 0;
-      for (const { heroId, upgradeCount } of upgradePlan) {
-        for (
-          let index = 0;
-          index < upgradeCount && !shouldStop.value;
-          index += 1
-        ) {
-          await executeBookCommand(tokenId, "book_upgrade", { heroId });
-          upgraded += 1;
-        }
-      }
-
-      if (upgradePlan.length > 0 && !shouldStop.value) {
-        // 完整计划执行期间不查询，结束后统一查询一次实际结果。
-        await sleep(HERO_STAR_ACTION_DELAY_MS);
-        const latestRoleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-        const remainingPlan = getBookUpgradePlan(latestRoleInfo);
-        if (remainingPlan.length > 0) {
-          throw new Error(
-            `图鉴升星校验失败，仍有${remainingPlan.reduce(
-              (sum, item) => sum + item.upgradeCount,
-              0,
-            )}次未完成`,
-          );
-        }
-      }
-      return {
-        upgraded,
-        heroCount: upgradePlan.length,
-        planned: upgradePlan.reduce(
-          (sum, item) => sum + item.upgradeCount,
-          0,
-        ),
-      };
-    };
-    const claimBookRewards = async (tokenId) => {
-      let claimed = 0;
-      // 每次成功后继续领取，直到服务器提示当前已无可领取奖励。
-      for (let attempt = 0; attempt < 10 && !shouldStop.value; attempt += 1) {
-        try {
-          await executeBookCommand(tokenId, "book_claimpointreward", {});
-          claimed += 1;
-        } catch (error) {
-          break;
-        }
-      }
-      return claimed;
-    };
     const useUniversalFragments = async ({
       tokenId,
       universalItemId,
@@ -4493,74 +4419,6 @@ export function createTasksItem(deps) {
         }
 
         roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-        const starUpgradePlan = heroIds
-          .map((heroId) => getHeroStarUpgradeCount(roleInfo, heroId))
-          .filter(({ upgradeCount, needsSynthesis }) =>
-            needsSynthesis || upgradeCount > 0,
-          );
-        const synthesisCount = starUpgradePlan.filter(
-          ({ needsSynthesis }) => needsSynthesis,
-        ).length;
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message:
-            starUpgradePlan.length > 0
-              ? `${tokenName} 仓库物品处理完成，检测到${starUpgradePlan.length}名可处理武将${synthesisCount > 0 ? `，其中${synthesisCount}名需要先合成` : ""}，共计划升星${starUpgradePlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次：${starUpgradePlan.map(({ heroId, upgradeCount, needsSynthesis }) => `${HERO_DICT[heroId]?.name || heroId}${needsSynthesis ? "合成后" : ""}${upgradeCount}次`).join("、")}`
-              : `${tokenName} 仓库物品处理完成，当前没有可升星武将`,
-          type: "info",
-        });
-        let upgradedHeroCount = 0;
-        let upgradedStarCount = 0;
-        if (starUpgradePlan.length > 0 && !shouldStop.value) {
-          await executeHeroStarPlan(tokenId, tokenName, starUpgradePlan);
-          await sleep(HERO_STAR_ACTION_DELAY_MS);
-          const latestRoleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-          for (const { heroId, currentStar, upgradeCount, needsSynthesis } of starUpgradePlan) {
-            const latestHero = getHeroes(latestRoleInfo)[heroId] ??
-              getHeroes(latestRoleInfo)[String(heroId)];
-            const latestStar = getHeroStar(getHeroes(latestRoleInfo), heroId);
-            const upgraded = Math.max(0, latestStar - currentStar);
-            if (upgraded > 0) upgradedHeroCount += 1;
-            upgradedStarCount += upgraded;
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${tokenName} ${HERO_DICT[heroId]?.name || heroId}${needsSynthesis ? "计划先合成并" : "计划"}升星${upgradeCount}次，实际${latestHero ? `${currentStar}星 → ${latestStar}星` : "未合成"}`,
-              type:
-                latestHero && upgraded >= upgradeCount
-                  ? "success"
-                  : "warning",
-            });
-          }
-        }
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 全武将升星完成：${upgradedHeroCount}名武将，共提升${upgradedStarCount}星`,
-          type: "success",
-        });
-
-        if (!shouldStop.value) {
-          // 与最后一次武将升星至少间隔3秒，再开始图鉴相关操作。
-          await sleep(HERO_STAR_ACTION_DELAY_MS);
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 开始执行图鉴升星`,
-            type: "info",
-          });
-          const bookUpgradeResult = await upgradeHeroBooks(tokenId, tokenName);
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 图鉴升星完成：检测${bookUpgradeResult.heroCount}名武将，计划${bookUpgradeResult.planned}次，成功${bookUpgradeResult.upgraded}次；开始领取图鉴奖励`,
-            type: "success",
-          });
-          const claimedBookRewardCount = await claimBookRewards(tokenId);
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 图鉴奖励领取完成：成功${claimedBookRewardCount}次`,
-            type: "success",
-          });
-        }
-
-        roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${tokenName} 仓库物品使用任务完成，剩余物品已重新查询`,
@@ -4581,8 +4439,17 @@ export function createTasksItem(deps) {
     });
 
     await Promise.all(taskPromises);
+    const shouldRunAutoStarBook = !shouldStop.value;
     isRunning.value = false;
     currentRunningTokenId.value = null;
+    if (shouldRunAutoStarBook) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: "仓库物品处理完成，开始调用统一的自动升星图鉴任务",
+        type: "info",
+      });
+      await batchAutoStarBook();
+    }
     message.success("仓库物品使用任务结束");
   };
 
