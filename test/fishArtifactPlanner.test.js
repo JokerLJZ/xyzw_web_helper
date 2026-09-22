@@ -34,17 +34,15 @@ test("从最高星开始并允许同种鱼灵多次合成及连续升星", () =>
   assert.equal(plan.some(({ fishId }) => fishId === 1101), false);
 });
 
-test("装备中的鱼灵参与合成并持续绑定原武将", () => {
+test("装备中的鱼灵使用额外库存材料升级并保持绑定", () => {
   const plan = planFishArtifactUpgrades({
     role: {
-      heroes: { 107: { heroId: 107, artifactId: 13041 } },
+      heroes: { 107: { heroId: 107, artifactId: 13044 } },
+      items: { 13044: { quantity: 1 } },
     },
   });
 
   assert.deepEqual(plan.map(({ itemId, heroId }) => ({ itemId, heroId })), [
-    { itemId: 13041, heroId: 107 },
-    { itemId: 13042, heroId: 107 },
-    { itemId: 13043, heroId: 107 },
     { itemId: 13044, heroId: 107 },
   ]);
 });
@@ -57,6 +55,15 @@ test("不会把其他武将已装备的鱼灵当作合成材料", () => {
         108: { heroId: 108, artifactId: 16011 },
       },
       items: { 16011: { quantity: 18 } },
+    },
+  });
+  assert.equal(plan.length, 0);
+});
+
+test("已装备鱼灵本体不抵扣升级材料", () => {
+  const plan = planFishArtifactUpgrades({
+    role: {
+      heroes: { 107: { heroId: 107, artifactId: 13041 } },
     },
   });
   assert.equal(plan.length, 0);

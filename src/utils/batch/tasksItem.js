@@ -1310,7 +1310,7 @@ export function createTasksItem(deps) {
         }
 
         if (!shouldStop.value) {
-          const fishUpgradePlan = planFishArtifactUpgrades(roleInfo);
+          let fishUpgradePlan = planFishArtifactUpgrades(roleInfo);
           addLog({
             time: new Date().toLocaleTimeString(),
             message:
@@ -1322,9 +1322,11 @@ export function createTasksItem(deps) {
 
           let fishUpgraded = 0;
           const failedFishIds = new Set();
-          for (const operation of fishUpgradePlan) {
-            if (shouldStop.value) break;
-            if (failedFishIds.has(operation.fishId)) continue;
+          while (!shouldStop.value) {
+            const operation = fishUpgradePlan.find(
+              ({ fishId }) => !failedFishIds.has(fishId),
+            );
+            if (!operation) break;
             const fishName = FishMap[operation.fishId]?.name || `鱼灵${operation.fishId}`;
             let completed = false;
             for (
@@ -1365,14 +1367,18 @@ export function createTasksItem(deps) {
                 );
               }
             }
-            if (!completed) failedFishIds.add(operation.fishId);
-          }
+            if (!completed) {
+              failedFishIds.add(operation.fishId);
+              continue;
+            }
 
-          if (fishUpgradePlan.length > 0 && !shouldStop.value) {
+            // 每次升级后以服务器最新数据重新规划，避免库存、装备状态或
+            // 服务端实际消耗与本地推算不一致时继续执行错误计划。
             await new Promise((resolve) =>
               setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
             );
             roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+            fishUpgradePlan = planFishArtifactUpgrades(roleInfo);
           }
 
           const fishBookPlan = planFishBookUpgrades(roleInfo);

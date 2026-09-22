@@ -26,7 +26,8 @@ export function isUpgradeableFishItem(itemId) {
 
 /**
  * 一次角色查询后生成完整鱼灵合成计划。
- * 每轮始终选择当前可合成的最高星级，且把装备中的鱼灵计入副本数量。
+ * 每轮始终选择当前可合成的最高星级。
+ * 已装备鱼灵仅作为升级目标，不抵扣升级所需的库存材料。
  */
 export function planFishArtifactUpgrades(roleInfo) {
   const role = getRole(roleInfo);
@@ -58,9 +59,7 @@ export function planFishArtifactUpgrades(roleInfo) {
       .filter((itemId) => {
         const cost = getFishMergeCost(itemId);
         const inventoryCount = inventory.get(itemId) || 0;
-        const equippedCount = equipped.get(itemId)?.length || 0;
-        return isUpgradeableFishItem(itemId) && cost > 0 &&
-          (inventoryCount >= cost || (equippedCount > 0 && inventoryCount >= cost - 1));
+        return isUpgradeableFishItem(itemId) && cost > 0 && inventoryCount >= cost;
       })
       .sort((left, right) => {
         const starDiff = getFishStar(right) - getFishStar(left);
@@ -73,10 +72,10 @@ export function planFishArtifactUpgrades(roleInfo) {
     const nextItemId = itemId + 1;
     const equippedHeroes = equipped.get(itemId) || [];
     const inventoryCount = inventory.get(itemId) || 0;
-    const canUpgradeEquipped = equippedHeroes.length > 0 && inventoryCount >= cost - 1;
+    const canUpgradeEquipped = equippedHeroes.length > 0;
     const heroId = canUpgradeEquipped ? equippedHeroes.shift() : -1;
 
-    inventory.set(itemId, inventoryCount - (heroId > 0 ? cost - 1 : cost));
+    inventory.set(itemId, inventoryCount - cost);
     if (heroId > 0) {
       if (!equipped.has(nextItemId)) equipped.set(nextItemId, []);
       equipped.get(nextItemId).push(heroId);
