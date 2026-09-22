@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { planHeroStarUpgrade } from "../src/utils/heroStarPlanner.js";
+import {
+  getHeroSynthesisFragmentCost,
+  planHeroStarUpgrade,
+} from "../src/utils/heroStarPlanner.js";
 
 test("未拥有武将时先扣除8碎片用于合成，再规划升星", () => {
   assert.deepEqual(
@@ -12,8 +15,8 @@ test("未拥有武将时先扣除8碎片用于合成，再规划升星", () => {
 
 test("碎片仅够合成时只执行合成，不规划升星", () => {
   assert.deepEqual(
-    planHeroStarUpgrade({ heroId: 204, hero: null, fragmentQuantity: 8 }),
-    { heroId: 204, currentStar: 0, needsSynthesis: true, upgradeCount: 0 },
+    planHeroStarUpgrade({ heroId: 104, hero: null, fragmentQuantity: 8 }),
+    { heroId: 104, currentStar: 0, needsSynthesis: true, upgradeCount: 0 },
   );
 });
 
@@ -32,5 +35,28 @@ test("已拥有武将沿用当前星级直接规划升星", () => {
       fragmentQuantity: 80,
     }),
     { heroId: 107, currentStar: 5, needsSynthesis: false, upgradeCount: 2 },
+  );
+});
+
+test("红橙紫武将只使用不同的合成碎片消耗", () => {
+  assert.equal(getHeroSynthesisFragmentCost(107), 8);
+  assert.equal(getHeroSynthesisFragmentCost(204), 4);
+  assert.equal(getHeroSynthesisFragmentCost(302), 1);
+
+  assert.deepEqual(
+    planHeroStarUpgrade({ heroId: 204, hero: null, fragmentQuantity: 4 }),
+    { heroId: 204, currentStar: 0, needsSynthesis: true, upgradeCount: 0 },
+  );
+  assert.deepEqual(
+    planHeroStarUpgrade({ heroId: 302, hero: null, fragmentQuantity: 1 }),
+    { heroId: 302, currentStar: 0, needsSynthesis: true, upgradeCount: 0 },
+  );
+  assert.deepEqual(
+    planHeroStarUpgrade({ heroId: 204, hero: null, fragmentQuantity: 12 }),
+    { heroId: 204, currentStar: 0, needsSynthesis: true, upgradeCount: 1 },
+  );
+  assert.deepEqual(
+    planHeroStarUpgrade({ heroId: 302, hero: null, fragmentQuantity: 9 }),
+    { heroId: 302, currentStar: 0, needsSynthesis: true, upgradeCount: 1 },
   );
 });
