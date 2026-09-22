@@ -1,11 +1,19 @@
 export const FISH_MAX_STAR = 5;
 
 const FISH_MERGE_COSTS = {
-  12: 1, // 红色专属鱼灵
-  13: 1, // 红色鱼灵
-  14: 2, // 橙色鱼灵
-  15: 5, // 紫色鱼灵
-  16: 20, // 蓝色鱼灵
+  12: 1,
+  13: 1,
+  14: 2,
+  15: 5,
+  16: 20,
+};
+
+const FISH_ID_RANGES = {
+  12: [1201, 1220],
+  13: [1301, 1305],
+  14: [1401, 1412],
+  15: [1501, 1506],
+  16: [1601, 1604],
 };
 
 const getRole = (roleInfo) =>
@@ -14,8 +22,16 @@ const getRole = (roleInfo) =>
 export const getFishBaseId = (itemId) => Math.floor((Number(itemId) || 0) / 10);
 export const getFishStar = (itemId) => (Number(itemId) || 0) % 10;
 
+export function isKnownFishId(fishId) {
+  const id = Number(fishId) || 0;
+  const quality = Math.floor(id / 100);
+  const range = FISH_ID_RANGES[quality];
+  return Boolean(range && id >= range[0] && id <= range[1]);
+}
+
 export function getFishMergeCost(itemId) {
   const baseId = getFishBaseId(itemId);
+  if (!isKnownFishId(baseId)) return 0;
   return FISH_MERGE_COSTS[Math.floor(baseId / 100)] || 0;
 }
 
@@ -25,70 +41,73 @@ export function isUpgradeableFishItem(itemId) {
 }
 
 /**
- * 一次角色查询后生成完整鱼灵合成计划。
- * 每轮始终选择当前可合成的最高星级。
- * 已装备鱼灵仅作为升级目标，不抵扣升级所需的库存材料。
+ * 根据一次角色查询生成“当前真实存在”的鱼灵升级计划。
+ *
+ * itemId 表示待升级鱼灵的当前星级；每次升级实际消耗的材料始终是
+ * 同种鱼灵的 1 星道具（fishId * 10 + 1）。这里不会把本地推算出的
+ * 升级产物再次加入库存，后续星级必须等服务器返回最新角色数据后再规划。
  */
 export function planFishArtifactUpgrades(roleInfo) {
   const role = getRole(roleInfo);
   const inventory = new Map();
-  const equipped = new Map();
+  const targets = [];
 
-  const addInventory = (itemId, quantity = 1) => {
-    const id = Number(itemId) || 0;
-    if (!isUpgradeableFishItem(id) && getFishStar(id) !== FISH_MAX_STAR) return;
-    inventory.set(id, (inventory.get(id) || 0) + Math.max(0, Number(quantity) || 0));
-  };
-
-  for (const [itemId, item] of Object.entries(role?.items || {})) {
-    addInventory(itemId, item?.quantity);
+  for (const [itemKey, item] of Object.entries(role?.items || {})) {
+    const itemId = Number(item?.itemId) || Number(itemKey) || 0;
+    if (!isUpgradeableFishItem(itemId) && getFishStar(itemId) !== FISH_MAX_STAR) {
+      continue;
+    }
+    const quantity = Math.max(0, Number(item?.quantity) || 0);
+    if (quantity > 0) inventory.set(itemId, quantity);
   }
 
   for (const [heroKey, hero] of Object.entries(role?.heroes || {})) {
     const itemId = Number(hero?.artifactId) || 0;
-    if (!itemId || getFishMergeCost(itemId) <= 0) continue;
-    const heroId = Number(hero?.heroId) || Number(heroKey) || 0;
-    if (!equipped.has(itemId)) equipped.set(itemId, []);
-    equipped.get(itemId).push(heroId);
+    if (!isUpgradeableFishItem(itemId)) continue;
+    targets.push({
+      itemId,
+      heroId: Number(hero?.heroId) || Number(heroKey) || 0,
+      source: "equipped",
+    });
   }
 
+  for (const [itemId, quantity] of inventory) {
+    if (!isUpgradeableFishItem(itemId)) continue;
+    for (let index = 0; index < quantity; index += 1) {
+      targets.push({ itemId, heroId: -1, source: "inventory" });
+    }
+  }
+
+  targets.sort((left, right) => {
+    const starDiff = getFishStar(right.itemId) - getFishStar(left.itemId);
+    if (starDiff) return starDiff;
+    if (left.source !== right.source) return left.source === "equipped" ? -1 : 1;
+    return left.itemId - right.itemId;
+  });
+
   const operations = [];
-  while (true) {
-    const itemIds = new Set([...inventory.keys(), ...equipped.keys()]);
-    const candidate = [...itemIds]
-      .filter((itemId) => {
-        const cost = getFishMergeCost(itemId);
-        const inventoryCount = inventory.get(itemId) || 0;
-        return isUpgradeableFishItem(itemId) && cost > 0 && inventoryCount >= cost;
-      })
-      .sort((left, right) => {
-        const starDiff = getFishStar(right) - getFishStar(left);
-        return starDiff || left - right;
-      })[0];
+  for (const target of targets) {
+    const fishId = getFishBaseId(target.itemId);
+    const materialItemId = fishId * 10 + 1;
+    const cost = getFishMergeCost(target.itemId);
+    const materialQuantity = inventory.get(materialItemId) || 0;
+    const targetQuantity = inventory.get(target.itemId) || 0;
 
-    if (!candidate) break;
-    const itemId = candidate;
-    const cost = getFishMergeCost(itemId);
-    const nextItemId = itemId + 1;
-    const equippedHeroes = equipped.get(itemId) || [];
-    const inventoryCount = inventory.get(itemId) || 0;
-    const canUpgradeEquipped = equippedHeroes.length > 0;
-    const heroId = canUpgradeEquipped ? equippedHeroes.shift() : -1;
+    if (target.source === "inventory" && targetQuantity <= 0) continue;
+    if (materialQuantity < cost) continue;
 
-    inventory.set(itemId, inventoryCount - cost);
-    if (heroId > 0) {
-      if (!equipped.has(nextItemId)) equipped.set(nextItemId, []);
-      equipped.get(nextItemId).push(heroId);
-    } else {
-      inventory.set(nextItemId, (inventory.get(nextItemId) || 0) + 1);
+    inventory.set(materialItemId, materialQuantity - cost);
+    if (target.source === "inventory" && target.itemId !== materialItemId) {
+      inventory.set(target.itemId, targetQuantity - 1);
     }
 
     operations.push({
-      fishId: getFishBaseId(itemId),
-      itemId,
-      nextItemId,
-      star: getFishStar(itemId),
-      heroId,
+      fishId,
+      itemId: target.itemId,
+      nextItemId: target.itemId + 1,
+      materialItemId,
+      star: getFishStar(target.itemId),
+      heroId: target.heroId,
       cost,
     });
   }
@@ -112,6 +131,6 @@ export function planFishBookUpgrades(roleInfo) {
       };
     })
     .filter(({ fishId, upgradeCount }) =>
-      Math.floor(fishId / 100) !== 11 && upgradeCount > 0,
+      isKnownFishId(fishId) && upgradeCount > 0,
     );
 }
