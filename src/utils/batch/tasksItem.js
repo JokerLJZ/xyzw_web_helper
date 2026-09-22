@@ -1089,10 +1089,8 @@ export function createTasksItem(deps) {
     return text.includes("200400") || text.includes("操作太快");
   };
 
-  /**
-   * 批量英雄升星
-   */
-  const batchHeroUpgrade = async () => {
+  /** 武将升星完成后，继续同步图鉴星级并领取全部可领取奖励。 */
+  const batchAutoStarBook = async () => {
     if (selectedTokens.value.length === 0) return;
 
     isRunning.value = true;
@@ -1111,7 +1109,7 @@ export function createTasksItem(deps) {
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始英雄升星: ${token.name} ===`,
+          message: `=== 开始自动升星图鉴: ${token.name} ===`,
           type: "info",
         });
 
@@ -1246,10 +1244,107 @@ export function createTasksItem(deps) {
           }
         }
 
+        if (!shouldStop.value) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+          );
+          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          const bookUpgradePlan = getBookUpgradePlan(roleInfo);
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message:
+              bookUpgradePlan.length > 0
+                ? `${token.name} 开始图鉴升星：${bookUpgradePlan.length}名武将，共${bookUpgradePlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次`
+                : `${token.name} 当前没有需要图鉴升星的武将`,
+            type: "info",
+          });
+
+          let bookUpgraded = 0;
+          for (const { heroId, upgradeCount } of bookUpgradePlan) {
+            if (shouldStop.value) break;
+            for (
+              let index = 0;
+              index < upgradeCount && !shouldStop.value;
+              index += 1
+            ) {
+              for (
+                let attempt = 0;
+                attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
+                attempt += 1
+              ) {
+                try {
+                  await waitForBookActionInterval(tokenId);
+                  const result = await tokenStore.sendMessageWithPromise(
+                    tokenId,
+                    "book_upgrade",
+                    { heroId },
+                    HELPER_COMMAND_TIMEOUT_MS,
+                  );
+                  if (!isSuccessfulBookCommand(result)) {
+                    throw new Error("图鉴升星响应未确认成功");
+                  }
+                  bookUpgraded += 1;
+                  break;
+                } catch (error) {
+                  if (
+                    !isHeroStarRateLimitError(error) ||
+                    attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
+                  ) {
+                    throw error;
+                  }
+                  await new Promise((resolve) =>
+                    setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
+                  );
+                }
+              }
+            }
+          }
+
+          if (bookUpgradePlan.length > 0 && !shouldStop.value) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+            );
+            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+            const remainingBookPlan = getBookUpgradePlan(roleInfo);
+            if (remainingBookPlan.length > 0) {
+              throw new Error(
+                `图鉴升星校验失败，仍有${remainingBookPlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次未完成`,
+              );
+            }
+          }
+
+          let claimedRewards = 0;
+          for (
+            let attempt = 0;
+            attempt < 10 && !shouldStop.value;
+            attempt += 1
+          ) {
+            try {
+              await waitForBookActionInterval(tokenId);
+              const result = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "book_claimpointreward",
+                {},
+                HELPER_COMMAND_TIMEOUT_MS,
+              );
+              if (!isSuccessfulBookCommand(result)) break;
+              claimedRewards += 1;
+            } catch (_error) {
+              // 没有更多可领取奖励时，服务端以失败响应结束领取循环。
+              break;
+            }
+          }
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 图鉴升星${bookUpgraded}次，领取图鉴奖励${claimedRewards}次`,
+            type: "success",
+          });
+        }
+
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} === 英雄升星完成 ===`,
+          message: `${token.name} === 自动升星图鉴完成 ===`,
           type: "success",
         });
       } catch (error) {
@@ -1257,7 +1352,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `英雄升星失败: ${error.message}`,
+          message: `自动升星图鉴失败: ${error.message}`,
           type: "error",
         });
       } finally {
@@ -1269,7 +1364,7 @@ export function createTasksItem(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("批量英雄升星结束");
+    message.success("自动升星图鉴任务结束");
   };
 
   /**
@@ -4938,7 +5033,7 @@ export function createTasksItem(deps) {
     batchUseWarehouseItems,
     batchFish,
     batchRecruit,
-    batchHeroUpgrade,
+    batchAutoStarBook,
     batchHeroLevelUpgrade,
     batchUpgradeLordTo6000,
     batchAdjustEarlyMainLevelFormation,

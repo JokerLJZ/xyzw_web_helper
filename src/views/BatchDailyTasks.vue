@@ -540,10 +540,10 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="batchHeroUpgrade"
+                  @click="batchAutoStarBook"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  一键英雄升星
+                  自动升星图鉴
                 </n-button>
                 <n-button
                   size="small"
@@ -551,20 +551,6 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   批量升级武将
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchBookUpgrade"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键图鉴升星
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimStarRewards"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键领取图鉴奖励
                 </n-button>
                 <n-button
                   size="small"
@@ -7565,13 +7551,11 @@ const {
   batchUseWarehouseItems,
   batchFish,
   batchRecruit,
-  batchHeroUpgrade,
+  batchAutoStarBook,
   batchHeroLevelUpgrade,
   batchUpgradeLordTo6000,
   batchAdjustEarlyMainLevelFormation,
   batchAdjustMainLevelFormation,
-  batchBookUpgrade,
-  batchClaimStarRewards,
   batchClaimPeachTasks,
   batchGenieSweep,
   batchUpgradeCrystal,
