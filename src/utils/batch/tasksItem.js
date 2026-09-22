@@ -496,6 +496,20 @@ export function createTasksItem(deps) {
     const heroName = HERO_DICT[heroId].name;
     const isLocked = batchSettings.crystalLockAttribute !== false;
     const maxUpgradeAttempts = 10000;
+    const crystalActionDelay = 3000;
+    const crystalRateLimitDelay = 6000;
+    const maxCrystalRateLimitRetries = 3;
+
+    const isCrystalRateLimitError = (error) => {
+      const errorText = [
+        getErrorMessage(error),
+        error?.code,
+        error?.body?.code,
+        error?.data?.code,
+        error?.response?.code,
+      ].join(" ");
+      return errorText.includes("200400") || errorText.includes("操作太快");
+    };
 
     isRunning.value = true;
     shouldStop.value = false;
@@ -512,6 +526,34 @@ export function createTasksItem(deps) {
       let upgraded = 0;
       let stopReason = "";
 
+      const executeCrystalOperation = async (operationName, operation) => {
+        for (
+          let attempt = 0;
+          attempt <= maxCrystalRateLimitRetries;
+          attempt += 1
+        ) {
+          try {
+            return await operation();
+          } catch (error) {
+            if (
+              !isCrystalRateLimitError(error) ||
+              attempt >= maxCrystalRateLimitRetries
+            ) {
+              throw error;
+            }
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${operationName}触发200400，等待6秒后进行第${attempt + 1}次重试`,
+              type: "warning",
+            });
+            await new Promise((resolve) =>
+              setTimeout(resolve, crystalRateLimitDelay),
+            );
+          }
+        }
+        return null;
+      };
+
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -520,7 +562,10 @@ export function createTasksItem(deps) {
         });
         await ensureConnection(tokenId);
 
-        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let roleInfo = await executeCrystalOperation(
+          "查询水晶状态",
+          () => tokenStore.sendGetRoleInfo(tokenId),
+        );
         let role = roleInfo?.role || {};
         let hero = getHeroFromRoleInfo(roleInfo, heroId);
         if (!hero) {
@@ -540,6 +585,13 @@ export function createTasksItem(deps) {
 
         let transformed = 0;
         const maxTransformAttempts = 100;
+        if (!stopReason && !isAttackTrump(trumpId)) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${heroName}当前水晶ID为${trumpId}，不是攻击水晶，开始转换`,
+            type: "info",
+          });
+        }
         while (
           !stopReason &&
           !shouldStop.value &&
@@ -556,18 +608,26 @@ export function createTasksItem(deps) {
             break;
           }
 
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "trump_upgrade",
-            { heroId, isLocked: false, isTrans: true },
-            10000,
+          const transformResult = await executeCrystalOperation(
+            "转换攻击水晶",
+            () => tokenStore.sendMessageWithPromise(
+              tokenId,
+              "trump_upgrade",
+              { heroId, isLocked: false, isTrans: true },
+              10000,
+            ),
           );
           transformed += 1;
           await new Promise((resolve) =>
-            setTimeout(resolve, delayConfig.command),
+            setTimeout(resolve, crystalActionDelay),
           );
 
-          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          roleInfo = transformResult?.role
+            ? transformResult
+            : await executeCrystalOperation(
+              "查询转换后的水晶状态",
+              () => tokenStore.sendGetRoleInfo(tokenId),
+            );
           role = roleInfo?.role || {};
           hero = getHeroFromRoleInfo(roleInfo, heroId);
           if (!hero) {
@@ -616,21 +676,32 @@ export function createTasksItem(deps) {
           }
 
           try {
-            const result = await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "trump_upgrade",
-              { heroId, isLocked: lockUpgrade, isTrans: false },
-              10000,
+            const result = await executeCrystalOperation(
+              "升级水晶",
+              () => tokenStore.sendMessageWithPromise(
+                tokenId,
+                "trump_upgrade",
+                { heroId, isLocked: lockUpgrade, isTrans: false },
+                10000,
+              ),
             );
             const resultMessage = result?.msg || result?.message || result?.error || "";
             if (result?.error || (result?.code !== undefined && result.code !== 0)) {
               throw new Error(resultMessage || `服务器返回错误码 ${result.code}`);
             }
             upgraded += 1;
-            trumpId += 1;
-            gold -= cost.gold;
-            crystalItems -= cost.items;
-            diamonds -= cost.diamonds;
+            const updatedRole = result?.role;
+            const updatedHero = getHeroFromRoleInfo(result, heroId);
+            trumpId = Number(updatedHero?.trumpId) || trumpId + 1;
+            gold = Number.isFinite(Number(updatedRole?.gold))
+              ? Math.max(0, Number(updatedRole.gold))
+              : gold - cost.gold;
+            crystalItems = updatedRole?.items
+              ? getItemQuantity(result, 1016)
+              : crystalItems - cost.items;
+            diamonds = Number.isFinite(Number(updatedRole?.diamond))
+              ? Math.max(0, Number(updatedRole.diamond))
+              : diamonds - cost.diamonds;
 
             if (upgraded % 10 === 0) {
               addLog({
@@ -641,7 +712,7 @@ export function createTasksItem(deps) {
             }
 
             await new Promise((resolve) =>
-              setTimeout(resolve, delayConfig.command),
+              setTimeout(resolve, crystalActionDelay),
             );
           } catch (error) {
             stopReason = getErrorMessage(error) || "升级接口执行失败";
