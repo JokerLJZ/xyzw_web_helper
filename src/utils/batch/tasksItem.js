@@ -20,6 +20,7 @@ import {
 import { getClaimableAchievementIds } from "@/utils/achievementRewards";
 import {
   HERO_STAR_FRAGMENT_COSTS,
+  getHeroSynthesisFragmentCost,
   planHeroStarUpgrade,
 } from "@/utils/heroStarPlanner";
 import {
@@ -2073,7 +2074,8 @@ export function createTasksItem(deps) {
         type: "info",
       });
 
-      if (lordOrder > luBuOrder || luBuLevel < lordLevel) {
+      // 同阶时升级主公；主公领先一阶后升级吕布，二者按阶数交替培养。
+      if (lordOrder > luBuOrder) {
         if (luBuLevel >= lordLevel && luBuOrder < lordOrder) {
           const orderCost = getHeroOrderCost(luBuOrder);
           const stones = getItemQuantity(roleInfo, 1003);
@@ -2126,6 +2128,133 @@ export function createTasksItem(deps) {
       );
       if (upgradeResult.stopReason) break;
     }
+  };
+
+  const getFormationUniversalFragment = (heroId) => {
+    if (heroId >= 101 && heroId < 200) {
+      return { itemId: 3201, index: heroId - 101, name: "万能红碎" };
+    }
+    if (heroId >= 201 && heroId < 300) {
+      return { itemId: 3302, index: heroId - 201, name: "万能橙碎" };
+    }
+    return null;
+  };
+
+  const sendFormationPreparationCommand = async (
+    tokenId,
+    tokenName,
+    command,
+    params,
+    operationName,
+  ) => {
+    for (
+      let attempt = 0;
+      attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
+      attempt += 1
+    ) {
+      try {
+        await waitForHeroStarInterval(tokenId);
+        return await tokenStore.sendMessageWithPromise(
+          tokenId,
+          command,
+          params,
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+      } catch (error) {
+        if (
+          !isHeroStarRateLimitError(error) ||
+          attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
+        ) {
+          throw error;
+        }
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} ${operationName}触发200400，等待6秒后进行第${attempt + 1}次重试`,
+          type: "warning",
+        });
+        await new Promise((resolve) =>
+          setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
+        );
+      }
+    }
+    return null;
+  };
+
+  /** 培养阵容前先确认武将；碎片不足时仅在万能碎片足够补齐时转换并合成。 */
+  const ensureFormationHeroOwned = async (
+    tokenId,
+    tokenName,
+    heroId,
+    initialRoleInfo = null,
+  ) => {
+    let roleInfo =
+      initialRoleInfo || (await tokenStore.sendGetRoleInfo(tokenId));
+    if (getHeroFromRoleInfo(roleInfo, heroId)) {
+      return { owned: true, roleInfo };
+    }
+
+    const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
+    const synthesisCost = getHeroSynthesisFragmentCost(heroId);
+    const fragmentQuantity = getItemQuantity(roleInfo, heroId);
+    const missingQuantity = Math.max(0, synthesisCost - fragmentQuantity);
+    const universal = getFormationUniversalFragment(heroId);
+    const universalQuantity = universal
+      ? getItemQuantity(roleInfo, universal.itemId)
+      : 0;
+
+    if (
+      fragmentQuantity + universalQuantity < synthesisCost ||
+      (missingQuantity > 0 && !universal)
+    ) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 未拥有${heroName}，合成需要${synthesisCost}个碎片；当前专属${fragmentQuantity}个${universal ? `、${universal.name}${universalQuantity}个` : ""}，资源不足，跳过`,
+        type: "info",
+      });
+      return { owned: false, roleInfo };
+    }
+
+    if (missingQuantity > 0) {
+      await sendFormationPreparationCommand(
+        tokenId,
+        tokenName,
+        "item_openpack",
+        {
+          itemId: universal.itemId,
+          number: missingQuantity,
+          index: universal.index,
+        },
+        `转换${heroName}碎片`,
+      );
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 使用${missingQuantity}个${universal.name}补足${heroName}合成碎片`,
+        type: "success",
+      });
+    }
+
+    await sendFormationPreparationCommand(
+      tokenId,
+      tokenName,
+      "hero_synthetic",
+      { itemId: heroId },
+      `合成${heroName}`,
+    );
+    await new Promise((resolve) =>
+      setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+    );
+    roleInfo = await getRoleInfoWithStarRateLimitRetry(
+      tokenId,
+      tokenName,
+      `确认${heroName}合成结果`,
+    );
+    const owned = Boolean(getHeroFromRoleInfo(roleInfo, heroId));
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} ${heroName}${owned ? "合成成功" : "合成后未在武将列表中确认"}`,
+      type: owned ? "success" : "warning",
+    });
+    return { owned, roleInfo };
   };
 
   /** 小号任务：将所选账号的主公直接升级至6000级。 */
@@ -2541,27 +2670,58 @@ export function createTasksItem(deps) {
           type: "info",
         });
         await ensureConnection(tokenId);
-        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        const ownedHeroIds = new Set(
-          Object.values(roleInfo?.role?.heroes || {}).map((hero) =>
-            Number(hero?.heroId ?? hero?.id),
-          ),
+        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const luBuResult = await ensureFormationHeroOwned(
+          tokenId,
+          tokenName,
+          107,
+          roleInfo,
         );
-
-        if (!ownedHeroIds.has(107)) {
+        roleInfo = luBuResult.roleInfo;
+        if (!luBuResult.owned) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 未拥有吕布，前期推图培养及阵容均不调整`,
+            message: `${tokenName} 吕布无法合成，前期推图培养及阵容均不调整`,
             type: "info",
           });
           tokenStatus.value[tokenId] = "completed";
           return;
         }
 
-        const supportHeroId = ownedHeroIds.has(223) ? 223 : 204;
+        const caiWenJiResult = await ensureFormationHeroOwned(
+          tokenId,
+          tokenName,
+          223,
+          roleInfo,
+        );
+        roleInfo = caiWenJiResult.roleInfo;
+        let supportHeroId = 223;
+        if (!caiWenJiResult.owned) {
+          const zhangFeiResult = await ensureFormationHeroOwned(
+            tokenId,
+            tokenName,
+            204,
+            roleInfo,
+          );
+          roleInfo = zhangFeiResult.roleInfo;
+          supportHeroId = zhangFeiResult.owned ? 204 : null;
+        }
+        const taiShiCiResult = await ensureFormationHeroOwned(
+          tokenId,
+          tokenName,
+          106,
+          roleInfo,
+        );
+        roleInfo = taiShiCiResult.roleInfo;
+        const ownedHeroIds = new Set(
+          Object.values(roleInfo?.role?.heroes || {}).map((hero) =>
+            Number(hero?.heroId ?? hero?.id),
+          ),
+        );
+
         for (const heroId of [supportHeroId, 106]) {
           if (shouldStop.value) break;
-          if (!ownedHeroIds.has(heroId)) continue;
+          if (!heroId || !ownedHeroIds.has(heroId)) continue;
           try {
             await upgradeSingleHero(tokenId, tokenName, heroId, 750);
           } catch (error) {
@@ -2653,24 +2813,19 @@ export function createTasksItem(deps) {
         });
 
         await ensureConnection(tokenId);
-        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        const ownedHeroIds = new Set(
-          Object.values(roleInfo?.role?.heroes || {}).map((hero) =>
-            Number(hero?.heroId ?? hero?.id),
-          ),
-        );
+        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
 
         for (const group of upgradeGroups) {
           for (const heroId of group.heroIds) {
             if (shouldStop.value) break;
-            if (!ownedHeroIds.has(heroId)) {
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${tokenName} 未拥有${HERO_DICT[heroId].name}，跳过升级`,
-                type: "info",
-              });
-              continue;
-            }
+            const ownershipResult = await ensureFormationHeroOwned(
+              tokenId,
+              tokenName,
+              heroId,
+              roleInfo,
+            );
+            roleInfo = ownershipResult.roleInfo;
+            if (!ownershipResult.owned) continue;
 
             try {
               await upgradeSingleHero(
@@ -2689,7 +2844,14 @@ export function createTasksItem(deps) {
           }
         }
 
-        if (!shouldStop.value && ownedHeroIds.has(107)) {
+        const luBuResult = await ensureFormationHeroOwned(
+          tokenId,
+          tokenName,
+          107,
+          roleInfo,
+        );
+        roleInfo = luBuResult.roleInfo;
+        if (!shouldStop.value && luBuResult.owned) {
           try {
             await upgradeLordAndLuBu(tokenId, tokenName);
           } catch (error) {

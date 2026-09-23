@@ -641,6 +641,24 @@
                 </n-button>
               </n-space>
             </n-tab-pane>
+            <n-tab-pane name="formation" tab="阵容管理">
+              <n-space>
+                <n-button
+                  size="small"
+                  @click="batchAdjustMainLevelFormation"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  推图默认阵容调整
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchAdjustEarlyMainLevelFormation"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  前期推图阵容
+                </n-button>
+              </n-space>
+            </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
               <n-space>
                 <n-button
@@ -711,20 +729,6 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   主线关卡信息获取
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchAdjustMainLevelFormation"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  推图默认阵容调整
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchAdjustEarlyMainLevelFormation"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  前期推图阵容
                 </n-button>
                 <n-button
                   size="small"
@@ -4634,6 +4638,14 @@ const taskGroupDefinitions = [
     tasks: ["batchTopUpFish", "batchTopUpArena"],
   },
   {
+    name: "formation",
+    label: "阵容管理",
+    tasks: [
+      "batchAdjustEarlyMainLevelFormation",
+      "batchAdjustMainLevelFormation",
+    ],
+  },
+  {
     name: "small-account",
     label: "小号任务",
     tasks: [
@@ -4644,8 +4656,6 @@ const taskGroupDefinitions = [
       "batchAwakenHeroSkills",
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
-      "batchAdjustEarlyMainLevelFormation",
-      "batchAdjustMainLevelFormation",
       "batchSmartBoxWeekly",
       "batchSmartRecruitWeekly",
       "batchSmartBlackMarketWeekly",
