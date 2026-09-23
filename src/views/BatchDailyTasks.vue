@@ -692,6 +692,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchAwakenHeroSkills"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="按全局设置中选择的红将，检查条件后自动觉醒技能"
+                >
+                  自动技能觉醒
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchTopUpGoldFish"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -2404,6 +2412,22 @@
                   filterable
                   size="small"
                   style="width: 180px"
+                />
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">技能觉醒红将</label>
+                <n-select
+                  v-model:value="batchSettings.awakeningHeroIds"
+                  :options="redFragmentPrimaryHeroOptions"
+                  multiple
+                  clearable
+                  filterable
+                  size="small"
+                  placeholder="请选择红将"
+                  style="width: 260px"
                 />
               </div>
               <div
@@ -4183,6 +4207,7 @@ const batchSettings = reactive({
   crystalHeroId: 107,
   crystalLockAttribute: true,
   equipmentUpgradeHeroId: 107,
+  awakeningHeroIds: [],
   useUniversalRed: true,
   useUniversalOrange: true,
   universalRedPrimaryHeroId: 107,
@@ -4269,6 +4294,15 @@ const normalizeEquipmentUpgradeSettings = () => {
   batchSettings.equipmentUpgradeHeroId = HERO_DICT[heroId] ? heroId : 107;
 };
 
+const normalizeAwakeningSettings = () => {
+  const redHeroIds = new Set(
+    redFragmentPrimaryHeroOptions.map((option) => option.value),
+  );
+  batchSettings.awakeningHeroIds = [
+    ...new Set((batchSettings.awakeningHeroIds || []).map(Number)),
+  ].filter((heroId) => redHeroIds.has(heroId));
+};
+
 watch(
   () => batchSettings.universalRedPrimaryHeroId,
   (primaryHeroId) => {
@@ -4303,6 +4337,7 @@ const loadBatchSettings = () => {
       normalizedRedemptionCodes.customRedemptionCodes;
     normalizeWarehouseItemSettings();
     normalizeEquipmentUpgradeSettings();
+    normalizeAwakeningSettings();
     delete batchSettings.blackMarketPurchaseMode;
   } catch (error) {
     console.error("Failed to load batch settings:", error);
@@ -4325,6 +4360,7 @@ const saveBatchSettings = () => {
       normalizedRedemptionCodes.customRedemptionCodes;
     normalizeWarehouseItemSettings();
     normalizeEquipmentUpgradeSettings();
+    normalizeAwakeningSettings();
     delete batchSettings.blackMarketPurchaseMode;
     localStorage.setItem("batchSettings", JSON.stringify(batchSettings));
     message.success("全局任务设置已保存");
@@ -4605,6 +4641,7 @@ const taskGroupDefinitions = [
       "batchUpgradeCrystal",
       "batchMaxWarriorLegionTech",
       "batchClaimAchievementRewards",
+      "batchAwakenHeroSkills",
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
       "batchAdjustEarlyMainLevelFormation",
@@ -7552,6 +7589,7 @@ const {
   batchFish,
   batchRecruit,
   batchAutoStarBook,
+  batchAwakenHeroSkills,
   batchHeroLevelUpgrade,
   batchUpgradeLordTo6000,
   batchAdjustEarlyMainLevelFormation,

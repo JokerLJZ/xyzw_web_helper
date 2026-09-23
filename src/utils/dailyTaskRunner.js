@@ -1376,22 +1376,29 @@ export class DailyTaskRunner {
     if (
       settings.freeGachaEnable !== false
       && isFreeGachaOpenDay()
-      && isTodayAvailable(statisticsTime["gacha:free"])
+      && isTodayAvailable(statistics["gacha:free"])
     ) {
       taskList.push({
         name: "免费扭蛋",
-        execute: () =>
-          this.executeGameCommand(
+        execute: async () => {
+          await this.executeGameCommand(
+            tokenId,
+            "gacha_getinfo",
+            {},
+            "初始化扭蛋信息",
+          );
+          return this.executeGameCommand(
             tokenId,
             "gacha_drawreward",
             { num: 1, isGroup: false },
             "免费扭蛋",
-          ),
+          );
+        },
       });
     } else if (
       settings.freeGachaEnable !== false
       && !isFreeGachaOpenDay()
-      && isTodayAvailable(statisticsTime["gacha:free"])
+      && isTodayAvailable(statistics["gacha:free"])
     ) {
       this.log("免费扭蛋跳过：仅周二、周四、周六执行", "info");
     }

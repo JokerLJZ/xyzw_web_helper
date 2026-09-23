@@ -27,6 +27,11 @@ import {
   planFishBookUpgrades,
 } from "@/utils/fishArtifactPlanner";
 import {
+  getHeroFromAwakeningRole,
+  isHeroAwakeSlot,
+  planHeroAwakenings,
+} from "@/utils/heroAwakeningPlanner";
+import {
   IRON_ITEM_ID,
   SHOE_TOY_ID,
   SHOE_TOY_UNLOCK_COST,
@@ -1670,6 +1675,140 @@ export function createTasksItem(deps) {
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("自动升星图鉴任务结束");
+  };
+
+  /** 小号任务：按全局配置为已满足条件的红将觉醒技能。 */
+  const batchAwakenHeroSkills = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const selectedHeroIds = [
+      ...new Set((batchSettings.awakeningHeroIds || []).map(Number)),
+    ].filter(
+      (heroId) =>
+        Number.isSafeInteger(heroId) &&
+        heroId >= 101 &&
+        heroId < 200 &&
+        HERO_DICT[heroId],
+    );
+    if (selectedHeroIds.length === 0) {
+      message.warning("请先在全局任务设置中选择需要觉醒的红色武将");
+      return;
+    }
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      tokenStatus.value[tokenId] = "running";
+      const completedPlan = [];
+
+      try {
+        await ensureConnection(tokenId);
+        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const awakeningPlan = planHeroAwakenings(roleInfo, selectedHeroIds);
+
+        if (awakeningPlan.length === 0) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 所选红将当前没有满足条件的可觉醒技能`,
+            type: "info",
+          });
+          return;
+        }
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 已确认${awakeningPlan.length}个可觉醒技能：${awakeningPlan.map(({ heroId, index }) => `${HERO_DICT[heroId]?.name || heroId}第${index + 1}技能`).join("、")}`,
+          type: "info",
+        });
+
+        for (const operation of awakeningPlan) {
+          if (shouldStop.value) break;
+          const heroName = HERO_DICT[operation.heroId]?.name || operation.heroId;
+          let completed = false;
+          for (
+            let attempt = 0;
+            attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
+            attempt += 1
+          ) {
+            try {
+              await waitForHeroStarInterval(tokenId);
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "hero_skillawake",
+                { heroId: operation.heroId, index: operation.index },
+                HELPER_COMMAND_TIMEOUT_MS,
+              );
+              completed = true;
+              completedPlan.push(operation);
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} ${heroName}第${operation.index + 1}技能觉醒指令执行成功`,
+                type: "success",
+              });
+              break;
+            } catch (error) {
+              if (
+                !isHeroStarRateLimitError(error) ||
+                attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
+              ) {
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${tokenName} ${heroName}第${operation.index + 1}技能觉醒失败，已跳过：${getErrorMessage(error)}`,
+                  type: "warning",
+                });
+                break;
+              }
+              await new Promise((resolve) =>
+                setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
+              );
+            }
+          }
+          if (!completed) continue;
+        }
+
+        if (completedPlan.length > 0 && !shouldStop.value) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
+          );
+          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        }
+
+        const verifiedCount = completedPlan.filter(({ heroId, index }) =>
+          isHeroAwakeSlot(getHeroFromAwakeningRole(roleInfo, heroId), index),
+        ).length;
+        tokenStatus.value[tokenId] =
+          verifiedCount === completedPlan.length ? "completed" : "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 技能觉醒完成：计划${awakeningPlan.length}个，指令成功${completedPlan.length}个，复查确认${verifiedCount}个`,
+          type:
+            verifiedCount === completedPlan.length ? "success" : "warning",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 自动技能觉醒失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    message.success("自动技能觉醒任务结束");
   };
 
   /**
@@ -5214,6 +5353,7 @@ export function createTasksItem(deps) {
     batchFish,
     batchRecruit,
     batchAutoStarBook,
+    batchAwakenHeroSkills,
     batchHeroLevelUpgrade,
     batchUpgradeLordTo6000,
     batchAdjustEarlyMainLevelFormation,

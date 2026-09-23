@@ -335,6 +335,7 @@ export function registerDefaultCommands(reg) {
     // 升星相关
     .register("hero_synthetic", { itemId: 107 })
     .register("hero_heroupgradestar")
+    .register("hero_skillawake", { heroId: 0, index: 0 })
     .register("book_upgrade")
     .register("book_claimpointreward")
 
@@ -380,7 +381,8 @@ export function registerDefaultCommands(reg) {
 
     // 扭蛋相关
     .register("gacha_drawreward", { num: 1, isGroup: false })
-    
+    .register("gacha_getinfo")
+
     // 功法
     .register("legacy_getinfo")
     .register("legacy_claimhangup")
@@ -1234,6 +1236,8 @@ export class XyzwWebSocketClient {
       task_claimdailyrewardresp: "task_claimdailyreward",
       task_claimweekrewardresp: "task_claimweekreward",
       task_claimachievementresp: "task_claimachievement",
+      gacha_drawrewardresp: "gacha_drawreward",
+      gacha_getinforesp: "gacha_getinfo",
 
       // 同步响应映射（优先级低）
 
@@ -1243,6 +1247,7 @@ export class XyzwWebSocketClient {
         "task_claimdailypoint",
         "role_commitpassword",
         "hero_synthetic",
+        "hero_skillawake",
         "hero_gointobattle",
         "hero_gobackbattle",
         "lordweapon_changedefaultweapon",
