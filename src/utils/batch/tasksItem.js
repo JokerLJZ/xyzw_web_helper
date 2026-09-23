@@ -1493,9 +1493,13 @@ export function createTasksItem(deps) {
               type: "info",
             });
           }
-          for (const { fishId, upgradeArtifactIds } of fishBookPlan) {
+          for (const { fishId, upgradeCount } of fishBookPlan) {
             if (shouldStop.value) break;
-            for (const artifactId of upgradeArtifactIds) {
+            for (
+              let upgradeIndex = 0;
+              upgradeIndex < upgradeCount;
+              upgradeIndex += 1
+            ) {
               if (shouldStop.value) break;
               let completed = false;
               for (
@@ -1507,12 +1511,12 @@ export function createTasksItem(deps) {
                   await waitForBookActionInterval(tokenId);
                   const result = await tokenStore.sendMessageWithPromise(
                     tokenId,
-                    "book_bookupgradestar",
-                    { artifactId },
+                    "book_upgradeartifact",
+                    { artifactId: fishId },
                     HELPER_COMMAND_TIMEOUT_MS,
                   );
                   if (!isSuccessfulBookCommand(result)) {
-                    throw new Error(`鱼灵图鉴物品${artifactId}升星响应未确认成功`);
+                    throw new Error(`鱼灵${fishId}图鉴升星响应未确认成功`);
                   }
                   completed = true;
                   fishBookUpgraded += 1;
@@ -4102,7 +4106,15 @@ export function createTasksItem(deps) {
     const OPEN_PACK_ITEM_IDS = [
       3001, 3002, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 35011,
     ];
-    const EXCLUDED_ACTIVITY_ITEM_IDS = new Set([5054, 5095, 6001]);
+    const EXCLUDED_ACTIVITY_ITEM_IDS = new Set([
+      5054,
+      5095,
+      5128,
+      5282,
+      5283,
+      5285,
+      6001,
+    ]);
     const useUniversalRed = batchSettings.useUniversalRed !== false;
     const useUniversalOrange = batchSettings.useUniversalOrange !== false;
     const redPrimaryHeroId = Number(

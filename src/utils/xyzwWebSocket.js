@@ -287,7 +287,7 @@ export function registerDefaultCommands(reg) {
     .register("artifact_lottery", { lotteryNumber: 1, newFree: true, type: 1 })
     .register("artifact_exchange")
     .register("artifact_upgradestar", { heroId: -1, itemId: 0 })
-    .register("book_bookupgradestar", { artifactId: 0 })
+    .register("book_upgradeartifact", { artifactId: 0 })
 
     // 灯神相关
     .register("genie_sweep", { genieId: 1 })
@@ -1198,6 +1198,7 @@ export class XyzwWebSocketClient {
       hero_heroupgradelevelresp: "hero_heroupgradelevel",
       hero_heroupgradeorderresp: "hero_heroupgradeorder",
       book_upgraderesp: "book_upgrade",
+      book_upgradeartifactresp: "book_upgradeartifact",
       book_claimpointrewardresp: "book_claimpointreward",
       // 军团信息
       legion_getinforesp: "legion_getinfo",
