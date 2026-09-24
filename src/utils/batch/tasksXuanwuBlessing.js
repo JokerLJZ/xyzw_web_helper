@@ -8,6 +8,7 @@ import { getXuanwuActBase } from "@/utils/towerActId";
 
 // 活动ID后缀（前缀为当天日期 YYMMDD）
 const WAR_ORDER_SUFFIX = "1";
+const LOTTERY_SUFFIX = "4";
 const SIGN_SUFFIX = "5";
 const GOODS_SUFFIX = "41";
 
@@ -258,7 +259,11 @@ export function createTasksXuanwuBlessing(deps) {
   };
 
   /** 一次性领完当前所有可领取的寻宝累抽奖励。 */
-  const claimLotteryRewards = async (tokenId, tokenName) => {
+  const claimLotteryRewards = async (
+    tokenId,
+    lotteryActivityId,
+    tokenName,
+  ) => {
     let claimed = 0;
     for (let round = 0; round < MAX_LOTTERY_REWARD_ROUNDS; round++) {
       if (shouldStop.value) break;
@@ -266,7 +271,7 @@ export function createTasksXuanwuBlessing(deps) {
         const res = await tokenStore.sendMessageWithPromise(
           tokenId,
           "activity_claimlotteryreward",
-          {},
+          { activityId: lotteryActivityId },
           8000,
         );
         if (!res?.reward?.length) break;
@@ -348,6 +353,7 @@ export function createTasksXuanwuBlessing(deps) {
         }
         const { actId, info } = resolved;
         const base = String(actId).slice(0, 6);
+        const lotteryActivityId = Number(base + LOTTERY_SUFFIX);
         const signActivityId = Number(base + SIGN_SUFFIX);
         const goodsId = Number(base + GOODS_SUFFIX);
 
@@ -383,6 +389,7 @@ export function createTasksXuanwuBlessing(deps) {
           lotteryCnt += drawn;
           const claimedLotteryRewards = await claimLotteryRewards(
             tokenId,
+            lotteryActivityId,
             token.name,
           );
           lotteryRewards += claimedLotteryRewards;
@@ -404,7 +411,11 @@ export function createTasksXuanwuBlessing(deps) {
         }
 
         // 即使本轮没有抽奖，也补领此前已达到但遗漏的累抽奖励。
-        lotteryRewards += await claimLotteryRewards(tokenId, token.name);
+        lotteryRewards += await claimLotteryRewards(
+          tokenId,
+          lotteryActivityId,
+          token.name,
+        );
 
         log(
           `${token.name} 玄武赐福完成: 任务${first.claimed + secondClaimed}, 通行证奖励${passRewards}, 点卯${signCnt}, 抽奖${lotteryCnt}, 累抽奖励${lotteryRewards}档`,
