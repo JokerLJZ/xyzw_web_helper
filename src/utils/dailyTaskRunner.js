@@ -11,6 +11,15 @@ import {
   loadBlackMarketSettings,
   runBlackMarketPurchase,
 } from "@/utils/blackMarket.js";
+import {
+  DREAM_MIN_MAIN_LEVEL,
+  GENIE_MIN_MAIN_LEVEL,
+  getGenieProgress,
+  getMainLevel,
+  isDreamMainLevelUnlocked,
+  isGenieMainLevelUnlocked,
+  planDailyGenieRewards,
+} from "@/utils/dailyFeatureEligibility.js";
 
 // 辅助函数
 const pickArenaTargetId = (targets) => {
@@ -398,6 +407,14 @@ export class DailyTaskRunner {
     );
 
     const role = roleInfoRes?.role || roleInfoRes?.data?.role || {};
+    const mainLevel = getMainLevel(role);
+    if (!isGenieMainLevelUnlocked(role)) {
+      this.log(
+        `当前主线关卡${mainLevel}，未达到灯神开启条件${GENIE_MIN_MAIN_LEVEL}关，跳过一键灯神扫荡`,
+        "info",
+      );
+      return;
+    }
     const genieData = role.genie || {};
     const sweepTicketCount = role.items?.[1021]?.quantity || 0;
 
@@ -455,6 +472,59 @@ export class DailyTaskRunner {
     }
 
     this.log("一键灯神扫荡完成", "success");
+  }
+
+  async runDailyGenieRewards(tokenId) {
+    const roleInfoRes = await this.executeGameCommand(
+      tokenId,
+      "role_getroleinfo",
+      {},
+      "查询灯神每日奖励",
+      15000,
+    );
+    const role = roleInfoRes?.role || roleInfoRes?.data?.role || {};
+    const mainLevel = getMainLevel(role);
+    if (!isGenieMainLevelUnlocked(role)) {
+      this.log(
+        `当前主线关卡${mainLevel}，未达到灯神开启条件${GENIE_MIN_MAIN_LEVEL}关，跳过灯神每日奖励`,
+        "info",
+      );
+      return;
+    }
+
+    const genieNames = { 1: "魏国", 2: "蜀国", 3: "吴国", 4: "群雄" };
+    const { claimableGenieIds, remainingTicketClaims } =
+      planDailyGenieRewards(role);
+
+    if (claimableGenieIds.length === 0) {
+      this.log("四个阵营当前没有可领取的灯神免费扫荡奖励", "info");
+    } else {
+      this.log(
+        `检测到可领取灯神免费扫荡奖励：${claimableGenieIds.map((id) => genieNames[id]).join("、")}`,
+      );
+      for (const genieId of claimableGenieIds) {
+        await this.executeGameCommand(
+          tokenId,
+          "genie_sweep",
+          { genieId },
+          `${genieNames[genieId]}灯神免费扫荡`,
+        );
+      }
+    }
+
+    if (remainingTicketClaims === 0) {
+      this.log("今日免费扫荡券已全部领取", "info");
+      return;
+    }
+
+    for (let i = 0; i < remainingTicketClaims; i++) {
+      await this.executeGameCommand(
+        tokenId,
+        "genie_buysweep",
+        {},
+        `领取免费扫荡券 ${i + 1}/${remainingTicketClaims}`,
+      );
+    }
   }
 
   async runHolyBeastFragmentPurchase(tokenId) {
@@ -1419,33 +1489,16 @@ export class DailyTaskRunner {
       }
     }
 
-    const kingdoms = ["魏国", "蜀国", "吴国", "群雄"];
-    for (let gid = 1; gid <= 4; gid++) {
-      if (isTodayAvailable(statisticsTime[`genie:daily:free:${gid}`])) {
-        taskList.push({
-          name: `${kingdoms[gid - 1]}灯神免费扫荡`,
-          execute: () =>
-            this.executeGameCommand(
-              tokenId,
-              "genie_sweep",
-              { genieId: gid },
-              `${kingdoms[gid - 1]}灯神免费扫荡`,
-            ),
-        });
-      }
-    }
-
-    for (let i = 0; i < 3; i++) {
+    if (isGenieMainLevelUnlocked(roleData)) {
       taskList.push({
-        name: `领取免费扫荡卷 ${i + 1}/3`,
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "genie_buysweep",
-            {},
-            `领取免费扫荡卷 ${i + 1}`,
-          ),
+        name: "灯神每日奖励检查",
+        execute: () => this.runDailyGenieRewards(tokenId),
       });
+    } else {
+      this.log(
+        `当前主线关卡${getMainLevel(roleData)}，未达到灯神开启条件${GENIE_MIN_MAIN_LEVEL}关，跳过灯神任务`,
+        "info",
+      );
     }
 
     if (settings.studyEnable !== false) {
@@ -1473,17 +1526,30 @@ export class DailyTaskRunner {
     }
 
     // 咸王梦境
-    if (settings.dreamEnable !== false) {
+    if (
+      settings.dreamEnable !== false
+      && isDreamMainLevelUnlocked(roleData)
+    ) {
       taskList.push({
         name: "咸王梦境",
         execute: () => this.runDreamTask(tokenId),
       });
+    } else if (
+      settings.dreamEnable !== false
+      && !isDreamMainLevelUnlocked(roleData)
+    ) {
+      this.log(
+        `当前主线关卡${getMainLevel(roleData)}，未达到梦境开启条件${DREAM_MIN_MAIN_LEVEL}关，跳过咸王梦境`,
+        "info",
+      );
     }
 
     // 深海灯神
     const dayOfWeek = new Date().getDay();
     if (
       dayOfWeek === 1 &&
+      isGenieMainLevelUnlocked(roleData) &&
+      getGenieProgress(roleData, 5) !== null &&
       isTodayAvailable(statisticsTime[`genie:daily:free:5`])
     ) {
       taskList.push({
@@ -1573,7 +1639,10 @@ export class DailyTaskRunner {
       },
     );
 
-    if (settings.genieSweepEnable === true) {
+    if (
+      settings.genieSweepEnable === true
+      && isGenieMainLevelUnlocked(roleData)
+    ) {
       taskList.push({
         name: "一键灯神扫荡",
         execute: () => this.runGenieSweepTask(tokenId),
