@@ -40,6 +40,19 @@ import {
   planToyActiveUpgrades,
   planToyPassiveUpgrades,
 } from "@/utils/toyUpgradePlanner";
+import {
+  GENIE_FACTION_GROUP,
+  GROUP_GENIE_LINEUP,
+  buildGroupGenieBattleParams,
+  didGroupGenieProgress,
+  getRemainingGenieChallenges,
+  isSavedGroupGenieFormationMatched,
+  selectHighestLevelPet,
+} from "@/utils/genieChallengePlanner";
+import {
+  GENIE_MIN_MAIN_LEVEL,
+  isGenieMainLevelUnlocked,
+} from "@/utils/dailyFeatureEligibility";
 
 // EquipmentLvConf.lvSpend，区间表示装备从当前等级继续升级所需的精铁。
 const EQUIPMENT_IRON_COST_RANGES = [
@@ -3377,6 +3390,162 @@ export function createTasksItem(deps) {
     message.success("批量领取蟠桃园任务奖励结束");
   };
 
+  /** 使用固定群雄阵容连续挑战灯神，失败或今日次数耗尽时停止。 */
+  const batchChallengeGroupGenie = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    for (const tokenId of selectedTokens.value) {
+      if (shouldStop.value) break;
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      tokenStatus.value[tokenId] = "running";
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始自动挑战群雄灯神: ${tokenName} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let role = roleInfo?.role || {};
+
+        if (!isGenieMainLevelUnlocked(role)) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 当前主线关卡${Number(role.levelId) || 0}，未达到灯神开启条件${GENIE_MIN_MAIN_LEVEL}关，跳过`,
+            type: "info",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          continue;
+        }
+
+        let allHeroesOwned = true;
+        for (const target of GROUP_GENIE_LINEUP) {
+          const ownership = await ensureFormationHeroOwned(
+            tokenId,
+            tokenName,
+            target.heroId,
+            roleInfo,
+          );
+          roleInfo = ownership.roleInfo;
+          if (!ownership.owned) {
+            allHeroesOwned = false;
+            break;
+          }
+        }
+        if (!allHeroesOwned) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 群雄灯神阵容不完整且无法合成，停止挑战`,
+            type: "warning",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          continue;
+        }
+
+        for (const target of GROUP_GENIE_LINEUP) {
+          if (shouldStop.value || target.minLevel <= 1) continue;
+          const result = await upgradeSingleHero(
+            tokenId,
+            tokenName,
+            target.heroId,
+            target.minLevel,
+            roleInfo,
+          );
+          if (!result.reachedTarget) break;
+          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        }
+        if (shouldStop.value) break;
+
+        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        role = roleInfo?.role || {};
+        const underLevelHero = GROUP_GENIE_LINEUP.find((target) =>
+          Number(getHeroFromRoleInfo(roleInfo, target.heroId)?.level || 0)
+            < target.minLevel,
+        );
+        if (underLevelHero) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${HERO_DICT[underLevelHero.heroId].name}未达到${underLevelHero.minLevel}级，停止群雄灯神挑战`,
+            type: "warning",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          continue;
+        }
+
+        const savedFormationMatched = isSavedGroupGenieFormationMatched(role);
+        const params = buildGroupGenieBattleParams(role);
+        const pet = selectHighestLevelPet(role);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 群雄灯神独立阵容${savedFormationMatched ? "已匹配，直接复用" : "不匹配，将在首次挑战时调整"}：1号公孙瓒、2号吕布、3号邢道荣、4号貂蝉、5号贾诩；玩具${params.lordWeaponId ? "皮鞋" : "空"}；宠物${pet ? `等级${pet.level}` : "空"}`,
+          type: "info",
+        });
+
+        let previousProgress = Number(role.genie?.[GENIE_FACTION_GROUP] ?? -1);
+        const remainingChallenges = getRemainingGenieChallenges(role);
+        let wins = 0;
+        for (let attempt = 0; attempt < remainingChallenges; attempt++) {
+          if (shouldStop.value) break;
+          const response = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "fight_startgenie",
+            params,
+            15000,
+          );
+          if (!didGroupGenieProgress(response, previousProgress)) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 群雄灯神本次未通关，停止后续挑战`,
+              type: "info",
+            });
+            break;
+          }
+          previousProgress += 1;
+          wins += 1;
+          params.battleTeam = {};
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 群雄灯神挑战成功，当前已通过第${previousProgress + 1}层`,
+            type: "success",
+          });
+          if (attempt + 1 < remainingChallenges) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, delayConfig.action),
+            );
+          }
+        }
+        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 群雄灯神自动挑战结束，本次通关${wins}层`,
+          type: shouldStop.value ? "warning" : "success",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 群雄灯神自动挑战失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("自动挑战群雄灯神任务结束");
+  };
+
   /**
    * 一键灯神扫荡
    */
@@ -5523,6 +5692,7 @@ export function createTasksItem(deps) {
     batchBookUpgrade,
     batchClaimStarRewards,
     batchClaimPeachTasks,
+    batchChallengeGroupGenie,
     batchGenieSweep,
   };
 }

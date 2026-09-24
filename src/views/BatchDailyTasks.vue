@@ -695,6 +695,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchChallengeGroupGenie"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="自动准备固定群雄阵容，并连续挑战至失败或今日次数用完"
+                >
+                  自动挑战群雄灯神
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchMaxWarriorLegionTech"
                   :disabled="isRunning || selectedTokens.length === 0"
                   title="按101至114顺序，每项一次升级到当前最高等级"
@@ -4654,6 +4662,7 @@ const taskGroupDefinitions = [
       "batchMaxWarriorLegionTech",
       "batchClaimAchievementRewards",
       "batchAwakenHeroSkills",
+      "batchChallengeGroupGenie",
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
       "batchSmartBoxWeekly",
@@ -7604,6 +7613,7 @@ const {
   batchUpgradeLordTo6000,
   batchAdjustEarlyMainLevelFormation,
   batchAdjustMainLevelFormation,
+  batchChallengeGroupGenie,
   batchClaimPeachTasks,
   batchGenieSweep,
   batchUpgradeCrystal,

@@ -290,6 +290,7 @@ export function registerDefaultCommands(reg) {
     .register("book_upgradeartifact", { artifactId: 0 })
 
     // 灯神相关
+    .register("fight_startgenie")
     .register("genie_sweep", { genieId: 1 })
     .register("genie_buysweep")
 
