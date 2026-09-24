@@ -49,9 +49,10 @@ export const claimAvailableHangUpOrderRewards = async (
   tokenStore,
   tokenId,
   timeout = 8000,
+  roleInfo = null,
 ) => {
-  const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-  const before = getHangUpOrderRewardState(roleInfo);
+  const currentRoleInfo = roleInfo || (await tokenStore.sendGetRoleInfo(tokenId));
+  const before = getHangUpOrderRewardState(currentRoleInfo);
 
   if (before.pendingOrders <= 0) {
     return { claimed: false, before, after: before, rewards: [] };

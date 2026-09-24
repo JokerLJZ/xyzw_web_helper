@@ -24,6 +24,10 @@ import {
   claimAvailableHangUpOrderRewards,
   formatHangUpOrderRewards,
 } from "@/utils/hangUpOrderRewards.js";
+import {
+  extractRolePatch,
+  mergeRoleSnapshot,
+} from "@/utils/roleSnapshot.js";
 
 // 辅助函数
 const pickArenaTargetId = (targets) => {
@@ -131,6 +135,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export class DailyTaskRunner {
   constructor(tokenStore, delaySettings = null) {
     this.tokenStore = tokenStore;
+    this.roleSnapshots = new Map();
     this.delaySettings = delaySettings || {
       commandDelay: 500,
       taskDelay: 500
@@ -162,6 +167,9 @@ export class DailyTaskRunner {
         params,
         timeout,
       );
+      const rolePatch = extractRolePatch(result);
+      const snapshot = this.roleSnapshots.get(tokenId);
+      if (snapshot && rolePatch) mergeRoleSnapshot(snapshot, rolePatch);
       await new Promise((resolve) => setTimeout(resolve, this.delaySettings.commandDelay));
       if (description) this.log(`${description} - 成功`, "success");
       return result;
@@ -204,7 +212,14 @@ export class DailyTaskRunner {
       const orderReward = await claimAvailableHangUpOrderRewards(
         this.tokenStore,
         tokenId,
+        8000,
+        { role: this.roleSnapshots.get(tokenId) },
       );
+      if (orderReward.response) {
+        const rolePatch = extractRolePatch(orderReward.response);
+        const snapshot = this.roleSnapshots.get(tokenId);
+        if (snapshot && rolePatch) mergeRoleSnapshot(snapshot, rolePatch);
+      }
       if (orderReward.claimed) {
         const rewardText = formatHangUpOrderRewards(orderReward.rewards);
         this.log(
@@ -241,7 +256,7 @@ export class DailyTaskRunner {
   async upgradeHangUpBeforeClaim(tokenId) {
     const itemId = 1024;
     try {
-      const roleInfo = await this.tokenStore.sendGetRoleInfo(tokenId);
+      const roleInfo = { role: await this.getLatestRole(tokenId) };
       const items =
         roleInfo?.role?.items ||
         roleInfo?.body?.role?.items ||
@@ -425,15 +440,7 @@ export class DailyTaskRunner {
   }
 
   async runGenieSweepTask(tokenId) {
-    const roleInfoRes = await this.executeGameCommand(
-      tokenId,
-      "role_getroleinfo",
-      {},
-      "获取灯神扫荡信息",
-      5000,
-    );
-
-    const role = roleInfoRes?.role || roleInfoRes?.data?.role || {};
+    const role = await this.getLatestRole(tokenId, "读取灯神扫荡信息");
     const mainLevel = getMainLevel(role);
     if (!isGenieMainLevelUnlocked(role)) {
       this.log(
@@ -502,14 +509,7 @@ export class DailyTaskRunner {
   }
 
   async runDailyGenieRewards(tokenId) {
-    const roleInfoRes = await this.executeGameCommand(
-      tokenId,
-      "role_getroleinfo",
-      {},
-      "查询灯神每日奖励",
-      15000,
-    );
-    const role = roleInfoRes?.role || roleInfoRes?.data?.role || {};
+    const role = await this.getLatestRole(tokenId, "读取灯神每日奖励");
     const mainLevel = getMainLevel(role);
     if (!isGenieMainLevelUnlocked(role)) {
       this.log(
@@ -611,15 +611,15 @@ export class DailyTaskRunner {
   }
 
   async getLatestRole(tokenId, description = "获取最新角色信息") {
-    const roleInfoRes = await this.executeGameCommand(
-      tokenId,
-      "role_getroleinfo",
-      {},
-      description,
-      8000,
-    );
+    const snapshot = this.roleSnapshots.get(tokenId);
+    if (snapshot) return snapshot;
 
-    return roleInfoRes?.role || roleInfoRes?.data?.role || {};
+    // 独立调用某个子功能时没有日常任务初始快照，允许在入口补查一次。
+    const roleInfoRes = await this.tokenStore.sendGetRoleInfo(tokenId);
+    const role = extractRolePatch(roleInfoRes) || {};
+    this.roleSnapshots.set(tokenId, role);
+    this.log(`${description}：已建立角色快照`);
+    return role;
   }
 
   async getActivityInfo(tokenId, description = "获取月度任务进度") {
@@ -849,15 +849,15 @@ export class DailyTaskRunner {
       );
       const updatedArenaNum = Number(updatedAct?.myArenaInfo?.num || 0);
 
-      try {
-        role = await this.getLatestRole(tokenId, "同步咸神门票库存");
-        const latestTickets = role?.items?.[1007]?.quantity || 0;
-        if (latestTickets !== ticketsLeft) {
-          this.log(`同步最新门票数量: ${latestTickets}`);
-          ticketsLeft = latestTickets;
-        }
-      } catch (error) {
-        this.log(`同步咸神门票失败: ${error.message}`, "warning");
+      role = await this.getLatestRole(tokenId, "读取咸神门票快照");
+      const latestTickets = role?.items?.[1007]?.quantity;
+      if (
+        typeof latestTickets === "number" &&
+        latestTickets >= 0 &&
+        latestTickets < ticketsLeft
+      ) {
+        this.log(`按服务器响应同步门票数量: ${latestTickets}`);
+        ticketsLeft = latestTickets;
       }
 
       remaining = Math.min(Math.max(0, shouldBe - updatedArenaNum), ticketsLeft);
@@ -896,19 +896,13 @@ export class DailyTaskRunner {
       return;
     }
 
-    const roleInfo = await this.executeGameCommand(
-      tokenId,
-      "role_getroleinfo",
-      {},
-      "获取梦境商店数据",
-      15000,
-    );
+    const role = await this.getLatestRole(tokenId, "读取梦境商店数据");
 
-    if (!roleInfo?.role?.dungeon?.merchant) {
+    if (!role?.dungeon?.merchant) {
       throw new Error("无法获取梦境商店数据");
     }
 
-    const merchantData = roleInfo.role.dungeon.merchant;
+    const merchantData = role.dungeon.merchant;
 
     let successCount = 0;
     let failCount = 0;
@@ -976,7 +970,19 @@ export class DailyTaskRunner {
     const result = await runAutomaticDream({
       purchase: () => this.runDreamPurchaseForToken(tokenId, this.loadDreamPurchaseList()),
       enabled: isDreamEnabled(tokenId),
-      send: (cmd, params) => this.tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
+      initialRole: this.roleSnapshots.get(tokenId) || null,
+      send: async (cmd, params) => {
+        const response = await this.tokenStore.sendMessageWithPromise(
+          tokenId,
+          cmd,
+          params,
+          15000,
+        );
+        const rolePatch = extractRolePatch(response);
+        const snapshot = this.roleSnapshots.get(tokenId);
+        if (snapshot && rolePatch) mergeRoleSnapshot(snapshot, rolePatch);
+        return response;
+      },
       stopped: () => this.callbacks?.shouldStop?.() === true,
       pause: () => sleep(DREAM_PUSH_INTERVAL_MS),
       log: (text) => this.log(text),
@@ -1032,10 +1038,12 @@ export class DailyTaskRunner {
       throw error;
     }
 
-    const roleData = roleInfoResp?.role;
+    const roleData = extractRolePatch(roleInfoResp);
     if (!roleData) {
       throw new Error("角色数据不存在");
     }
+    // 日常任务期间仅在入口查询一次；后续命令返回的 role 增量持续合并到此快照。
+    this.roleSnapshots.set(tokenId, roleData);
 
     // 重新加载设置，使用正确的 roleId (虽然通常 tokenId 就是 roleId 或者一一对应，但为了保险)
     // 在这个项目中，tokenId 似乎就是 roleId 或者用于标识

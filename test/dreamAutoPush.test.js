@@ -84,6 +84,20 @@ test("本期已选阵容不会被覆盖，增量战报不丢失英雄身份", as
   assert.equal(f.calls.some((c) => c.cmd === "dungeon_selecthero"), false);
 });
 
+test("日常任务传入初始角色快照后梦境不重复执行入口查询", async () => {
+  const f = fixture();
+  await runDreamAutoPush({
+    ...f,
+    initialRole: structuredClone(f.role),
+    maxBattles: 1,
+  });
+  assert.equal(
+    f.calls.filter((call) => call.cmd === "role_getroleinfo").length,
+    1,
+    "只保留战斗后的必要状态核对",
+  );
+});
+
 test("已经超过195层时仍继续使用吕布推层，再自动采购", async () => {
   const f = fixture();
   f.role.dungeon.id = 196;

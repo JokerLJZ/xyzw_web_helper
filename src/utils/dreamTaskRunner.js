@@ -48,6 +48,7 @@ export function isDreamCompleted(dungeon, period) {
 /** 自动推层：只使用吕布，不消耗复活道具。 */
 export async function runDreamAutoPush({
   send, enabled = true, stopped = () => false, log = () => {},
+  initialRole = null,
   now = () => new Date(),
   pause = () =>
     new Promise((resolve) => setTimeout(resolve, DREAM_PUSH_INTERVAL_MS)),
@@ -88,7 +89,7 @@ export async function runDreamAutoPush({
     if (!data?.role?.dungeon) throw new Error("未获取到梦境状态，可能尚未解锁");
     return data.role;
   };
-  let role = await fetchRole();
+  let role = initialRole?.dungeon ? initialRole : await fetchRole();
   let dungeon = role.dungeon;
   if (isDreamCompleted(dungeon, period)) {
     return {
