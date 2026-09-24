@@ -1,6 +1,6 @@
 /**
  * 玄武赐福（通行证活动）批量任务
- * 顺序执行：任务领取 -> 通行证奖励 -> 免费珍宝 -> 抽奖 -> 点卯 -> 抽奖后二次领取
+ * 顺序执行：任务领取 -> 通行证奖励 -> 免费珍宝 -> 点卯 -> 抽奖 -> 累抽奖励 -> 抽奖后二次领取
  * 抽奖会推进任务进度（如"抽奖X次"类任务），故抽奖后需重新拉取并再领一轮
  */
 
@@ -18,6 +18,9 @@ const RATE_LIMIT_RETRY_DELAY_MS = 6000;
 
 // 通行证奖励领取最大轮数
 const MAX_REWARD_ROUNDS = 10;
+
+// 寻宝累抽奖励档位通常少于此数；循环到服务器提示无奖励即停止。
+const MAX_LOTTERY_REWARD_ROUNDS = 20;
 
 // 点卯补领天数（patchDay 0-6）
 const SIGN_MAX_DAY = 6;
@@ -254,6 +257,38 @@ export function createTasksXuanwuBlessing(deps) {
     return count;
   };
 
+  /** 一次性领完当前所有可领取的寻宝累抽奖励。 */
+  const claimLotteryRewards = async (tokenId, tokenName) => {
+    let claimed = 0;
+    for (let round = 0; round < MAX_LOTTERY_REWARD_ROUNDS; round++) {
+      if (shouldStop.value) break;
+      try {
+        const res = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_claimlotteryreward",
+          {},
+          8000,
+        );
+        if (!res?.reward?.length) break;
+        claimed++;
+        log(
+          `${tokenName} 寻宝累抽奖励领取: ${formatReward(res.reward)}`,
+          "success",
+        );
+      } catch {
+        // 当前已无达到条件且尚未领取的累抽奖励。
+        break;
+      }
+      await delay(commandDelay);
+    }
+    if (claimed > 0) {
+      log(`${tokenName} 寻宝累抽奖励已一次性领取${claimed}档`, "success");
+    } else {
+      log(`${tokenName} 当前没有可领取的寻宝累抽奖励`);
+    }
+    return claimed;
+  };
+
   /** 玄武点卯（patchDay 0-6 补领） */
   const claimSign = async (tokenId, signActivityId, tokenName) => {
     let claimed = 0;
@@ -329,6 +364,7 @@ export function createTasksXuanwuBlessing(deps) {
 
         // 4. 抽完全部玄武灵契；领奖若再次产出灵契，则继续抽取并再次领奖。
         let lotteryCnt = 0;
+        let lotteryRewards = 0;
         let secondClaimed = 0;
         for (let round = 0; round < MAX_REWARD_ROUNDS; round++) {
           const remainingDrawTimes = MAX_DRAW_TIMES - lotteryCnt;
@@ -345,6 +381,11 @@ export function createTasksXuanwuBlessing(deps) {
             remainingDrawTimes,
           );
           lotteryCnt += drawn;
+          const claimedLotteryRewards = await claimLotteryRewards(
+            tokenId,
+            token.name,
+          );
+          lotteryRewards += claimedLotteryRewards;
           const latestInfo = await fetchWarOrder(tokenId, actId);
           if (!latestInfo) break;
           const second = await claimTasks(tokenId, actId, latestInfo, token.name);
@@ -354,11 +395,19 @@ export function createTasksXuanwuBlessing(deps) {
               ? await claimPassRewards(tokenId, actId, token.name)
               : 0;
           passRewards += newPassRewards;
-          if (drawn === 0 && second.claimed === 0 && newPassRewards === 0) break;
+          if (
+            drawn === 0
+            && claimedLotteryRewards === 0
+            && second.claimed === 0
+            && newPassRewards === 0
+          ) break;
         }
 
+        // 即使本轮没有抽奖，也补领此前已达到但遗漏的累抽奖励。
+        lotteryRewards += await claimLotteryRewards(tokenId, token.name);
+
         log(
-          `${token.name} 玄武赐福完成: 任务${first.claimed + secondClaimed}, 通行证奖励${passRewards}, 点卯${signCnt}, 抽奖${lotteryCnt}`,
+          `${token.name} 玄武赐福完成: 任务${first.claimed + secondClaimed}, 通行证奖励${passRewards}, 点卯${signCnt}, 抽奖${lotteryCnt}, 累抽奖励${lotteryRewards}档`,
           "success",
         );
 

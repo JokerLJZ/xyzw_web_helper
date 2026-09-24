@@ -365,6 +365,7 @@ export function registerDefaultCommands(reg) {
     .register("activity_warorderrewardclaim")
     .register("activity_getlotteryinfo")
     .register("activity_lottery")
+    .register("activity_claimlotteryreward")
     .register("activity_claimsignreward")
     .register("activity_commonbuygoods")
     .register("legion_getpayloadtask")
@@ -1216,7 +1217,10 @@ export class XyzwWebSocketClient {
       ],
       activity_getlotteryinforesp: "activity_getlotteryinfo",
       activity_lotteryresp: "activity_lottery",
-      activity_rewardresp: "activity_claimsignreward",
+      activity_rewardresp: [
+        "activity_claimsignreward",
+        "activity_claimlotteryreward",
+      ],
       arena_getarearankresp: "arena_getarearank",
       // 功法相关响应映射
       legacy_getinforesp: "legacy_getinfo",
