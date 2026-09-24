@@ -419,13 +419,6 @@
                 >
                   一键灯神扫荡
                 </n-button>
-                <n-button
-                  size="small"
-                  @click="batchXuanwuBlessing"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键玄武赐福
-                </n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="dungeon" tab="副本">
@@ -461,6 +454,13 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键领取蟠桃园任务
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchXuanwuBlessing"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键玄武赐福
                 </n-button>
               </n-space>
               <n-space>
@@ -700,6 +700,14 @@
                   title="自动准备固定群雄阵容，并连续挑战至失败或今日次数用完"
                 >
                   自动挑战群雄灯神
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchChallengeThreeKingdomsGenie"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="按魏、蜀、吴独立阵容各挑战一次，不升级武将"
+                >
+                  魏蜀吴灯神各挑战一次
                 </n-button>
                 <n-button
                   size="small"
@@ -4599,7 +4607,6 @@ const taskGroupDefinitions = [
       "store_purchase",
       "collection_claimfreereward",
       "batchGenieSweep",
-      "batchXuanwuBlessing",
     ],
   },
   {
@@ -4610,6 +4617,7 @@ const taskGroupDefinitions = [
       "batchmengjing",
       "skinChallenge",
       "batchClaimPeachTasks",
+      "batchXuanwuBlessing",
     ],
   },
   {
@@ -4663,6 +4671,7 @@ const taskGroupDefinitions = [
       "batchClaimAchievementRewards",
       "batchAwakenHeroSkills",
       "batchChallengeGroupGenie",
+      "batchChallengeThreeKingdomsGenie",
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
       "batchSmartBoxWeekly",
@@ -7614,6 +7623,7 @@ const {
   batchAdjustEarlyMainLevelFormation,
   batchAdjustMainLevelFormation,
   batchChallengeGroupGenie,
+  batchChallengeThreeKingdomsGenie,
   batchClaimPeachTasks,
   batchGenieSweep,
   batchUpgradeCrystal,

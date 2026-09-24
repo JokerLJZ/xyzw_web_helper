@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   GROUP_GENIE_LINEUP,
+  GENIE_FACTION_LINEUPS,
+  buildFactionBattleTeam,
+  buildGenieBattleParams,
   buildGroupGenieBattleParams,
   didGroupGenieProgress,
   getRemainingGenieChallenges,
@@ -34,6 +37,29 @@ test("群雄灯神使用固定五人站位、皮鞋和最高等级宠物", () =>
     lordWeaponId: 2,
     petUId: "high",
   });
+});
+
+test("魏蜀吴灯神使用指定五人阵容", () => {
+  assert.deepEqual(GENIE_FACTION_LINEUPS, {
+    1: [101, 202, 102, 113, 109],
+    2: [110, 104, 118, 103, 206],
+    3: [105, 106, 121, 119, 111],
+  });
+  assert.deepEqual(buildFactionBattleTeam(1), {
+    0: 101, 1: 202, 2: 102, 3: 113, 4: 109,
+  });
+});
+
+test("魏国灯神保存阵容匹配时直接复用独立阵容", () => {
+  const role = {
+    genieBattleTeam: { 1: { 0: 101, 1: 202, 2: 102, 3: 113, 4: 109 } },
+    genieLordWeapon: { 1: 0 },
+    geniePet: { 1: "" },
+  };
+  assert.deepEqual(
+    buildGenieBattleParams(role, 1, buildFactionBattleTeam(1)),
+    { battleTeam: {}, genieId: 1, lordWeaponId: 0 },
+  );
 });
 
 test("群雄灯神保存阵容完全匹配时以空阵容复用", () => {

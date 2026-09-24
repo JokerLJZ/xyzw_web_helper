@@ -42,8 +42,13 @@ import {
 } from "@/utils/toyUpgradePlanner";
 import {
   GENIE_FACTION_GROUP,
+  GENIE_FACTION_LINEUPS,
+  GENIE_FACTION_NAMES,
   GROUP_GENIE_LINEUP,
+  buildFactionBattleTeam,
+  buildGenieBattleParams,
   buildGroupGenieBattleParams,
+  didGenieProgress,
   didGroupGenieProgress,
   getRemainingGenieChallenges,
   isSavedGroupGenieFormationMatched,
@@ -3491,6 +3496,11 @@ export function createTasksItem(deps) {
 
         let previousProgress = Number(role.genie?.[GENIE_FACTION_GROUP] ?? -1);
         const remainingChallenges = getRemainingGenieChallenges(role);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 查询到今日剩余灯神挑战次数${remainingChallenges}次，将全部使用`,
+          type: "info",
+        });
         let wins = 0;
         for (let attempt = 0; attempt < remainingChallenges; attempt++) {
           if (shouldStop.value) break;
@@ -3503,19 +3513,19 @@ export function createTasksItem(deps) {
           if (!didGroupGenieProgress(response, previousProgress)) {
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 群雄灯神本次未通关，停止后续挑战`,
+              message: `${tokenName} 群雄灯神第${attempt + 1}/${remainingChallenges}次挑战未通关，继续使用剩余次数`,
               type: "info",
             });
-            break;
+          } else {
+            previousProgress += 1;
+            wins += 1;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 群雄灯神挑战成功，当前已通过第${previousProgress + 1}层`,
+              type: "success",
+            });
           }
-          previousProgress += 1;
-          wins += 1;
           params.battleTeam = {};
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 群雄灯神挑战成功，当前已通过第${previousProgress + 1}层`,
-            type: "success",
-          });
           if (attempt + 1 < remainingChallenges) {
             await new Promise((resolve) =>
               setTimeout(resolve, delayConfig.action),
@@ -3544,6 +3554,128 @@ export function createTasksItem(deps) {
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("自动挑战群雄灯神任务结束");
+  };
+
+  /** 使用各阵营独立阵容，按魏、蜀、吴顺序各挑战一次，不升级武将。 */
+  const batchChallengeThreeKingdomsGenie = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    for (const tokenId of selectedTokens.value) {
+      if (shouldStop.value) break;
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      tokenStatus.value[tokenId] = "running";
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始魏蜀吴灯神各挑战一次: ${tokenName} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let role = roleInfo?.role || {};
+        if (!isGenieMainLevelUnlocked(role)) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 当前主线关卡${Number(role.levelId) || 0}，未达到灯神开启条件${GENIE_MIN_MAIN_LEVEL}关，跳过`,
+            type: "info",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          continue;
+        }
+
+        let completed = 0;
+        const availableChallenges = getRemainingGenieChallenges(role);
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 查询到今日剩余灯神挑战次数${availableChallenges}次，本任务最多使用3次`,
+          type: "info",
+        });
+        for (const genieId of [1, 2, 3]) {
+          if (shouldStop.value) break;
+          if (completed >= availableChallenges) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 今日灯神挑战次数已用完，停止后续阵营`,
+              type: "info",
+            });
+            break;
+          }
+          const name = GENIE_FACTION_NAMES[genieId];
+          let allHeroesOwned = true;
+          for (const heroId of GENIE_FACTION_LINEUPS[genieId]) {
+            const ownership = await ensureFormationHeroOwned(
+              tokenId,
+              tokenName,
+              heroId,
+              roleInfo,
+            );
+            roleInfo = ownership.roleInfo;
+            if (!ownership.owned) {
+              allHeroesOwned = false;
+              break;
+            }
+          }
+          if (!allHeroesOwned) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${name}灯神阵容不完整且无法合成，跳过该阵营`,
+              type: "warning",
+            });
+            continue;
+          }
+
+          role = roleInfo?.role || {};
+          const team = buildFactionBattleTeam(genieId);
+          const params = buildGenieBattleParams(role, genieId, team);
+          const previousProgress = Number(role.genie?.[genieId] ?? -1);
+          const response = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "fight_startgenie",
+            params,
+            15000,
+          );
+          const won = didGenieProgress(response, genieId, previousProgress);
+          completed += 1;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${name}灯神已挑战一次${won ? "并通关" : "，本次未通关"}`,
+            type: won ? "success" : "info",
+          });
+          if (genieId < 3) {
+            await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+          }
+        }
+
+        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 魏蜀吴灯神挑战结束，共执行${completed}次`,
+          type: shouldStop.value ? "warning" : "success",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 魏蜀吴灯神挑战失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    }
+
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("魏蜀吴灯神挑战任务结束");
   };
 
   /**
@@ -5693,6 +5825,7 @@ export function createTasksItem(deps) {
     batchClaimStarRewards,
     batchClaimPeachTasks,
     batchChallengeGroupGenie,
+    batchChallengeThreeKingdomsGenie,
     batchGenieSweep,
   };
 }
