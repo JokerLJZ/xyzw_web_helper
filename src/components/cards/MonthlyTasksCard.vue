@@ -221,7 +221,7 @@ const autoTopUpFish = async (need, shouldBe, target) => {
     }
     let freeUsed = 0;
     const lastFreeTime = Number(
-      role?.statisticsTime?.["artifact:normal:lottery:time"] || 0,
+      role?.statistics?.["artifact:normal:lottery:time"] || 0,
     );
     if (isTodayAvailable(lastFreeTime)) {
       message.info("检测到今日免费钓鱼次数，开始消耗 3 次");

@@ -313,7 +313,7 @@ export function createTasksArena(deps) {
         }
         let freeUsed = 0;
         const lastFreeTime = Number(
-          role?.statisticsTime?.["artifact:normal:lottery:time"] || 0,
+          role?.statistics?.["artifact:normal:lottery:time"] || 0,
         );
         if (isTodayAvailable(lastFreeTime)) {
           addLog({

@@ -628,7 +628,7 @@ export class DailyTaskRunner {
 
     let role = await this.getLatestRole(tokenId, "获取钓鱼库存信息");
     const lastFreeTime = Number(
-      role?.statisticsTime?.["artifact:normal:lottery:time"] || 0,
+      role?.statistics?.["artifact:normal:lottery:time"] || 0,
     );
 
     if (isTodayAvailable(lastFreeTime)) {
