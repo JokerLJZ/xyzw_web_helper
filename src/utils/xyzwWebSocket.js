@@ -156,6 +156,7 @@ export function registerDefaultCommands(reg) {
     .register("system_getdatabundlever", { isAudit: false })
     .register("system_buygold", { buyNum: 1 })
     .register("system_claimhangupreward")
+    .register("system_claimhanguporder")
     .register("system_claimcdkreward", { key: "", platformType: "h5" })
     .register("system_hangupupgrade", { upgradeNum: 1 })
     .register("system_signinreward")
@@ -1265,6 +1266,7 @@ export class XyzwWebSocketClient {
         "activity_commonbuygoods",
         "activity_buystoregoods",
         "system_buygold",
+        "system_claimhanguporder",
         "system_claimcdkreward",
         "discount_claimreward",
         "card_claimreward",

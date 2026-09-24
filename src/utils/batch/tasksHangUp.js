@@ -3,6 +3,11 @@
  * 包含: claimHangUpRewards, claimHangUpRewardsFiveTimes, batchAddHangUpTime, batchStudy, batchclubsign
  */
 
+import {
+  claimAvailableHangUpOrderRewards,
+  formatHangUpOrderRewards,
+} from "@/utils/hangUpOrderRewards";
+
 /**
  * 创建挂机、答题、签到类任务执行器
  * @param {Object} deps - 依赖项
@@ -119,6 +124,35 @@ export function createTasksHangUp(deps) {
     }
   };
 
+  const claimHangUpOrderRewards = async (tokenId, tokenName) => {
+    try {
+      const result = await claimAvailableHangUpOrderRewards(tokenStore, tokenId);
+      if (!result.claimed) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 当前没有可领取的整数关卡挂机奖励（已领取至第${result.before.lastClaimedOrder}档）`,
+          type: "info",
+        });
+        return result;
+      }
+
+      const rewardText = formatHangUpOrderRewards(result.rewards);
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 整数关卡挂机奖励领取完成：第${result.before.lastClaimedOrder + 1}-${result.before.activeOrder}档${rewardText ? `，${rewardText}` : ""}`,
+        type: "success",
+      });
+      return result;
+    } catch (error) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 整数关卡挂机奖励检查或领取失败，继续领取普通挂机收益：${error.message || error}`,
+        type: "warning",
+      });
+      return null;
+    }
+  };
+
   /**
    * 领取挂机奖励
    */
@@ -157,6 +191,9 @@ export function createTasksHangUp(deps) {
             type: "warning",
           });
         }
+
+        await claimHangUpOrderRewards(tokenId, token.name);
+        await sleep(500);
 
         // 1. Claim reward
         addLog({
@@ -246,6 +283,9 @@ export function createTasksHangUp(deps) {
             type: "warning",
           });
         }
+
+        await claimHangUpOrderRewards(tokenId, tokenName);
+        await sleep(500);
 
         for (let i = 0; i < 5; i++) {
           if (shouldStop.value) break;

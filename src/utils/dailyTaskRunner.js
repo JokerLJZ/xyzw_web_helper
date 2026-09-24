@@ -20,6 +20,10 @@ import {
   isGenieMainLevelUnlocked,
   planDailyGenieRewards,
 } from "@/utils/dailyFeatureEligibility.js";
+import {
+  claimAvailableHangUpOrderRewards,
+  formatHangUpOrderRewards,
+} from "@/utils/hangUpOrderRewards.js";
 
 // 辅助函数
 const pickArenaTargetId = (targets) => {
@@ -196,6 +200,29 @@ export class DailyTaskRunner {
 
   async claimHangUpRewardsFiveTimes(tokenId) {
     await this.upgradeHangUpBeforeClaim(tokenId);
+    try {
+      const orderReward = await claimAvailableHangUpOrderRewards(
+        this.tokenStore,
+        tokenId,
+      );
+      if (orderReward.claimed) {
+        const rewardText = formatHangUpOrderRewards(orderReward.rewards);
+        this.log(
+          `整数关卡挂机奖励领取完成：第${orderReward.before.lastClaimedOrder + 1}-${orderReward.before.activeOrder}档${rewardText ? `，${rewardText}` : ""}`,
+          "success",
+        );
+      } else {
+        this.log(
+          `当前没有可领取的整数关卡挂机奖励（已领取至第${orderReward.before.lastClaimedOrder}档）`,
+        );
+      }
+    } catch (error) {
+      this.log(
+        `整数关卡挂机奖励检查或领取失败，继续领取普通挂机收益：${error.message || error}`,
+        "warning",
+      );
+    }
+
     for (let i = 0; i < 5; i++) {
       await this.executeGameCommand(
         tokenId,
