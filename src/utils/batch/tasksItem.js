@@ -96,6 +96,31 @@ const getEquipmentIronCost = (level) => {
   )?.[2] ?? null;
 };
 
+const FORMATION_UNIVERSAL_FRAGMENT_EXCLUDED_HERO_IDS = new Set([223]);
+
+/** 返回阵容准备可使用的万能碎片；蔡文姬只能消耗专属碎片。 */
+export function getFormationUniversalFragment(heroId) {
+  const normalizedHeroId = Number(heroId);
+  if (FORMATION_UNIVERSAL_FRAGMENT_EXCLUDED_HERO_IDS.has(normalizedHeroId)) {
+    return null;
+  }
+  if (normalizedHeroId >= 101 && normalizedHeroId < 200) {
+    return {
+      itemId: 3201,
+      index: normalizedHeroId - 101,
+      name: "万能红碎",
+    };
+  }
+  if (normalizedHeroId >= 201 && normalizedHeroId < 300) {
+    return {
+      itemId: 3302,
+      index: normalizedHeroId - 201,
+      name: "万能橙碎",
+    };
+  }
+  return null;
+}
+
 /**
  * 开箱、钓鱼、招募类任务
  * 包含: batchOpenBox, batchSmartBoxWeekly, batchClaimBoxPointReward, batchFish, batchRecruit
@@ -2536,16 +2561,6 @@ export function createTasksItem(deps) {
       );
       if (upgradeResult.stopReason) break;
     }
-  };
-
-  const getFormationUniversalFragment = (heroId) => {
-    if (heroId >= 101 && heroId < 200) {
-      return { itemId: 3201, index: heroId - 101, name: "万能红碎" };
-    }
-    if (heroId >= 201 && heroId < 300) {
-      return { itemId: 3302, index: heroId - 201, name: "万能橙碎" };
-    }
-    return null;
   };
 
   const sendFormationPreparationCommand = async (
