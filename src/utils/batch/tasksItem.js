@@ -210,8 +210,9 @@ export function createTasksItem(deps) {
   };
 
   /**
-   * 领取当前周活动限时商店的免费福利。
-   * 宝箱周、招募周和黑市周共用 activityId=9，免费商品固定为 goodsIndex=0。
+   * 领取当前周活动商店的免费福利。
+   * 宝箱周和招募周使用“限时商店”(activityId=5)；
+   * 黑市周使用“金砖商店”(activityId=9)，免费商品均为 goodsIndex=0。
    */
   const batchClaimWeeklyActivityBenefit = async () => {
     if (selectedTokens.value.length === 0) return;
@@ -220,6 +221,11 @@ export function createTasksItem(deps) {
       招募周: 1,
       宝箱周: 2,
       黑市周: 11,
+    };
+    const WEEK_ACTIVITY_FREE_SHOPS = {
+      招募周: { activityId: 5, goodsIndex: 0, shopName: "限时商店" },
+      宝箱周: { activityId: 5, goodsIndex: 0, shopName: "限时商店" },
+      黑市周: { activityId: 9, goodsIndex: 0, shopName: "金砖商店" },
     };
     const RATE_LIMIT_RETRY_DELAY_MS = 6000;
     const MAX_RATE_LIMIT_RETRIES = 3;
@@ -282,6 +288,7 @@ export function createTasksItem(deps) {
       const tokenName = token?.name || tokenId;
       const weekName = activityWeek?.value;
       const weeklyInfoId = WEEK_ACTIVITY_INFO_IDS[weekName];
+      const freeShop = WEEK_ACTIVITY_FREE_SHOPS[weekName];
 
       try {
         tokenStatus.value[tokenId] = "running";
@@ -305,7 +312,7 @@ export function createTasksItem(deps) {
             : activity?.myTotalInfo?.[weeklyInfoId] ??
               activity?.myTotalInfo?.[String(weeklyInfoId)];
 
-        if (!weekName || !weeklyInfo) {
+        if (!weekName || !weeklyInfo || !freeShop) {
           tokenStatus.value[tokenId] = "completed";
           addLog({
             time: new Date().toLocaleTimeString(),
@@ -317,7 +324,7 @@ export function createTasksItem(deps) {
 
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${tokenName} 开始领取${weekName}活动福利 ===`,
+          message: `=== ${tokenName} 开始领取${weekName}${freeShop.shopName}免费福利（活动${freeShop.activityId}/商品${freeShop.goodsIndex}） ===`,
           type: "info",
         });
 
@@ -329,7 +336,11 @@ export function createTasksItem(deps) {
               tokenStore.sendMessageWithPromise(
                 tokenId,
                 "activity_buystoregoods",
-                { activityId: 9, goodsIndex: 0, buyNum: 1 },
+                {
+                  activityId: freeShop.activityId,
+                  goodsIndex: freeShop.goodsIndex,
+                  buyNum: 1,
+                },
                 HELPER_COMMAND_TIMEOUT_MS,
               ),
           );
@@ -346,7 +357,7 @@ export function createTasksItem(deps) {
           tokenStatus.value[tokenId] = "completed";
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${tokenName} ${weekName}活动福利领取成功${rewardText ? `：${rewardText}` : ""}`,
+            message: `${tokenName} ${weekName}${freeShop.shopName}福利领取成功${rewardText ? `：${rewardText}` : ""}`,
             type: "success",
           });
         } catch (claimError) {
@@ -357,7 +368,7 @@ export function createTasksItem(deps) {
           tokenStatus.value[tokenId] = "completed";
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${tokenName} ${weekName}活动福利已领取或当前不可领取，跳过：${getErrorMessage(claimError)}`,
+            message: `${tokenName} ${weekName}${freeShop.shopName}福利已领取或当前不可领取，跳过：${getErrorMessage(claimError)}`,
             type: "info",
           });
         }
