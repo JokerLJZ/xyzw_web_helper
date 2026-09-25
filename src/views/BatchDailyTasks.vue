@@ -734,6 +734,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchClaimMailAttachments"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="一次性领取全部系统邮件附件"
+                >
+                  收取邮件
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchAwakenHeroSkills"
                   :disabled="isRunning || selectedTokens.length === 0"
                   title="按全局设置中选择的红将，检查条件后自动觉醒技能"
@@ -4707,6 +4715,7 @@ const taskGroupDefinitions = [
       "batchReplaceBestFishArtifact",
       "batchMaxWarriorLegionTech",
       "batchClaimAchievementRewards",
+      "batchClaimMailAttachments",
       "batchAwakenHeroSkills",
       "batchChallengeGroupGenie",
       "batchChallengeThreeKingdomsGenie",
@@ -7671,6 +7680,7 @@ const {
   batchUpgradeShoeToy,
   batchMaxWarriorLegionTech,
   batchClaimAchievementRewards,
+  batchClaimMailAttachments,
 } = tasksItem;
 
 const confirmUpgradeLordTo6000 = () => {

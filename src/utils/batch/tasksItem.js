@@ -134,6 +134,80 @@ export function createTasksItem(deps) {
   };
 
   const fishNames = { 1: "普通鱼竿", 2: "黄金鱼竿" };
+  const isNoClaimableMailError = (error) => {
+    const errorMessage = getErrorMessage(error);
+    return (
+      errorMessage.includes("3500020") ||
+      errorMessage.includes("没有可领取") ||
+      errorMessage.includes("无可领取") ||
+      errorMessage.includes("无附件")
+    );
+  };
+
+  /** 收取所有系统邮件附件。 */
+  const batchClaimMailAttachments = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+
+      try {
+        tokenStatus.value[tokenId] = "running";
+        await ensureConnection(tokenId);
+
+        const result = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "mail_claimallattachment",
+          { category: 0 },
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+        const rewardCount = Array.isArray(result?.reward)
+          ? result.reward.length
+          : 0;
+        const mailCount = Array.isArray(result?.list)
+          ? result.list.filter((mail) => mail?.haveAttachments).length
+          : 0;
+
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message:
+            rewardCount > 0 || mailCount > 0
+              ? `${tokenName} 邮件附件领取完成：处理${mailCount || "若干"}封邮件，获得${rewardCount}项奖励`
+              : `${tokenName} 当前没有可领取的邮件附件`,
+          type: rewardCount > 0 || mailCount > 0 ? "success" : "info",
+        });
+      } catch (error) {
+        const errorMessage = getErrorMessage(error);
+        const noReward = isNoClaimableMailError(error);
+        tokenStatus.value[tokenId] = noReward ? "completed" : "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: noReward
+            ? `${tokenName} 当前没有可领取的邮件附件`
+            : `${tokenName} 收取邮件失败：${errorMessage}`,
+          type: noReward ? "info" : "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+    message.success("收取邮件任务结束");
+  };
 
   /** 达到4001级后，自动领取免费扳手并升级皮鞋玩具及已开放被动技能。 */
   const batchUpgradeShoeToy = async () => {
@@ -5925,6 +5999,46 @@ export function createTasksItem(deps) {
           });
         }
 
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 按积分开箱完成，开始领取宝箱积分和邮件附件`,
+          type: "info",
+        });
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "item_batchclaimboxpointreward",
+          {},
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 宝箱积分领取成功`,
+          type: "success",
+        });
+        await new Promise((resolve) =>
+          setTimeout(resolve, delayConfig.action),
+        );
+        try {
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "mail_claimallattachment",
+            { category: 0 },
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 邮件附件领取成功`,
+            type: "success",
+          });
+        } catch (mailError) {
+          if (!isNoClaimableMailError(mailError)) throw mailError;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 当前没有可领取的邮件附件`,
+            type: "info",
+          });
+        }
+
         await tokenStore.sendMessage(tokenId, "role_getroleinfo");
         tokenStatus.value[tokenId] = "completed";
         addLog({
@@ -5959,6 +6073,7 @@ export function createTasksItem(deps) {
   };
 
   return {
+    batchClaimMailAttachments,
     batchUpgradeShoeToy,
     batchClaimAchievementRewards,
     batchMaxWarriorLegionTech,

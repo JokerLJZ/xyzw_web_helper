@@ -66,6 +66,7 @@ export const availableTasks = [
   { label: "水晶升级至资源不足", value: "batchUpgradeCrystal" },
   { label: "战士科技依次升满", value: "batchMaxWarriorLegionTech" },
   { label: "领取成就奖励", value: "batchClaimAchievementRewards" },
+  { label: "收取邮件", value: "batchClaimMailAttachments" },
   { label: "自动技能觉醒", value: "batchAwakenHeroSkills" },
   { label: "一键竞技场补齐", value: "batchTopUpArena" },
   { label: "一键换皮闯关", value: "skinChallenge" },
