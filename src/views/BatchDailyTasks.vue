@@ -1739,8 +1739,8 @@
             type="info"
             style="margin-bottom: 12px"
           >
-            开箱优先级: 木质宝箱(保留200个) → 青铜宝箱 → 黄金宝箱 → 铂金宝箱<br />
-            积分: 木质=1分, 青铜=10分, 黄金=20分, 铂金=50分
+            按积分开箱不会使用木质宝箱，只使用青铜、黄金和铂金宝箱<br />
+            积分: 青铜=10分, 黄金=20分, 铂金=50分
           </n-alert>
           <div class="setting-item" v-if="helperType !== 'pointsBox'">
             <label class="setting-label">消耗数量（10的倍数）</label>

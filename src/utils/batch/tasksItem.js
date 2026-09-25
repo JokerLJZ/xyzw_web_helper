@@ -5733,7 +5733,6 @@ export function createTasksItem(deps) {
       : helperSettings.targetPoints;
 
     const boxPriority = [
-      { id: 2001, name: "木质宝箱", points: 1, reserve: 200 },
       { id: 2002, name: "青铜宝箱", points: 10, reserve: 0 },
       { id: 2003, name: "黄金宝箱", points: 20, reserve: 0 },
       { id: 2004, name: "铂金宝箱", points: 50, reserve: 0 },
@@ -5783,7 +5782,7 @@ export function createTasksItem(deps) {
 
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 箱子库存: 木质=${boxInventory[2001]}, 青铜=${boxInventory[2002]}, 黄金=${boxInventory[2003]}, 铂金=${boxInventory[2004]}`,
+          message: `${token.name} 可用于积分开箱的库存: 青铜=${boxInventory[2002]}, 黄金=${boxInventory[2003]}, 铂金=${boxInventory[2004]}（木质宝箱不使用）`,
           type: "info",
         });
         addLog({
@@ -5805,32 +5804,10 @@ export function createTasksItem(deps) {
         const boxToOpen = {};
         let remainingPoints = targetPoints;
 
-        const woodenAvailable = boxInventory[2001] - 200;
-        if (woodenAvailable >= 10) {
-          const woodenPoints = woodenAvailable * 1;
-          const pointsNeeded = Math.min(woodenPoints, remainingPoints);
-          let woodenToOpen = Math.min(pointsNeeded, woodenAvailable);
-          woodenToOpen = Math.floor(woodenToOpen / 10) * 10;
-          if (woodenToOpen === 0 && woodenAvailable >= 10 && pointsNeeded > 0) {
-            woodenToOpen = 10;
-          }
-          
-          if (woodenToOpen >= 10) {
-            boxToOpen[2001] = woodenToOpen;
-            remainingPoints -= woodenToOpen * 1;
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 计划开 木质宝箱: ${woodenToOpen} 个 (积分: ${woodenToOpen})`,
-              type: "info",
-            });
-          }
-        }
-
         if (remainingPoints > 0) {
           const bronzeAvailable = Math.floor(boxInventory[2002] / 10) * 10;
           const goldAvailable = Math.floor(boxInventory[2003] / 10) * 10;
           const platinumAvailable = Math.floor(boxInventory[2004] / 10) * 10;
-          const woodenTotal = Math.floor(boxInventory[2001] / 10) * 10;
 
           let bestResult = null;
           let minWaste = Infinity;
@@ -5848,21 +5825,13 @@ export function createTasksItem(deps) {
               for (let platinum = 0; platinum <= platinumAvailable; platinum += 10) {
                 const platinumPoints = platinum * 50;
                 if (platinumPoints > afterBronzeGold) break;
-                
-                const afterPlatinum = afterBronzeGold - platinumPoints;
-                
-                let wooden = 0;
-                if (afterPlatinum > 0) {
-                  wooden = Math.ceil(afterPlatinum / 10) * 10;
-                  if (wooden > woodenTotal || wooden > 100) continue;
-                }
-                
-                const totalPoints = bronzePoints + goldPoints + platinumPoints + wooden;
+
+                const totalPoints = bronzePoints + goldPoints + platinumPoints;
                 const waste = totalPoints - targetPoints;
-                
+
                 if (waste >= 0 && waste < minWaste) {
                   minWaste = waste;
-                  bestResult = { bronze, gold, platinum, wooden, totalPoints };
+                  bestResult = { bronze, gold, platinum, totalPoints };
                   if (waste === 0) break;
                 }
               }
@@ -5896,16 +5865,18 @@ export function createTasksItem(deps) {
                 type: "info",
               });
             }
-            if (bestResult.wooden > 0) {
-              boxToOpen[2001] = (boxToOpen[2001] || 0) + bestResult.wooden;
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 计划开 木质宝箱: ${bestResult.wooden} 个 (积分: ${bestResult.wooden})`,
-                type: "info",
-              });
-            }
             remainingPoints = 0;
           }
+        }
+
+        if (remainingPoints > 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 无法在不使用木质宝箱的前提下凑够 ${targetPoints} 积分，已停止`,
+            type: "error",
+          });
+          tokenStatus.value[tokenId] = "failed";
+          return;
         }
 
         for (const box of boxPriority) {
