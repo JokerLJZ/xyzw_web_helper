@@ -1187,10 +1187,9 @@ export function createTasksItem(deps) {
   const HERO_STAR_ACTION_DELAY_MS = 1500;
   const HERO_STAR_RATE_LIMIT_DELAY_MS = 6000;
   const HERO_STAR_MAX_RATE_LIMIT_RETRIES = 4;
-  const lastHeroStarActionAt = new Map();
-  const lastBookActionAt = new Map();
-  const waitForHeroStarInterval = async (tokenId) => {
-    const lastActionAt = lastHeroStarActionAt.get(tokenId) || 0;
+  const lastStarBookActionAt = new Map();
+  const waitForStarBookActionInterval = async (tokenId) => {
+    const lastActionAt = lastStarBookActionAt.get(tokenId) || 0;
     const waitMs = Math.max(
       0,
       HERO_STAR_ACTION_DELAY_MS - (Date.now() - lastActionAt),
@@ -1198,19 +1197,10 @@ export function createTasksItem(deps) {
     if (waitMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
-    lastHeroStarActionAt.set(tokenId, Date.now());
+    lastStarBookActionAt.set(tokenId, Date.now());
   };
-  const waitForBookActionInterval = async (tokenId) => {
-    const lastActionAt = lastBookActionAt.get(tokenId) || 0;
-    const waitMs = Math.max(
-      0,
-      HERO_STAR_ACTION_DELAY_MS - (Date.now() - lastActionAt),
-    );
-    if (waitMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
-    }
-    lastBookActionAt.set(tokenId, Date.now());
-  };
+  const waitForHeroStarInterval = waitForStarBookActionInterval;
+  const waitForBookActionInterval = waitForStarBookActionInterval;
 
   const heroLevelOrderThresholds = [
     { level: 100, order: 1 },
@@ -1337,7 +1327,11 @@ export function createTasksItem(deps) {
       attempt += 1
     ) {
       try {
-        return await tokenStore.sendGetRoleInfo(tokenId);
+        await waitForStarBookActionInterval(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        // 查询响应后重新计时，避免下一条升星或图鉴指令紧接着发出。
+        lastStarBookActionAt.set(tokenId, Date.now());
+        return roleInfo;
       } catch (error) {
         if (
           !isHeroStarRateLimitError(error) ||
@@ -1383,7 +1377,11 @@ export function createTasksItem(deps) {
         });
 
         await ensureConnection(tokenId);
-        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let roleInfo = await getRoleInfoWithStarRateLimitRetry(
+          tokenId,
+          token.name,
+          "开始任务前查询状态",
+        );
         const starUpgradePlan = heroIds
           .map((heroId) => getHeroStarUpgradeCount(roleInfo, heroId))
           .filter(({ upgradeCount, needsSynthesis }) =>
@@ -1495,7 +1493,11 @@ export function createTasksItem(deps) {
           await new Promise((resolve) =>
             setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
           );
-          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          roleInfo = await getRoleInfoWithStarRateLimitRetry(
+            tokenId,
+            token.name,
+            "武将升星完成后查询状态",
+          );
 
           let synthesisReconciled = false;
           for (const { heroId, needsSynthesis } of starUpgradePlan) {
@@ -1535,7 +1537,11 @@ export function createTasksItem(deps) {
             await new Promise((resolve) =>
               setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
             );
-            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+            roleInfo = await getRoleInfoWithStarRateLimitRetry(
+              tokenId,
+              token.name,
+              "补发合成后查询状态",
+            );
           }
 
           for (const { heroId, currentStar, upgradeCount, needsSynthesis } of starUpgradePlan) {
@@ -1696,7 +1702,11 @@ export function createTasksItem(deps) {
           await new Promise((resolve) =>
             setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
           );
-          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+          roleInfo = await getRoleInfoWithStarRateLimitRetry(
+            tokenId,
+            token.name,
+            "武将图鉴开始前查询状态",
+          );
           const bookUpgradePlan = getBookUpgradePlan(roleInfo);
           addLog({
             time: new Date().toLocaleTimeString(),
@@ -1752,7 +1762,11 @@ export function createTasksItem(deps) {
             await new Promise((resolve) =>
               setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
             );
-            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+            roleInfo = await getRoleInfoWithStarRateLimitRetry(
+              tokenId,
+              token.name,
+              "武将图鉴完成后校验状态",
+            );
             const remainingBookPlan = getBookUpgradePlan(roleInfo);
             if (remainingBookPlan.length > 0) {
               throw new Error(
