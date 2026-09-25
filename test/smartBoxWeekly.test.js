@@ -10,6 +10,8 @@ const createSmartBoxScenario = ({
   selectedTypes = [2002, 2003, 2004],
   currentProgress = 0,
   completedRounds = 0,
+  currentRound = completedRounds + 1,
+  finalRewardClaimCount = completedRounds,
 }) => {
   const tokenId = "token-1";
   const token = { id: tokenId, name: "测试账号" };
@@ -24,6 +26,8 @@ const createSmartBoxScenario = ({
   let rewardIndex = 0;
   let boxWeekProgress = currentProgress;
   let boxWeekCompletedRounds = completedRounds;
+  let boxWeekCurrentRound = currentRound;
+  let boxWeekFinalRewardClaimCount = finalRewardClaimCount;
 
   const getRoleInfo = () => ({
     role: {
@@ -47,8 +51,8 @@ const createSmartBoxScenario = ({
             myTotalInfo: {
               2: {
                 num: boxWeekProgress,
-                rounds: boxWeekCompletedRounds + 1,
-                complete: { 4: boxWeekCompletedRounds },
+                rounds: boxWeekCurrentRound,
+                complete: { 4: boxWeekFinalRewardClaimCount },
               },
             },
             activity: [{ id: 2, data: { rewards: Array(5).fill({}) } }],
@@ -78,9 +82,18 @@ const createSmartBoxScenario = ({
       }
 
       if (cmd === "activity_claimweekactreward") {
-        assert.equal(boxWeekProgress, 8000);
+        const hasPreviousUnclaimedReward =
+          boxWeekFinalRewardClaimCount < boxWeekCurrentRound - 1;
+        if (!hasPreviousUnclaimedReward) {
+          assert.equal(boxWeekProgress, 8000);
+          boxWeekProgress = 0;
+        }
         boxWeekCompletedRounds += 1;
-        boxWeekProgress = 0;
+        boxWeekFinalRewardClaimCount += 1;
+        boxWeekCurrentRound = Math.max(
+          boxWeekCurrentRound,
+          boxWeekFinalRewardClaimCount + 1,
+        );
       }
 
       return {};
@@ -300,7 +313,9 @@ test("本周已完成三轮时即使配置四轮也只执行最后一轮", async
 
   assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
   assert.equal(
-    scenario.logs.some((entry) => entry.message.includes("本周已完成3/4轮，本次执行1轮")),
+    scenario.logs.some((entry) =>
+      entry.message.includes("本周已领取3/4轮大奖，本次继续执行1轮"),
+    ),
     true,
   );
 });
@@ -317,4 +332,68 @@ test("本周已完成四轮时不再开箱", async () => {
   assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
   assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 0);
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
+
+test("服务器显示四轮完成但仍有8000进度时直接领取待领自选大奖", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2003: 0 },
+    currentProgress: 8000,
+    completedRounds: 3,
+    currentRound: 4,
+    finalRewardClaimCount: 3,
+  });
+
+  await scenario.run();
+
+  assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
+  assert.equal(
+    scenario.logs.some((entry) =>
+      entry.message.includes("检测到1轮自选大奖尚未领取"),
+    ),
+    true,
+  );
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
+
+test("已进入第二轮但第一轮大奖漏领时先直接补领", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2003: 400 },
+    currentProgress: 1200,
+    completedRounds: 0,
+    currentRound: 2,
+    finalRewardClaimCount: 0,
+  });
+
+  await scenario.run();
+
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
+  assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
+  assert.equal(
+    scenario.logs.some((entry) =>
+      entry.message.includes("检测到1轮自选大奖尚未领取"),
+    ),
+    true,
+  );
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
+
+test("存在多轮历史漏领时不受本次执行轮数限制并全部补领", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2003: 400 },
+    currentProgress: 500,
+    groupCount: 1,
+    completedRounds: 0,
+    currentRound: 3,
+    finalRewardClaimCount: 0,
+  });
+
+  await scenario.run();
+
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 2);
+  assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
+  assert.equal(
+    scenario.logs.some((entry) => entry.message.includes("已补领2轮自选大奖")),
+    true,
+  );
 });

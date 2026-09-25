@@ -5700,7 +5700,15 @@ export function createTasksItem(deps) {
         activityResult?.data?.activity ||
         activityResult?.body?.activity;
       const info = activity?.myTotalInfo?.["2"];
-      if (!info) return { completedRounds: 0, currentProgress: 0 };
+      if (!info) {
+        return {
+          completedRounds: 0,
+          currentProgress: 0,
+          pendingGrandRewardCount: 0,
+          hasCurrentGrandReward: false,
+          totalRounds: 4,
+        };
+      }
 
       const complete = info.complete || {};
       const boxActivity = activity.activity?.find(
@@ -5708,19 +5716,47 @@ export function createTasksItem(deps) {
       );
       const rewardCount = boxActivity?.data?.rewards?.length || 5;
       const finalRewardIndex = rewardCount - 1;
+      const finalRewardTarget =
+        Number(boxActivity?.data?.rewards?.[finalRewardIndex]?.num) || 8000;
       const completedByFinalReward =
         Number(complete[String(finalRewardIndex)]) || 0;
-      const completedByCurrentRound = Math.max(
-        0,
-        (Number(info.rounds) || 1) - 1,
+      const currentRound = Math.max(1, Number(info.rounds) || 1);
+      const totalRounds = Math.max(
+        1,
+        Number(boxActivity?.data?.rounds) || 4,
       );
+      const currentProgress = Math.min(
+        finalRewardTarget,
+        Math.max(0, Number(info.num) || 0),
+      );
+      const previousRoundCount = Math.min(
+        totalRounds,
+        Math.max(0, currentRound - 1),
+      );
+      const pendingPreviousRewardCount = Math.max(
+        0,
+        previousRoundCount - completedByFinalReward,
+      );
+      const hasCurrentGrandReward =
+        currentRound <= totalRounds &&
+        currentProgress >= finalRewardTarget &&
+        completedByFinalReward < currentRound;
+      const pendingThroughCurrentRound = hasCurrentGrandReward
+        ? Math.max(
+            0,
+            Math.min(totalRounds, currentRound) - completedByFinalReward,
+          )
+        : 0;
 
       return {
-        completedRounds: Math.min(
-          4,
-          Math.max(completedByFinalReward, completedByCurrentRound),
+        completedRounds: Math.min(totalRounds, completedByFinalReward),
+        currentProgress,
+        pendingGrandRewardCount: Math.max(
+          pendingPreviousRewardCount,
+          pendingThroughCurrentRound,
         ),
-        currentProgress: Math.min(8000, Math.max(0, Number(info.num) || 0)),
+        hasCurrentGrandReward,
+        totalRounds,
       };
     };
 
@@ -5850,6 +5886,55 @@ export function createTasksItem(deps) {
       await waitForSmartBoxAction();
     };
 
+    const claimBoxGrandReward = async (tokenId, token, description) => {
+      await waitForSmartBoxAction();
+      await runSmartBoxOperation(
+        token.name,
+        "领取宝箱周自选大奖",
+        () =>
+          tokenStore.sendMessageWithPromise(
+            tokenId,
+            "activity_claimweekactreward",
+            {
+              selectRewardsMap: { 0: 1 },
+              typ: 2,
+            },
+            HELPER_COMMAND_TIMEOUT_MS,
+          ),
+      );
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${token.name} ${description}万能红自选奖励领取成功`,
+        type: "success",
+      });
+      await waitForSmartBoxAction();
+      try {
+        await runSmartBoxOperation(
+          token.name,
+          "领取宝箱周完成邮件",
+          () =>
+            tokenStore.sendMessageWithPromise(
+              tokenId,
+              "mail_claimallattachment",
+              { category: 0 },
+              HELPER_COMMAND_TIMEOUT_MS,
+            ),
+        );
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} ${description}完成邮件附件领取成功`,
+          type: "success",
+        });
+      } catch (mailError) {
+        if (!isNoClaimableMailError(mailError)) throw mailError;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} ${description}完成后没有可领取的邮件附件`,
+          type: "info",
+        });
+      }
+    };
+
     const taskPromises = selectedTokens.value.map(async (tokenId) => {
       if (shouldStop.value) return;
 
@@ -5875,15 +5960,53 @@ export function createTasksItem(deps) {
 
         let activityResult = await fetchBoxActivity(tokenId, token.name);
         let boxWeekState = getBoxWeekState(activityResult);
+        let recoveredRewardCount = 0;
+
+        while (
+          boxWeekState.pendingGrandRewardCount > 0 &&
+          recoveredRewardCount < boxWeekState.totalRounds &&
+          !shouldStop.value
+        ) {
+          const claimedBefore = boxWeekState.completedRounds;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 检测到${boxWeekState.pendingGrandRewardCount}轮自选大奖尚未领取，开始补领`,
+            type: "info",
+          });
+          if (boxWeekState.hasCurrentGrandReward) {
+            await claimPointsAndMail(tokenId, token);
+          }
+          await claimBoxGrandReward(
+            tokenId,
+            token,
+            `历史漏领第${recoveredRewardCount + 1}轮`,
+          );
+          recoveredRewardCount += 1;
+          activityResult = await fetchBoxActivity(tokenId, token.name, true);
+          boxWeekState = getBoxWeekState(activityResult);
+          if (boxWeekState.completedRounds <= claimedBefore) {
+            throw new Error("补领自选大奖后，服务器已领取轮数未增加");
+          }
+        }
+
         const completedRounds = boxWeekState.completedRounds;
-        const remainingRounds = Math.max(0, 4 - completedRounds);
-        const groupCount = Math.min(requestedGroupCount, remainingRounds);
+        const remainingRounds = Math.max(
+          0,
+          boxWeekState.totalRounds - completedRounds,
+        );
+        const groupCount = Math.min(
+          Math.max(0, requestedGroupCount - recoveredRewardCount),
+          remainingRounds,
+        );
 
         if (groupCount === 0) {
           tokenStatus.value[tokenId] = "completed";
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 宝箱周已完成4/4轮，无需继续执行`,
+            message:
+              recoveredRewardCount > 0
+                ? `${token.name} 已补领${recoveredRewardCount}轮自选大奖，无需继续开箱`
+                : `${token.name} 宝箱周已完成${boxWeekState.totalRounds}/${boxWeekState.totalRounds}轮，无需继续执行`,
             type: "success",
           });
           return;
@@ -5891,7 +6014,7 @@ export function createTasksItem(deps) {
 
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始智能宝箱周任务：${token.name}，本周已完成${completedRounds}/4轮，本次执行${groupCount}轮 ===`,
+          message: `=== 开始智能宝箱周任务：${token.name}，本周已领取${completedRounds}/${boxWeekState.totalRounds}轮大奖，本次继续执行${groupCount}轮 ===`,
           type: "info",
         });
 
@@ -6032,56 +6155,21 @@ export function createTasksItem(deps) {
             break;
           }
 
-          await waitForSmartBoxAction();
-          await runSmartBoxOperation(
-            token.name,
-            "领取宝箱周自选大奖",
-            () =>
-              tokenStore.sendMessageWithPromise(
-                tokenId,
-                "activity_claimweekactreward",
-                {
-                  selectRewardsMap: { 0: 1 },
-                  typ: 2,
-                },
-                HELPER_COMMAND_TIMEOUT_MS,
-              ),
+          await claimBoxGrandReward(
+            tokenId,
+            token,
+            `宝箱周第${groupIndex}/${groupCount}轮`,
           );
           completedGroups += 1;
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 宝箱周第${groupIndex}/${groupCount}轮万能红自选奖励领取成功`,
-            type: "success",
-          });
-          await waitForSmartBoxAction();
-          try {
-            await runSmartBoxOperation(
-              token.name,
-              "领取宝箱周完成邮件",
-              () =>
-                tokenStore.sendMessageWithPromise(
-                  tokenId,
-                  "mail_claimallattachment",
-                  { category: 0 },
-                  HELPER_COMMAND_TIMEOUT_MS,
-                ),
-            );
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 宝箱周第${groupIndex}/${groupCount}轮完成后邮件附件领取成功`,
-              type: "success",
-            });
-          } catch (mailError) {
-            if (!isNoClaimableMailError(mailError)) throw mailError;
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 宝箱周第${groupIndex}/${groupCount}轮完成后没有可领取的邮件附件`,
-              type: "info",
-            });
-          }
           boxWeekState = {
-            completedRounds: Math.min(4, completedRounds + groupIndex),
+            completedRounds: Math.min(
+              boxWeekState.totalRounds,
+              completedRounds + groupIndex,
+            ),
             currentProgress: 0,
+            pendingGrandRewardCount: 0,
+            hasCurrentGrandReward: false,
+            totalRounds: boxWeekState.totalRounds,
           };
         }
 
