@@ -528,7 +528,7 @@
                   size="small"
                   @click="batchClaimWeeklyActivityBenefit"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="查询当前周活动后，领取限时商店第0项免费福利；已领取时自动跳过"
+                  title="查询当前周活动后，领取对应活动商店第0项免费福利；已领取时自动跳过"
                 >
                   领取周活动福利
                 </n-button>

@@ -211,7 +211,7 @@ export function createTasksItem(deps) {
 
   /**
    * 领取当前周活动商店的免费福利。
-   * 宝箱周和招募周使用“限时商店”(activityId=5)；
+   * 招募周使用“限时商店”(activityId=5)，宝箱周使用活动商店(activityId=7)；
    * 黑市周使用“金砖商店”(activityId=9)，免费商品均为 goodsIndex=0。
    */
   const batchClaimWeeklyActivityBenefit = async () => {
@@ -224,7 +224,7 @@ export function createTasksItem(deps) {
     };
     const WEEK_ACTIVITY_FREE_SHOPS = {
       招募周: { activityId: 5, goodsIndex: 0, shopName: "限时商店" },
-      宝箱周: { activityId: 5, goodsIndex: 0, shopName: "限时商店" },
+      宝箱周: { activityId: 7, goodsIndex: 0, shopName: "活动商店" },
       黑市周: { activityId: 9, goodsIndex: 0, shopName: "金砖商店" },
     };
     const RATE_LIMIT_RETRY_DELAY_MS = 6000;
