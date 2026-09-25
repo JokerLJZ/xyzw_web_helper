@@ -87,7 +87,7 @@ export const availableTasks = [
   { label: "小号推图默认阵容调整", value: "batchAdjustMainLevelFormation" },
   { label: "一键玄武赐福", value: "batchXuanwuBlessing" },
   {
-    label: "玄武活动兑换宠物饼干",
+    label: "玄武活动兑换饼干白玉",
     value: "batchExchangeXuanwuPetCookies",
   },
 ];

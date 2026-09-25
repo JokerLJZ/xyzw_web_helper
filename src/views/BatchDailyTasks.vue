@@ -793,9 +793,9 @@
                   size="small"
                   @click="batchExchangeXuanwuPetCookies"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="使用全部可兑换的玄武活动道具5285兑换宠物饼干"
+                  title="只查询一次活动道具5285，按相同数量依次兑换宠物饼干和白玉"
                 >
-                  玄武活动兑换宠物饼干
+                  玄武活动兑换饼干白玉
                 </n-button>
                 <n-button
                   size="small"
