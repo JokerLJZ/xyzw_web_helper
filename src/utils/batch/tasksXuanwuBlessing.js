@@ -7,8 +7,8 @@
 import { getXuanwuActBase } from "@/utils/towerActId";
 import { getNextUnclaimedLotteryCumulativeId } from "@/utils/xuanwuLotteryRewards";
 import {
-  getXuanwuCookieAndJadeExchangeIds,
-  getXuanwuCookieAndJadeExchangePlan,
+  getXuanwuPetCookieExchangeIds,
+  getXuanwuPetCookieExchangeQuantity,
 } from "@/utils/xuanwuPetCookieExchange";
 
 // 活动ID后缀（前缀为当天日期 YYMMDD）
@@ -480,7 +480,7 @@ export function createTasksXuanwuBlessing(deps) {
     message.success("批量玄武赐福结束");
   };
 
-  /** 小号任务：只查询一次库存，按相同数量依次兑换饼干和白玉。 */
+  /** 小号任务：只查询一次库存，用全部可兑换道具换取宠物饼干。 */
   const batchExchangeXuanwuPetCookies = async () => {
     if (selectedTokens.value.length === 0) return;
     isRunning.value = true;
@@ -497,7 +497,7 @@ export function createTasksXuanwuBlessing(deps) {
       const tokenName = token?.name || tokenId;
 
       try {
-        log(`=== 开始玄武活动兑换饼干白玉: ${tokenName} ===`);
+        log(`=== 开始玄武活动兑换宠物饼干: ${tokenName} ===`);
         await ensureConnection(tokenId);
         if (shouldStop.value) return;
 
@@ -507,21 +507,18 @@ export function createTasksXuanwuBlessing(deps) {
         }
 
         const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        const exchangePlan = getXuanwuCookieAndJadeExchangePlan(roleInfo);
-        if (
-          exchangePlan.cookieExchangeQuantity <= 0 &&
-          exchangePlan.whiteJadeExchangeQuantity <= 0
-        ) {
+        const exchange = getXuanwuPetCookieExchangeQuantity(roleInfo);
+        if (exchange.exchangeQuantity <= 0) {
           log(
-            `${tokenName} 玄武活动道具${exchangePlan.itemId}现有${exchangePlan.itemQuantity}个，不足兑换1份宠物饼干，跳过兑换`,
+            `${tokenName} 玄武活动道具${exchange.itemId}现有${exchange.itemQuantity}个，不足${exchange.unitCost}个，跳过兑换`,
           );
           tokenStatus.value[tokenId] = "completed";
           return;
         }
 
         const activityBase = String(resolved.actId).slice(0, 6);
-        const { activityId, cookieGoodsId, whiteJadeGoodsId } =
-          getXuanwuCookieAndJadeExchangeIds(activityBase);
+        const { activityId, goodsId } =
+          getXuanwuPetCookieExchangeIds(activityBase);
 
         const exchangeWithRateLimitRetry = async (goodsId, quantity, name) => {
           for (let attempt = 0; ; attempt++) {
@@ -549,43 +546,23 @@ export function createTasksXuanwuBlessing(deps) {
           }
         };
 
-        const cookieExchangeQuantity = exchangePlan.cookieExchangeQuantity;
-        const whiteJadeExchangeQuantity =
-          exchangePlan.whiteJadeExchangeQuantity;
         log(
-          `${tokenName} 玄武活动道具${exchangePlan.itemId}现有${exchangePlan.itemQuantity}个，计划兑换宠物饼干${cookieExchangeQuantity}份、白玉${whiteJadeExchangeQuantity}份，预计剩余${exchangePlan.remainingItemQuantity}个`,
+          `${tokenName} 玄武活动道具${exchange.itemId}现有${exchange.itemQuantity}个，计划兑换宠物饼干${exchange.exchangeQuantity}份，预计剩余${exchange.itemQuantity - exchange.exchangeQuantity * exchange.unitCost}个`,
         );
         const cookieResult = await exchangeWithRateLimitRetry(
-          cookieGoodsId,
-          cookieExchangeQuantity,
+          goodsId,
+          exchange.exchangeQuantity,
           "宠物饼干",
         );
         log(
-          `${tokenName} 宠物饼干兑换${cookieExchangeQuantity}份成功${cookieResult?.reward?.length ? `：${formatReward(cookieResult.reward)}` : ""}`,
-          "success",
-        );
-
-        if (whiteJadeExchangeQuantity > 0) {
-          await delay(commandDelay);
-          const whiteJadeResult = await exchangeWithRateLimitRetry(
-            whiteJadeGoodsId,
-            whiteJadeExchangeQuantity,
-            "白玉",
-          );
-          log(
-            `${tokenName} 白玉兑换${whiteJadeExchangeQuantity}份成功${whiteJadeResult?.reward?.length ? `：${formatReward(whiteJadeResult.reward)}` : ""}`,
-            "success",
-          );
-        }
-        log(
-          `${tokenName} 玄武活动兑换完成：宠物饼干${cookieExchangeQuantity}份，白玉${whiteJadeExchangeQuantity}份`,
+          `${tokenName} 宠物饼干兑换${exchange.exchangeQuantity}份成功${cookieResult?.reward?.length ? `：${formatReward(cookieResult.reward)}` : ""}`,
           "success",
         );
         tokenStatus.value[tokenId] = "completed";
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";
         log(
-          `${tokenName} 玄武活动兑换饼干白玉失败: ${error?.message || "未知错误"}`,
+          `${tokenName} 玄武活动兑换宠物饼干失败: ${error?.message || "未知错误"}`,
           "error",
         );
       } finally {
@@ -598,7 +575,7 @@ export function createTasksXuanwuBlessing(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("玄武活动兑换饼干白玉任务结束");
+    message.success("玄武活动兑换宠物饼干任务结束");
   };
 
   return {
