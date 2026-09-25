@@ -687,6 +687,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchReplaceBestFishArtifact"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="按赤羽、焰神、其他红鱼，再按橙紫蓝品质选择最高星鱼灵"
+                >
+                  一键替换鱼灵
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchUpgradeShoeToy"
                   :disabled="isRunning || selectedTokens.length === 0"
                   title="主公达到4001级后，领取免费扳手并升级皮鞋玩具和已开放被动技能"
@@ -2436,6 +2444,19 @@
                 <label class="setting-label">装备升级武将</label>
                 <n-select
                   v-model:value="batchSettings.equipmentUpgradeHeroId"
+                  :options="heroLevelUpgradeHeroOptions"
+                  filterable
+                  size="small"
+                  style="width: 180px"
+                />
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">鱼灵替换武将</label>
+                <n-select
+                  v-model:value="batchSettings.fishReplacementHeroId"
                   :options="heroLevelUpgradeHeroOptions"
                   filterable
                   size="small"
@@ -4235,6 +4256,7 @@ const batchSettings = reactive({
   crystalHeroId: 107,
   crystalLockAttribute: true,
   equipmentUpgradeHeroId: 107,
+  fishReplacementHeroId: 107,
   awakeningHeroIds: [],
   useUniversalRed: true,
   useUniversalOrange: true,
@@ -4322,6 +4344,11 @@ const normalizeEquipmentUpgradeSettings = () => {
   batchSettings.equipmentUpgradeHeroId = HERO_DICT[heroId] ? heroId : 107;
 };
 
+const normalizeFishReplacementSettings = () => {
+  const heroId = Number(batchSettings.fishReplacementHeroId);
+  batchSettings.fishReplacementHeroId = HERO_DICT[heroId] ? heroId : 107;
+};
+
 const normalizeAwakeningSettings = () => {
   const redHeroIds = new Set(
     redFragmentPrimaryHeroOptions.map((option) => option.value),
@@ -4365,6 +4392,7 @@ const loadBatchSettings = () => {
       normalizedRedemptionCodes.customRedemptionCodes;
     normalizeWarehouseItemSettings();
     normalizeEquipmentUpgradeSettings();
+    normalizeFishReplacementSettings();
     normalizeAwakeningSettings();
     delete batchSettings.blackMarketPurchaseMode;
   } catch (error) {
@@ -4388,6 +4416,7 @@ const saveBatchSettings = () => {
       normalizedRedemptionCodes.customRedemptionCodes;
     normalizeWarehouseItemSettings();
     normalizeEquipmentUpgradeSettings();
+    normalizeFishReplacementSettings();
     normalizeAwakeningSettings();
     delete batchSettings.blackMarketPurchaseMode;
     localStorage.setItem("batchSettings", JSON.stringify(batchSettings));
@@ -4675,6 +4704,7 @@ const taskGroupDefinitions = [
     tasks: [
       "batchJoinLegion",
       "batchUpgradeCrystal",
+      "batchReplaceBestFishArtifact",
       "batchMaxWarriorLegionTech",
       "batchClaimAchievementRewards",
       "batchAwakenHeroSkills",
@@ -7637,6 +7667,7 @@ const {
   batchGenieSweep,
   batchUpgradeCrystal,
   batchUpgradeEquipment,
+  batchReplaceBestFishArtifact,
   batchUpgradeShoeToy,
   batchMaxWarriorLegionTech,
   batchClaimAchievementRewards,

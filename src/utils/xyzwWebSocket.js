@@ -1260,6 +1260,8 @@ export class XyzwWebSocketClient {
         "hero_skillawake",
         "hero_gointobattle",
         "hero_gobackbattle",
+        "artifact_load",
+        "artifact_unload",
         "lordweapon_changedefaultweapon",
         "lordweapon_get",
         "lordweapon_unlock",

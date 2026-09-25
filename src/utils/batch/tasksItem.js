@@ -27,6 +27,7 @@ import {
   planFishArtifactUpgrades,
   planFishBookUpgrades,
 } from "@/utils/fishArtifactPlanner";
+import { selectBestFishArtifact } from "@/utils/fishArtifactReplacement";
 import {
   getHeroFromAwakeningRole,
   isHeroAwakeSlot,
@@ -505,6 +506,124 @@ export function createTasksItem(deps) {
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("精铁一键升级装备任务结束");
+  };
+
+  /** 小号任务：为指定武将换上当前账号拥有的最优普通鱼灵。 */
+  const batchReplaceBestFishArtifact = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const targetHeroId = Number(batchSettings.fishReplacementHeroId || 107);
+    if (!Number.isSafeInteger(targetHeroId) || !HERO_DICT[targetHeroId]) {
+      message.warning("请先在任务设置中选择鱼灵替换武将");
+      return;
+    }
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      const heroName = HERO_DICT[targetHeroId]?.name || targetHeroId;
+
+      try {
+        await ensureConnection(tokenId);
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const role =
+          roleInfo?.role ||
+          roleInfo?.data?.role ||
+          roleInfo?.body?.role ||
+          {};
+        const targetHero =
+          role?.heroes?.[targetHeroId] ||
+          role?.heroes?.[String(targetHeroId)];
+        if (!targetHero) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 未拥有${heroName}，跳过鱼灵替换`,
+            type: "warning",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        const selectedFish = selectBestFishArtifact(roleInfo, targetHeroId);
+        if (!selectedFish) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 没有可替换的红、橙、紫或蓝色鱼灵`,
+            type: "info",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        const fishName =
+          FishMap[selectedFish.fishId]?.name || `鱼灵${selectedFish.fishId}`;
+        if (Number(targetHero.artifactId) === selectedFish.itemId) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${heroName}已装备最优鱼灵${fishName}${selectedFish.star}星，无需替换`,
+            type: "success",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        if (
+          selectedFish.holderHeroId > 0 &&
+          selectedFish.holderHeroId !== targetHeroId
+        ) {
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "artifact_unload",
+            { heroId: selectedFish.holderHeroId },
+            HELPER_COMMAND_TIMEOUT_MS,
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, delayConfig.action),
+          );
+        }
+
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "artifact_load",
+          {
+            heroId: targetHeroId,
+            itemId: selectedFish.itemId,
+            targetHeroId: -1,
+            pearlId: Number(targetHero.pearlId) || 0,
+          },
+          HELPER_COMMAND_TIMEOUT_MS,
+        );
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 已为${heroName}替换${fishName}${selectedFish.star}星`,
+          type: "success",
+        });
+        tokenStatus.value[tokenId] = "completed";
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 为${heroName}替换鱼灵失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("一键替换鱼灵任务结束");
   };
 
   /** 升级指定武将的梦魇水晶，直到资源不足或服务器拒绝继续升级。 */
@@ -5860,6 +5979,7 @@ export function createTasksItem(deps) {
     batchMaxWarriorLegionTech,
     batchUpgradeCrystal,
     batchUpgradeEquipment,
+    batchReplaceBestFishArtifact,
     batchOpenBox,
     batchOpenBoxByPoints,
     batchClaimBoxPointReward,

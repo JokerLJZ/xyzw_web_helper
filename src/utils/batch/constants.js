@@ -51,6 +51,7 @@ export const availableTasks = [
   { label: "江湖黑市周任务", value: "batchSmartBlackMarketWeekly" },
   { label: "使用仓库物品", value: "batchUseWarehouseItems" },
   { label: "精铁一键升级装备", value: "batchUpgradeEquipment" },
+  { label: "一键替换鱼灵", value: "batchReplaceBestFishArtifact" },
   { label: "自动兑换码", value: "batchRedeemCodes" },
   { label: "批量钓鱼", value: "batchFish" },
   { label: "批量招募", value: "batchRecruit" },
@@ -157,6 +158,7 @@ export const defaultSettings = {
 export const defaultBatchSettings = {
   legionId: null,
   crystalHeroId: 107,
+  fishReplacementHeroId: 107,
   crystalLockAttribute: true,
   redemptionCodeMode: REDEMPTION_CODE_MODES.DEFAULT,
   customRedemptionCodes: "",
