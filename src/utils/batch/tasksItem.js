@@ -4714,6 +4714,7 @@ export function createTasksItem(deps) {
       5128,
       5282,
       5283,
+      5284,
       5285,
       6001,
     ]);
@@ -4737,6 +4738,18 @@ export function createTasksItem(deps) {
     const getQuantity = (items, itemId) => {
       const item = items[itemId] ?? items[String(itemId)];
       return Math.max(0, Number(item?.quantity ?? item?.count ?? item ?? 0) || 0);
+    };
+    const setQuantity = (roleInfo, itemId, quantity) => {
+      const items = getItems(roleInfo);
+      const key = Object.hasOwn(items, itemId) ? itemId : String(itemId);
+      const current = items[key];
+      const nextQuantity = Math.max(0, Number(quantity) || 0);
+
+      if (current && typeof current === "object") {
+        current.quantity = nextQuantity;
+      } else {
+        items[key] = { quantity: nextQuantity };
+      }
     };
     const getActivityPackItemIds = (items) =>
       Object.entries(items)
@@ -4789,13 +4802,20 @@ export function createTasksItem(deps) {
       index = 0,
       tokenName,
       command = "item_openpack",
+      knownBeforeQuantity = null,
     }) => {
       let remaining = Math.max(0, Math.trunc(quantity));
       let used = 0;
+      let trackedQuantity = Number.isFinite(Number(knownBeforeQuantity))
+        ? Math.max(0, Number(knownBeforeQuantity))
+        : null;
       while (remaining > 0 && !shouldStop.value) {
         const amount = Math.min(MAX_USE_PER_REQUEST, remaining);
-        const beforeInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-        const beforeQuantity = getQuantity(getItems(beforeInfo), itemId);
+        let beforeQuantity = trackedQuantity;
+        if (beforeQuantity === null) {
+          const beforeInfo = await getRoleInfoWithRetry(tokenId, tokenName);
+          beforeQuantity = getQuantity(getItems(beforeInfo), itemId);
+        }
         let consumedAmount = 0;
 
         for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
@@ -4825,6 +4845,7 @@ export function createTasksItem(deps) {
             const afterInfo = await getRoleInfoWithRetry(tokenId, tokenName);
             const afterQuantity = getQuantity(getItems(afterInfo), itemId);
             consumedAmount = Math.max(0, beforeQuantity - afterQuantity);
+            trackedQuantity = afterQuantity;
             if (consumedAmount > 0) break;
             throw error;
           }
@@ -4832,6 +4853,9 @@ export function createTasksItem(deps) {
 
         used += consumedAmount;
         remaining -= consumedAmount;
+        if (trackedQuantity !== null && consumedAmount > 0) {
+          trackedQuantity = Math.max(0, beforeQuantity - consumedAmount);
+        }
         await sleep(actionDelayMs);
       }
       if (used > 0) {
@@ -4950,10 +4974,16 @@ export function createTasksItem(deps) {
         }
       }
     };
-    const upgradeHeroStars = async (tokenId, heroId, tokenName) => {
-      const roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
+    const upgradeHeroStars = async (
+      tokenId,
+      heroId,
+      tokenName,
+      roleInfo,
+    ) => {
       const planItem = getHeroStarUpgradeCount(roleInfo, heroId);
-      if (!planItem.needsSynthesis && planItem.upgradeCount <= 0) return 0;
+      if (!planItem.needsSynthesis && planItem.upgradeCount <= 0) {
+        return { upgraded: 0, roleInfo };
+      }
 
       await executeHeroStarPlan(tokenId, tokenName, [planItem]);
       await sleep(HERO_STAR_ACTION_DELAY_MS);
@@ -4965,35 +4995,72 @@ export function createTasksItem(deps) {
         message: `${tokenName} ${HERO_DICT[heroId]?.name || heroId}计划升星${planItem.upgradeCount}次，实际${planItem.currentStar}星 → ${latestStar}星`,
         type: upgraded >= planItem.upgradeCount ? "success" : "warning",
       });
-      return upgraded;
+      return { upgraded, roleInfo: latestRoleInfo };
     };
     const useUniversalFragments = async ({
       tokenId,
       universalItemId,
       resolveTargetHeroId,
       tokenName,
+      initialRoleInfo,
     }) => {
+      let roleInfo = initialRoleInfo;
       while (!shouldStop.value) {
-        let roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-        let targetHeroId = resolveTargetHeroId(roleInfo);
-
-        // 先把已有的目标武将碎片用掉，再计算还需要转换多少万能碎片。
-        await upgradeHeroStars(tokenId, targetHeroId, tokenName);
-        roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
-        targetHeroId = resolveTargetHeroId(roleInfo);
+        const targetHeroId = resolveTargetHeroId(roleInfo);
         if (getHeroStar(getHeroes(roleInfo), targetHeroId) >= 30) break;
 
         const universalQuantity = getQuantity(
           getItems(roleInfo),
           universalItemId,
         );
-        if (universalQuantity <= 0) break;
         const amount = getUniversalAmountForImmediateUpgrades(
           roleInfo,
           targetHeroId,
           universalQuantity,
         );
-        if (amount <= 0) {
+        let usedAmount = 0;
+        if (amount > 0) {
+          const index =
+            universalItemId === UNIVERSAL_RED_ITEM_ID
+              ? targetHeroId - 101
+              : targetHeroId - 201;
+          usedAmount = await useInBatches({
+            tokenId,
+            itemId: universalItemId,
+            quantity: amount,
+            index,
+            tokenName,
+            knownBeforeQuantity: universalQuantity,
+          });
+          if (usedAmount <= 0 || shouldStop.value) break;
+          setQuantity(
+            roleInfo,
+            universalItemId,
+            universalQuantity - usedAmount,
+          );
+          setQuantity(
+            roleInfo,
+            targetHeroId,
+            getQuantity(getItems(roleInfo), targetHeroId) + usedAmount,
+          );
+        }
+
+        // 已有专属碎片与本轮转换所得碎片合并规划，一次升完后再查询确认。
+        const fragmentUpgrade = await upgradeHeroStars(
+          tokenId,
+          targetHeroId,
+          tokenName,
+          roleInfo,
+        );
+        roleInfo = fragmentUpgrade.roleInfo;
+        if (usedAmount > 0 && fragmentUpgrade.upgraded <= 0) {
+          throw new Error(
+            `${HERO_DICT[targetHeroId]?.name || targetHeroId}使用万能碎片后未能升星`,
+          );
+        }
+        if (fragmentUpgrade.upgraded > 0) continue;
+
+        if (universalQuantity > 0) {
           const heroName = HERO_DICT[targetHeroId]?.name || targetHeroId;
           const currentStar = getHeroStar(getHeroes(roleInfo), targetHeroId);
           const fragmentCount = getQuantity(getItems(roleInfo), targetHeroId);
@@ -5003,30 +5070,10 @@ export function createTasksItem(deps) {
             message: `${tokenName} ${heroName}升星还需${Math.max(0, nextCost - fragmentCount)}个碎片，当前万能碎片${universalQuantity}个，不转换以避免碎片闲置`,
             type: "info",
           });
-          break;
         }
-        const index =
-          universalItemId === UNIVERSAL_RED_ITEM_ID
-            ? targetHeroId - 101
-            : targetHeroId - 201;
-        await useInBatches({
-          tokenId,
-          itemId: universalItemId,
-          quantity: amount,
-          index,
-          tokenName,
-        });
-        const upgraded = await upgradeHeroStars(
-          tokenId,
-          targetHeroId,
-          tokenName,
-        );
-        if (upgraded <= 0) {
-          throw new Error(
-            `${HERO_DICT[targetHeroId]?.name || targetHeroId}使用万能碎片后未能升星`,
-          );
-        }
+        break;
       }
+      return roleInfo;
     };
 
     isRunning.value = true;
@@ -5041,16 +5088,15 @@ export function createTasksItem(deps) {
         await ensureConnection(tokenId);
         let roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         const mainLevel = getMainLevel(roleInfo);
-        const items = getItems(roleInfo);
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${tokenName} 当前主线关卡${mainLevel}，开始使用仓库物品`,
           type: "info",
         });
 
-        const redQuantity = getQuantity(items, UNIVERSAL_RED_ITEM_ID);
+        const redQuantity = getQuantity(getItems(roleInfo), UNIVERSAL_RED_ITEM_ID);
         if (useUniversalRed && redQuantity > 0) {
-          await useUniversalFragments({
+          roleInfo = await useUniversalFragments({
             tokenId,
             universalItemId: UNIVERSAL_RED_ITEM_ID,
             resolveTargetHeroId: (latestRoleInfo) =>
@@ -5058,6 +5104,7 @@ export function createTasksItem(deps) {
                 ? redPrimaryHeroId
                 : redSecondaryHeroId,
             tokenName,
+            initialRoleInfo: roleInfo,
           });
         } else if (!useUniversalRed && redQuantity > 0) {
           addLog({
@@ -5067,13 +5114,17 @@ export function createTasksItem(deps) {
           });
         }
 
-        const orangeQuantity = getQuantity(items, UNIVERSAL_ORANGE_ITEM_ID);
+        const orangeQuantity = getQuantity(
+          getItems(roleInfo),
+          UNIVERSAL_ORANGE_ITEM_ID,
+        );
         if (useUniversalOrange && orangeQuantity > 0) {
-          await useUniversalFragments({
+          roleInfo = await useUniversalFragments({
             tokenId,
             universalItemId: UNIVERSAL_ORANGE_ITEM_ID,
             resolveTargetHeroId: () => orangeHeroId,
             tokenName,
+            initialRoleInfo: roleInfo,
           });
         } else if (!useUniversalOrange && orangeQuantity > 0) {
           addLog({
@@ -5084,7 +5135,10 @@ export function createTasksItem(deps) {
         }
 
         if (mainLevel >= 7200) {
-          const coinBagQuantity = getQuantity(items, COIN_BAG_ITEM_ID);
+          const coinBagQuantity = getQuantity(
+            getItems(roleInfo),
+            COIN_BAG_ITEM_ID,
+          );
           if (coinBagQuantity > 0) {
             await useInBatches({
               tokenId,
@@ -5093,7 +5147,7 @@ export function createTasksItem(deps) {
               tokenName,
             });
           }
-        } else if (getQuantity(items, COIN_BAG_ITEM_ID) > 0) {
+        } else if (getQuantity(getItems(roleInfo), COIN_BAG_ITEM_ID) > 0) {
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${tokenName} 主线未达到7200，跳过金币袋使用`,
@@ -5103,7 +5157,7 @@ export function createTasksItem(deps) {
 
         for (const itemId of OPEN_PACK_ITEM_IDS) {
           if (itemId === COIN_BAG_ITEM_ID || shouldStop.value) continue;
-          const quantity = getQuantity(items, itemId);
+          const quantity = getQuantity(getItems(roleInfo), itemId);
           if (quantity <= 0) continue;
           try {
             await useInBatches({ tokenId, itemId, quantity, tokenName });

@@ -5,10 +5,10 @@
  */
 
 import { getXuanwuActBase } from "@/utils/towerActId";
+import { getNextUnclaimedLotteryCumulativeId } from "@/utils/xuanwuLotteryRewards";
 
 // 活动ID后缀（前缀为当天日期 YYMMDD）
 const WAR_ORDER_SUFFIX = "1";
-const LOTTERY_SUFFIX = "4";
 const SIGN_SUFFIX = "5";
 const GOODS_SUFFIX = "41";
 
@@ -258,38 +258,77 @@ export function createTasksXuanwuBlessing(deps) {
     return count;
   };
 
-  /** 一次性领完当前所有可领取的寻宝累抽奖励。 */
-  const claimLotteryRewards = async (
-    tokenId,
-    lotteryActivityId,
-    tokenName,
-  ) => {
+  /** 查询累计抽奖状态后，一次性领完已达成且尚未领取的奖励档位。 */
+  const claimLotteryRewards = async (tokenId, tokenName) => {
+    let lotteryInfo;
+    try {
+      const infoRes = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "activity_getlotteryinfo",
+        {},
+        8000,
+      );
+      lotteryInfo = infoRes?.lotteryInfo || {};
+    } catch (error) {
+      log(
+        `${tokenName} 查询寻宝累抽奖励失败: ${error?.message || "未知错误"}`,
+        "warning",
+      );
+      return 0;
+    }
+
+    const claimedMap = { ...(lotteryInfo?.cumulativeClaimedMap || {}) };
+    let nextId = getNextUnclaimedLotteryCumulativeId(
+      { cumulativeClaimedMap: claimedMap },
+      MAX_LOTTERY_REWARD_ROUNDS,
+    );
+    if (nextId === null) {
+      log(`${tokenName} 当前没有可领取的寻宝累抽奖励`);
+      return 0;
+    }
+
+    log(
+      `${tokenName} 累计抽奖${Number(lotteryInfo.lotteryNum) || 0}次，下一个未领取档位：${nextId}`,
+    );
+
     let claimed = 0;
-    for (let round = 0; round < MAX_LOTTERY_REWARD_ROUNDS; round++) {
+    while (nextId !== null && claimed < MAX_LOTTERY_REWARD_ROUNDS) {
       if (shouldStop.value) break;
       try {
         const res = await tokenStore.sendMessageWithPromise(
           tokenId,
-          "activity_claimlotteryreward",
-          { activityId: lotteryActivityId },
+          "activity_claimlotterycumulative",
+          { id: nextId },
           8000,
         );
-        if (!res?.reward?.length) break;
+        if (!res?.reward?.length) {
+          log(`${tokenName} 寻宝累抽奖励档位${nextId}未返回奖励，已停止`, "warning");
+          break;
+        }
         claimed++;
         log(
-          `${tokenName} 寻宝累抽奖励领取: ${formatReward(res.reward)}`,
+          `${tokenName} 寻宝累抽奖励档位${nextId}: ${formatReward(res.reward)}`,
           "success",
         );
-      } catch {
-        // 当前已无达到条件且尚未领取的累抽奖励。
+        Object.assign(
+          claimedMap,
+          res?.lotteryInfo?.cumulativeClaimedMap || { [nextId]: true },
+        );
+        nextId = getNextUnclaimedLotteryCumulativeId(
+          { cumulativeClaimedMap: claimedMap },
+          MAX_LOTTERY_REWARD_ROUNDS,
+        );
+      } catch (error) {
+        log(
+          `${tokenName} 寻宝累抽奖励档位${nextId}尚未达到领取条件或领取失败，已停止: ${error?.message || "未知错误"}`,
+          "info",
+        );
         break;
       }
       await delay(commandDelay);
     }
     if (claimed > 0) {
       log(`${tokenName} 寻宝累抽奖励已一次性领取${claimed}档`, "success");
-    } else {
-      log(`${tokenName} 当前没有可领取的寻宝累抽奖励`);
     }
     return claimed;
   };
@@ -353,7 +392,6 @@ export function createTasksXuanwuBlessing(deps) {
         }
         const { actId, info } = resolved;
         const base = String(actId).slice(0, 6);
-        const lotteryActivityId = Number(base + LOTTERY_SUFFIX);
         const signActivityId = Number(base + SIGN_SUFFIX);
         const goodsId = Number(base + GOODS_SUFFIX);
 
@@ -389,7 +427,6 @@ export function createTasksXuanwuBlessing(deps) {
           lotteryCnt += drawn;
           const claimedLotteryRewards = await claimLotteryRewards(
             tokenId,
-            lotteryActivityId,
             token.name,
           );
           lotteryRewards += claimedLotteryRewards;
@@ -413,7 +450,6 @@ export function createTasksXuanwuBlessing(deps) {
         // 即使本轮没有抽奖，也补领此前已达到但遗漏的累抽奖励。
         lotteryRewards += await claimLotteryRewards(
           tokenId,
-          lotteryActivityId,
           token.name,
         );
 
