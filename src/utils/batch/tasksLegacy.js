@@ -40,6 +40,49 @@ export function createTasksLegacy(deps) {
     );
   };
 
+  const isLegacyModuleClosedError = (error) => {
+    const messageText = String(error?.message || error || "").toLowerCase();
+    return (
+      messageText.includes("200160") || messageText.includes("模块未开启")
+    );
+  };
+
+  const isRateLimitError = (error) => {
+    const messageText = String(error?.message || error || "").toLowerCase();
+    return messageText.includes("200400") || messageText.includes("操作太快");
+  };
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const sendLegacyHangUpCommand = async (
+    tokenId,
+    tokenName,
+    command,
+    operationName,
+  ) => {
+    for (let attempt = 0; attempt <= 1; attempt++) {
+      try {
+        return await tokenStore.sendMessageWithPromise(
+          tokenId,
+          command,
+          {},
+          8000,
+        );
+      } catch (error) {
+        if (attempt === 0 && isRateLimitError(error)) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${operationName}触发200400，等待6秒后重试`,
+            type: "warning",
+          });
+          await sleep(6000);
+          continue;
+        }
+        throw error;
+      }
+    }
+  };
+
   const isAlreadyClaimedError = (error) => {
     const messageText = String(error?.message || error || "").toLowerCase();
     return ["已领取", "已经领取", "已领", "already", "claimed"].some((keyword) =>
@@ -153,13 +196,54 @@ export function createTasksLegacy(deps) {
         });
         await ensureConnection(tokenId);
 
-        const resp = await tokenStore.sendMessageWithPromise(
+        const legacyInfo = await sendLegacyHangUpCommand(
           tokenId,
-          "legacy_beginhangup",
-          {},
-          5000,
+          tokenName,
+          "legacy_getinfo",
+          "查询功法状态",
         );
-        const beginTime = resp?.roleLegacy?.hangUpBeginTime;
+        const currentBeginTime = Number(
+          legacyInfo?.roleLegacy?.hangUpBeginTime || 0,
+        );
+        if (currentBeginTime > 0) {
+          tokenStatus.value[tokenId] = "completed";
+          skippedCount++;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `=== ${tokenName} 已在探索功法中 (${new Date(currentBeginTime).toLocaleString()})，跳过 ===`,
+            type: "warning",
+          });
+          return;
+        }
+
+        await sendLegacyHangUpCommand(
+          tokenId,
+          tokenName,
+          "role_backclaimreward",
+          "结算返回奖励",
+        );
+
+        const resp = await sendLegacyHangUpCommand(
+          tokenId,
+          tokenName,
+          "legacy_beginhangup",
+          "开始探索功法",
+        );
+        let beginTime = Number(resp?.roleLegacy?.hangUpBeginTime || 0);
+        if (beginTime <= 0) {
+          const verifiedInfo = await sendLegacyHangUpCommand(
+            tokenId,
+            tokenName,
+            "legacy_getinfo",
+            "确认探索状态",
+          );
+          beginTime = Number(
+            verifiedInfo?.roleLegacy?.hangUpBeginTime || 0,
+          );
+        }
+        if (beginTime <= 0) {
+          throw new Error("开始探索接口已返回，但未查询到探索开始时间");
+        }
         const beginTimeText = beginTime
           ? new Date(beginTime).toLocaleString()
           : "已返回成功响应";
@@ -173,6 +257,16 @@ export function createTasksLegacy(deps) {
         successCount++;
       } catch (error) {
         console.error(error);
+        if (isLegacyModuleClosedError(error)) {
+          tokenStatus.value[tokenId] = "completed";
+          skippedCount++;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `=== ${tokenName} 功法系统未开启，跳过 ===`,
+            type: "warning",
+          });
+          return;
+        }
         if (isLegacyHangUpInProgressError(error)) {
           tokenStatus.value[tokenId] = "completed";
           skippedCount++;

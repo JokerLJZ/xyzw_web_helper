@@ -396,6 +396,7 @@ export function registerDefaultCommands(reg) {
     .register("legacy_claimhangup")
     .register("legacy_beginhangup")
     .register("legacy_claimchargereward", { id: 2 })
+    .register("role_backclaimreward")
     // 功法残卷赠送
     .register("legacy_gift_getlist")
     .register("legacy_gift_send", { recipientId: 0, itemId: 0, quantity: 0 })
@@ -1269,6 +1270,7 @@ export class XyzwWebSocketClient {
         "lordweapon_upgradepassiveskilllevel",
       ],
       syncrewardresp: [
+        "role_backclaimreward",
         "activity_commonbuygoods",
         "activity_buystoregoods",
         "system_buygold",
