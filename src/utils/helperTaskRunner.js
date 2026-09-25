@@ -30,7 +30,7 @@ export function getErrorMessage(error) {
 export function isRateLimitError(error) {
   const message = getErrorMessage(error);
 
-  return message.includes("400312") || message.includes("操作过快");
+  return /400312|200400|操作过快|操作太快/.test(message);
 }
 
 export function getItemQuantity(roleInfo, itemId) {
@@ -237,10 +237,11 @@ export async function runInventoryVerifiedGameCommand({
   maxRetries = HELPER_MAX_RETRIES,
   sleepFn = sleep,
   onProgress,
+  initialRoleInfo = null,
 }) {
   const targetTotal = Math.max(0, Math.trunc(Number(total) || 0));
-  const initialRoleInfo = await queryInventory();
-  let currentCount = getItemQuantity(initialRoleInfo, itemId);
+  let latestRoleInfo = initialRoleInfo || (await queryInventory());
+  let currentCount = getItemQuantity(latestRoleInfo, itemId);
 
   if (currentCount < targetTotal) {
     throw new Error(`库存不足：当前 ${currentCount}，需要 ${targetTotal}`);
@@ -287,8 +288,8 @@ export async function runInventoryVerifiedGameCommand({
       }
     }
 
-    const roleInfo = await queryInventory();
-    currentCount = getItemQuantity(roleInfo, itemId);
+    latestRoleInfo = await queryInventory();
+    currentCount = getItemQuantity(latestRoleInfo, itemId);
     const totalConsumed = Math.max(0, initialCount - currentCount);
     const consumed = totalConsumed - verifiedConsumed;
 
@@ -319,5 +320,6 @@ export async function runInventoryVerifiedGameCommand({
     completed: targetTotal,
     finalCount: currentCount,
     initialCount,
+    ...(initialRoleInfo ? { lastRoleInfo: latestRoleInfo } : {}),
   };
 }

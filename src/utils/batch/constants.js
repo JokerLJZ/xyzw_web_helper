@@ -46,6 +46,7 @@ export const availableTasks = [
   { label: "批量开箱", value: "batchOpenBox" },
   { label: "按积分开箱", value: "batchOpenBoxByPoints" },
   { label: "领取宝箱积分", value: "batchClaimBoxPointReward" },
+  { label: "领取周活动福利", value: "batchClaimWeeklyActivityBenefit" },
   { label: "智能宝箱周任务", value: "batchSmartBoxWeekly" },
   { label: "智能招募周任务", value: "batchSmartRecruitWeekly" },
   { label: "江湖黑市周任务", value: "batchSmartBlackMarketWeekly" },

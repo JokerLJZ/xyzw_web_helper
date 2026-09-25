@@ -209,6 +209,178 @@ export function createTasksItem(deps) {
     message.success("收取邮件任务结束");
   };
 
+  /**
+   * 领取当前周活动限时商店的免费福利。
+   * 宝箱周、招募周和黑市周共用 activityId=9，免费商品固定为 goodsIndex=0。
+   */
+  const batchClaimWeeklyActivityBenefit = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    const WEEK_ACTIVITY_INFO_IDS = {
+      招募周: 1,
+      宝箱周: 2,
+      黑市周: 11,
+    };
+    const RATE_LIMIT_RETRY_DELAY_MS = 6000;
+    const MAX_RATE_LIMIT_RETRIES = 3;
+    const wait = (delayMs) =>
+      new Promise((resolve) => setTimeout(resolve, delayMs));
+    const isRateLimitError = (error) =>
+      /200400|操作太快|操作过快/.test(getErrorMessage(error));
+    const isConnectionError = (error) =>
+      /timeout|超时|连接|disconnected|websocket/i.test(
+        getErrorMessage(error),
+      );
+    const getActivity = (result) =>
+      result?.activity ||
+      result?.data?.activity ||
+      result?.body?.activity ||
+      result?.data?.body?.activity ||
+      null;
+    const getRewards = (result) =>
+      result?.reward ||
+      result?.body?.reward ||
+      result?.data?.reward ||
+      result?.data?.body?.reward ||
+      [];
+
+    const runWithRateLimitRetry = async (
+      tokenName,
+      operationName,
+      operation,
+    ) => {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await operation();
+        } catch (error) {
+          if (
+            !isRateLimitError(error) ||
+            attempt >= MAX_RATE_LIMIT_RETRIES
+          ) {
+            throw error;
+          }
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${operationName}触发200400，等待6秒后进行第${attempt + 1}次重试`,
+            type: "warning",
+          });
+          await wait(RATE_LIMIT_RETRY_DELAY_MS);
+        }
+      }
+    };
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+      const weekName = activityWeek?.value;
+      const weeklyInfoId = WEEK_ACTIVITY_INFO_IDS[weekName];
+
+      try {
+        tokenStatus.value[tokenId] = "running";
+        await ensureConnection(tokenId);
+
+        const activityResult = await runWithRateLimitRetry(
+          tokenName,
+          "查询周活动状态",
+          () =>
+            tokenStore.sendMessageWithPromise(
+              tokenId,
+              "activity_get",
+              {},
+              HELPER_COMMAND_TIMEOUT_MS,
+            ),
+        );
+        const activity = getActivity(activityResult);
+        const weeklyInfo =
+          weeklyInfoId == null
+            ? null
+            : activity?.myTotalInfo?.[weeklyInfoId] ??
+              activity?.myTotalInfo?.[String(weeklyInfoId)];
+
+        if (!weekName || !weeklyInfo) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 当前未检测到开放中的周活动福利，跳过领取`,
+            type: "info",
+          });
+          return;
+        }
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${tokenName} 开始领取${weekName}活动福利 ===`,
+          type: "info",
+        });
+
+        try {
+          const claimResult = await runWithRateLimitRetry(
+            tokenName,
+            `领取${weekName}活动福利`,
+            () =>
+              tokenStore.sendMessageWithPromise(
+                tokenId,
+                "activity_buystoregoods",
+                { activityId: 9, goodsIndex: 0, buyNum: 1 },
+                HELPER_COMMAND_TIMEOUT_MS,
+              ),
+          );
+          const rewards = getRewards(claimResult);
+          const rewardText = Array.isArray(rewards)
+            ? rewards
+                .map(
+                  (reward) =>
+                    `道具${reward?.itemId ?? reward?.type ?? "未知"}x${reward?.value ?? reward?.quantity ?? 0}`,
+                )
+                .join("、")
+            : "";
+
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${weekName}活动福利领取成功${rewardText ? `：${rewardText}` : ""}`,
+            type: "success",
+          });
+        } catch (claimError) {
+          if (isRateLimitError(claimError) || isConnectionError(claimError)) {
+            throw claimError;
+          }
+          // 免费商品只能领取一次。已领取、商店未开放或商品不可购买均按正常跳过处理。
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${weekName}活动福利已领取或当前不可领取，跳过：${getErrorMessage(claimError)}`,
+            type: "info",
+          });
+        }
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 领取周活动福利失败：${getErrorMessage(error)}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+    message.success("领取周活动福利任务结束");
+  };
+
   /** 达到4001级后，自动领取免费扳手并升级皮鞋玩具及已开放被动技能。 */
   const batchUpgradeShoeToy = async () => {
     if (selectedTokens.value.length === 0) return;
@@ -5458,6 +5630,43 @@ export function createTasksItem(deps) {
     // 奖励领取后可能只补回少量宝箱，需要多轮补开才能凑出8000分。
     // 同时设置上限，避免奖励接口异常时任务无限循环。
     const maxCyclesPerGroup = 20;
+    const smartBoxActionDelayMs = Math.max(
+      2000,
+      Number(delayConfig.action) || 0,
+    );
+    const smartBoxRateLimitDelayMs = 6000;
+    const smartBoxMaxRateLimitRetries = 3;
+    const waitForSmartBoxAction = () =>
+      new Promise((resolve) => setTimeout(resolve, smartBoxActionDelayMs));
+    const isSmartBoxRateLimitError = (error) =>
+      /200400|操作太快|操作过快/.test(getErrorMessage(error));
+
+    const runSmartBoxOperation = async (
+      tokenName,
+      operationName,
+      operation,
+    ) => {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await operation();
+        } catch (error) {
+          if (
+            !isSmartBoxRateLimitError(error) ||
+            attempt >= smartBoxMaxRateLimitRetries
+          ) {
+            throw error;
+          }
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${operationName}触发200400，等待6秒后进行第${attempt + 1}次重试`,
+            type: "warning",
+          });
+          await new Promise((resolve) =>
+            setTimeout(resolve, smartBoxRateLimitDelayMs),
+          );
+        }
+      }
+    };
 
     const getBoxWeekState = (activityResult) => {
       const activity =
@@ -5495,16 +5704,43 @@ export function createTasksItem(deps) {
       tokenStatus.value[id] = "waiting";
     });
 
-    const fetchRoleInfo = (tokenId) =>
-      tokenStore.sendMessageWithPromise(
-        tokenId,
-        "role_getroleinfo",
-        {},
-        HELPER_COMMAND_TIMEOUT_MS,
+    const fetchRoleInfo = async (tokenId, tokenName, waitBefore = false) => {
+      if (waitBefore) await waitForSmartBoxAction();
+      return runSmartBoxOperation(tokenName, "查询宝箱库存", () =>
+        tokenStore.sendMessageWithPromise(
+          tokenId,
+          "role_getroleinfo",
+          {},
+          HELPER_COMMAND_TIMEOUT_MS,
+        ),
       );
+    };
 
-    const openSmartBoxes = async (tokenId, token, boxes, phase) => {
+    const fetchBoxActivity = async (
+      tokenId,
+      tokenName,
+      waitBefore = false,
+    ) => {
+      if (waitBefore) await waitForSmartBoxAction();
+      return runSmartBoxOperation(tokenName, "查询宝箱周进度", () =>
+        tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_get",
+          {},
+          HELPER_COMMAND_TIMEOUT_MS,
+        ),
+      );
+    };
+
+    const openSmartBoxes = async (
+      tokenId,
+      token,
+      boxes,
+      phase,
+      initialRoleInfo,
+    ) => {
       let openedPoints = 0;
+      let latestRoleInfo = initialRoleInfo;
 
       for (const box of boxes) {
         if (shouldStop.value) break;
@@ -5520,7 +5756,8 @@ export function createTasksItem(deps) {
           type: "info",
         });
 
-        await runInventoryVerifiedGameCommand({
+        await waitForSmartBoxAction();
+        const openResult = await runInventoryVerifiedGameCommand({
           tokenStore,
           tokenId,
           cmd: "item_openbox",
@@ -5528,9 +5765,12 @@ export function createTasksItem(deps) {
           total: count,
           batchSize: box.batchSize,
           timeout: HELPER_COMMAND_TIMEOUT_MS,
-          delayMs: delayConfig.action,
+          delayMs: smartBoxActionDelayMs,
+          retryDelayMs: smartBoxRateLimitDelayMs,
+          maxRetries: smartBoxMaxRateLimitRetries,
           createParams: (amount) => ({ itemId: box.id, number: amount }),
-          queryInventory: () => fetchRoleInfo(tokenId),
+          queryInventory: () => fetchRoleInfo(tokenId, token.name, true),
+          initialRoleInfo: latestRoleInfo,
           onProgress: (progress) => {
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -5539,10 +5779,11 @@ export function createTasksItem(deps) {
             });
           },
         });
+        latestRoleInfo = openResult.lastRoleInfo;
         openedPoints += count * box.points;
       }
 
-      return openedPoints;
+      return { openedPoints, lastRoleInfo: latestRoleInfo };
     };
 
     const claimPointsAndMail = async (tokenId, token) => {
@@ -5551,19 +5792,36 @@ export function createTasksItem(deps) {
         message: `${token.name} 本轮开箱完成，开始领取宝箱积分和邮件附件`,
         type: "info",
       });
-      await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "item_batchclaimboxpointreward",
-        {},
-        HELPER_COMMAND_TIMEOUT_MS,
+      await runSmartBoxOperation(
+        token.name,
+        "领取宝箱积分",
+        () =>
+          tokenStore.sendMessageWithPromise(
+            tokenId,
+            "item_batchclaimboxpointreward",
+            {},
+            HELPER_COMMAND_TIMEOUT_MS,
+          ),
       );
-      await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
-      await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "mail_claimallattachment",
-        { category: 0 },
-        HELPER_COMMAND_TIMEOUT_MS,
-      );
+      await waitForSmartBoxAction();
+      try {
+        await runSmartBoxOperation(token.name, "领取邮件附件", () =>
+          tokenStore.sendMessageWithPromise(
+            tokenId,
+            "mail_claimallattachment",
+            { category: 0 },
+            HELPER_COMMAND_TIMEOUT_MS,
+          ),
+        );
+      } catch (mailError) {
+        if (!isNoClaimableMailError(mailError)) throw mailError;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 当前没有可领取的邮件附件，继续核对宝箱周进度`,
+          type: "info",
+        });
+      }
+      await waitForSmartBoxAction();
     };
 
     const taskPromises = selectedTokens.value.map(async (tokenId) => {
@@ -5589,12 +5847,7 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
-        let activityResult = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "activity_get",
-          {},
-          HELPER_COMMAND_TIMEOUT_MS,
-        );
+        let activityResult = await fetchBoxActivity(tokenId, token.name);
         let boxWeekState = getBoxWeekState(activityResult);
         const completedRounds = boxWeekState.completedRounds;
         const remainingRounds = Math.max(0, 4 - completedRounds);
@@ -5622,17 +5875,17 @@ export function createTasksItem(deps) {
           if (shouldStop.value) return;
 
           if (groupIndex > 1) {
-            activityResult = await tokenStore.sendMessageWithPromise(
+            activityResult = await fetchBoxActivity(
               tokenId,
-              "activity_get",
-              {},
-              HELPER_COMMAND_TIMEOUT_MS,
+              token.name,
+              true,
             );
             boxWeekState = getBoxWeekState(activityResult);
           }
 
           let currentProgress = boxWeekState.currentProgress;
           let cyclesForCurrentGroup = 0;
+          let cachedRoleInfo = null;
 
           if (currentProgress >= 8000) {
             await claimPointsAndMail(tokenId, token);
@@ -5644,7 +5897,10 @@ export function createTasksItem(deps) {
             !shouldStop.value
           ) {
             cyclesForCurrentGroup += 1;
-            const roleInfo = await fetchRoleInfo(tokenId);
+            const roleInfo =
+              cachedRoleInfo ||
+              (await fetchRoleInfo(tokenId, token.name, true));
+            cachedRoleInfo = null;
             const inventory = getSmartBoxInventory(roleInfo);
             const selectedPoints = getSmartBoxPoints(inventory, selectedTypes);
             const requiredStartPoints = Math.max(0, 4000 - currentProgress);
@@ -5691,30 +5947,34 @@ export function createTasksItem(deps) {
               message: `${token.name} 第${groupIndex}/${groupCount}轮本次开箱${plan.points}分，预计进度${Math.min(8000, currentProgress + plan.points)}/8000`,
               type: "info",
             });
-            const openedPoints = await openSmartBoxes(
+            const openResult = await openSmartBoxes(
               tokenId,
               token,
               plan.boxes,
               "累计开箱",
+              roleInfo,
             );
-            if (openedPoints <= 0) break;
+            if (openResult.openedPoints <= 0) break;
 
             await claimPointsAndMail(tokenId, token);
 
-            activityResult = await tokenStore.sendMessageWithPromise(
+            activityResult = await fetchBoxActivity(
               tokenId,
-              "activity_get",
-              {},
-              HELPER_COMMAND_TIMEOUT_MS,
+              token.name,
             );
             boxWeekState = getBoxWeekState(activityResult);
             const refreshedProgress = boxWeekState.currentProgress;
-            const refreshedInventory = getSmartBoxInventory(
-              await fetchRoleInfo(tokenId),
+            const refreshedRoleInfo = await fetchRoleInfo(
+              tokenId,
+              token.name,
+              true,
             );
+            const refreshedInventory =
+              getSmartBoxInventory(refreshedRoleInfo);
             const afterInventory = JSON.stringify(
               selectedTypes.map((id) => refreshedInventory[id] || 0),
             );
+            cachedRoleInfo = refreshedRoleInfo;
 
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -5746,14 +6006,20 @@ export function createTasksItem(deps) {
             break;
           }
 
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "activity_claimweekactreward",
-            {
-              selectRewardsMap: { 0: 1 },
-              typ: 2,
-            },
-            HELPER_COMMAND_TIMEOUT_MS,
+          await waitForSmartBoxAction();
+          await runSmartBoxOperation(
+            token.name,
+            "领取宝箱周自选大奖",
+            () =>
+              tokenStore.sendMessageWithPromise(
+                tokenId,
+                "activity_claimweekactreward",
+                {
+                  selectRewardsMap: { 0: 1 },
+                  typ: 2,
+                },
+                HELPER_COMMAND_TIMEOUT_MS,
+              ),
           );
           completedGroups += 1;
           addLog({
@@ -5761,17 +6027,32 @@ export function createTasksItem(deps) {
             message: `${token.name} 宝箱周第${groupIndex}/${groupCount}轮万能红自选奖励领取成功`,
             type: "success",
           });
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "mail_claimallattachment",
-            { category: 0 },
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 宝箱周第${groupIndex}/${groupCount}轮完成后邮件附件领取成功`,
-            type: "success",
-          });
+          await waitForSmartBoxAction();
+          try {
+            await runSmartBoxOperation(
+              token.name,
+              "领取宝箱周完成邮件",
+              () =>
+                tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "mail_claimallattachment",
+                  { category: 0 },
+                  HELPER_COMMAND_TIMEOUT_MS,
+                ),
+            );
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 宝箱周第${groupIndex}/${groupCount}轮完成后邮件附件领取成功`,
+              type: "success",
+            });
+          } catch (mailError) {
+            if (!isNoClaimableMailError(mailError)) throw mailError;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 宝箱周第${groupIndex}/${groupCount}轮完成后没有可领取的邮件附件`,
+              type: "info",
+            });
+          }
           boxWeekState = {
             completedRounds: Math.min(4, completedRounds + groupIndex),
             currentProgress: 0,
@@ -6074,6 +6355,7 @@ export function createTasksItem(deps) {
 
   return {
     batchClaimMailAttachments,
+    batchClaimWeeklyActivityBenefit,
     batchUpgradeShoeToy,
     batchClaimAchievementRewards,
     batchMaxWarriorLegionTech,
