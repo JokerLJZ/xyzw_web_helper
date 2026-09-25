@@ -85,6 +85,10 @@ export const availableTasks = [
   { label: "小号前期推图阵容", value: "batchAdjustEarlyMainLevelFormation" },
   { label: "小号推图默认阵容调整", value: "batchAdjustMainLevelFormation" },
   { label: "一键玄武赐福", value: "batchXuanwuBlessing" },
+  {
+    label: "玄武活动兑换宠物饼干",
+    value: "batchExchangeXuanwuPetCookies",
+  },
 ];
 
 // 月度任务目标

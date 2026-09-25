@@ -6,6 +6,10 @@
 
 import { getXuanwuActBase } from "@/utils/towerActId";
 import { getNextUnclaimedLotteryCumulativeId } from "@/utils/xuanwuLotteryRewards";
+import {
+  getXuanwuPetCookieExchangeIds,
+  getXuanwuPetCookieExchangeQuantity,
+} from "@/utils/xuanwuPetCookieExchange";
 
 // 活动ID后缀（前缀为当天日期 YYMMDD）
 const WAR_ORDER_SUFFIX = "1";
@@ -476,7 +480,81 @@ export function createTasksXuanwuBlessing(deps) {
     message.success("批量玄武赐福结束");
   };
 
+  /** 小号任务：用全部可兑换的玄武活动道具换取宠物饼干。 */
+  const batchExchangeXuanwuPetCookies = async () => {
+    if (selectedTokens.value.length === 0) return;
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+
+      try {
+        log(`=== 开始玄武活动兑换宠物饼干: ${tokenName} ===`);
+        await ensureConnection(tokenId);
+        if (shouldStop.value) return;
+
+        const resolved = await resolveWarOrder(tokenId);
+        if (!resolved) {
+          throw new Error("未找到玄武赐福活动，请确认活动是否开启");
+        }
+
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const exchange = getXuanwuPetCookieExchangeQuantity(roleInfo);
+        if (exchange.exchangeQuantity <= 0) {
+          log(
+            `${tokenName} 玄武活动道具${exchange.itemId}现有${exchange.itemQuantity}个，不足${exchange.unitCost}个，跳过兑换`,
+          );
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        const activityBase = String(resolved.actId).slice(0, 6);
+        const { activityId, goodsId } =
+          getXuanwuPetCookieExchangeIds(activityBase);
+        const res = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_exchange",
+          {
+            activityId,
+            goodsId,
+            quantity: exchange.exchangeQuantity,
+          },
+          8000,
+        );
+        log(
+          `${tokenName} 玄武活动兑换宠物饼干成功：消耗道具${exchange.itemId}x${exchange.exchangeQuantity * exchange.unitCost}，兑换${exchange.exchangeQuantity}份${res?.reward?.length ? `，获得${formatReward(res.reward)}` : ""}`,
+          "success",
+        );
+        tokenStatus.value[tokenId] = "completed";
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        log(
+          `${tokenName} 玄武活动兑换宠物饼干失败: ${error?.message || "未知错误"}`,
+          "error",
+        );
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        log(`${tokenName} 连接已关闭`);
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("玄武活动兑换宠物饼干任务结束");
+  };
+
   return {
     batchXuanwuBlessing,
+    batchExchangeXuanwuPetCookies,
   };
 }

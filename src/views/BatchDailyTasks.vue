@@ -783,6 +783,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchExchangeXuanwuPetCookies"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="使用全部可兑换的玄武活动道具5285兑换宠物饼干"
+                >
+                  玄武活动兑换宠物饼干
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchRedeemCodes"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -4678,6 +4686,7 @@ const taskGroupDefinitions = [
       "batchSmartRecruitWeekly",
       "batchSmartBlackMarketWeekly",
       "batchUseWarehouseItems",
+      "batchExchangeXuanwuPetCookies",
       "batchRedeemCodes",
       "store_discount_purchase",
     ],
@@ -7692,7 +7701,8 @@ const tasksApex = createTasksApex(createTaskDeps());
 const { batchApexGuess } = tasksApex;
 
 const tasksXuanwuBlessing = createTasksXuanwuBlessing(createTaskDeps());
-const { batchXuanwuBlessing } = tasksXuanwuBlessing;
+const { batchXuanwuBlessing, batchExchangeXuanwuPetCookies } =
+  tasksXuanwuBlessing;
 
 // 盐杯竞猜 pick 选择
 const footballPick = ref(3);
