@@ -67,17 +67,51 @@ test("饼干和白玉按相同数量一次性规划", () => {
       cookieUnitCost: 5,
       whiteJadeUnitCost: 5,
       pairUnitCost: 10,
-      exchangeQuantity: 2,
+      pairExchangeQuantity: 2,
+      extraCookieQuantity: 0,
+      cookieExchangeQuantity: 2,
+      whiteJadeExchangeQuantity: 2,
       remainingItemQuantity: 1,
     },
   );
 });
 
-test("不足一组饼干白玉时不执行兑换", () => {
-  assert.equal(
+test("不足5个活动道具时不执行兑换", () => {
+  assert.deepEqual(
     getXuanwuCookieAndJadeExchangePlan({
-      role: { items: { 5285: { quantity: 9 } } },
-    }).exchangeQuantity,
-    0,
+      role: { items: { 5285: { quantity: 4 } } },
+    }),
+    {
+      itemId: 5285,
+      itemQuantity: 4,
+      cookieUnitCost: 5,
+      whiteJadeUnitCost: 5,
+      pairUnitCost: 10,
+      pairExchangeQuantity: 0,
+      extraCookieQuantity: 0,
+      cookieExchangeQuantity: 0,
+      whiteJadeExchangeQuantity: 0,
+      remainingItemQuantity: 4,
+    },
   );
+});
+
+test("剩余道具达到5个但不足10个时追加兑换一份饼干", () => {
+  const plan = getXuanwuCookieAndJadeExchangePlan({
+    role: { items: { 5285: { quantity: 27 } } },
+  });
+
+  assert.equal(plan.cookieExchangeQuantity, 3);
+  assert.equal(plan.whiteJadeExchangeQuantity, 2);
+  assert.equal(plan.remainingItemQuantity, 2);
+});
+
+test("只有5至9个道具时只兑换一份饼干", () => {
+  const plan = getXuanwuCookieAndJadeExchangePlan({
+    role: { items: { 5285: { quantity: 9 } } },
+  });
+
+  assert.equal(plan.cookieExchangeQuantity, 1);
+  assert.equal(plan.whiteJadeExchangeQuantity, 0);
+  assert.equal(plan.remainingItemQuantity, 4);
 });

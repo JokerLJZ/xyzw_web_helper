@@ -508,9 +508,12 @@ export function createTasksXuanwuBlessing(deps) {
 
         const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         const exchangePlan = getXuanwuCookieAndJadeExchangePlan(roleInfo);
-        if (exchangePlan.exchangeQuantity <= 0) {
+        if (
+          exchangePlan.cookieExchangeQuantity <= 0 &&
+          exchangePlan.whiteJadeExchangeQuantity <= 0
+        ) {
           log(
-            `${tokenName} 玄武活动道具${exchangePlan.itemId}现有${exchangePlan.itemQuantity}个，不足一组${exchangePlan.pairUnitCost}个，跳过兑换`,
+            `${tokenName} 玄武活动道具${exchangePlan.itemId}现有${exchangePlan.itemQuantity}个，不足兑换1份宠物饼干，跳过兑换`,
           );
           tokenStatus.value[tokenId] = "completed";
           return;
@@ -546,32 +549,36 @@ export function createTasksXuanwuBlessing(deps) {
           }
         };
 
-        const exchangeQuantity = exchangePlan.exchangeQuantity;
+        const cookieExchangeQuantity = exchangePlan.cookieExchangeQuantity;
+        const whiteJadeExchangeQuantity =
+          exchangePlan.whiteJadeExchangeQuantity;
         log(
-          `${tokenName} 玄武活动道具${exchangePlan.itemId}现有${exchangePlan.itemQuantity}个，计划兑换宠物饼干${exchangeQuantity}份、白玉${exchangeQuantity}份，预计剩余${exchangePlan.remainingItemQuantity}个`,
+          `${tokenName} 玄武活动道具${exchangePlan.itemId}现有${exchangePlan.itemQuantity}个，计划兑换宠物饼干${cookieExchangeQuantity}份、白玉${whiteJadeExchangeQuantity}份，预计剩余${exchangePlan.remainingItemQuantity}个`,
         );
         const cookieResult = await exchangeWithRateLimitRetry(
           cookieGoodsId,
-          exchangeQuantity,
+          cookieExchangeQuantity,
           "宠物饼干",
         );
         log(
-          `${tokenName} 宠物饼干兑换${exchangeQuantity}份成功${cookieResult?.reward?.length ? `：${formatReward(cookieResult.reward)}` : ""}`,
+          `${tokenName} 宠物饼干兑换${cookieExchangeQuantity}份成功${cookieResult?.reward?.length ? `：${formatReward(cookieResult.reward)}` : ""}`,
           "success",
         );
 
-        await delay(commandDelay);
-        const whiteJadeResult = await exchangeWithRateLimitRetry(
-          whiteJadeGoodsId,
-          exchangeQuantity,
-          "白玉",
-        );
+        if (whiteJadeExchangeQuantity > 0) {
+          await delay(commandDelay);
+          const whiteJadeResult = await exchangeWithRateLimitRetry(
+            whiteJadeGoodsId,
+            whiteJadeExchangeQuantity,
+            "白玉",
+          );
+          log(
+            `${tokenName} 白玉兑换${whiteJadeExchangeQuantity}份成功${whiteJadeResult?.reward?.length ? `：${formatReward(whiteJadeResult.reward)}` : ""}`,
+            "success",
+          );
+        }
         log(
-          `${tokenName} 白玉兑换${exchangeQuantity}份成功${whiteJadeResult?.reward?.length ? `：${formatReward(whiteJadeResult.reward)}` : ""}`,
-          "success",
-        );
-        log(
-          `${tokenName} 玄武活动兑换完成：宠物饼干${exchangeQuantity}份，白玉${exchangeQuantity}份`,
+          `${tokenName} 玄武活动兑换完成：宠物饼干${cookieExchangeQuantity}份，白玉${whiteJadeExchangeQuantity}份`,
           "success",
         );
         tokenStatus.value[tokenId] = "completed";

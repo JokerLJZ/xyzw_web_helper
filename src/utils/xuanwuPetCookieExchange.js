@@ -33,7 +33,13 @@ export const getXuanwuCookieAndJadeExchangePlan = (roleInfo) => {
   const itemQuantity = getXuanwuExchangeItemQuantity(roleInfo);
   const pairUnitCost =
     XUANWU_COOKIE_UNIT_COST + XUANWU_WHITE_JADE_UNIT_COST;
-  const exchangeQuantity = Math.floor(itemQuantity / pairUnitCost);
+  const pairExchangeQuantity = Math.floor(itemQuantity / pairUnitCost);
+  const remainderAfterPairs = itemQuantity % pairUnitCost;
+  const extraCookieQuantity =
+    remainderAfterPairs >= XUANWU_COOKIE_UNIT_COST ? 1 : 0;
+  const cookieExchangeQuantity =
+    pairExchangeQuantity + extraCookieQuantity;
+  const whiteJadeExchangeQuantity = pairExchangeQuantity;
 
   return {
     itemId: XUANWU_EXCHANGE_ITEM_ID,
@@ -41,8 +47,14 @@ export const getXuanwuCookieAndJadeExchangePlan = (roleInfo) => {
     cookieUnitCost: XUANWU_COOKIE_UNIT_COST,
     whiteJadeUnitCost: XUANWU_WHITE_JADE_UNIT_COST,
     pairUnitCost,
-    exchangeQuantity,
-    remainingItemQuantity: itemQuantity - exchangeQuantity * pairUnitCost,
+    pairExchangeQuantity,
+    extraCookieQuantity,
+    cookieExchangeQuantity,
+    whiteJadeExchangeQuantity,
+    remainingItemQuantity:
+      itemQuantity -
+      pairExchangeQuantity * pairUnitCost -
+      extraCookieQuantity * XUANWU_COOKIE_UNIT_COST,
   };
 };
 
