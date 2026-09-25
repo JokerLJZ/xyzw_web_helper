@@ -1184,7 +1184,7 @@ export function createTasksItem(deps) {
 
   const heroIds = Object.keys(HERO_DICT).map(Number);
   const starFragmentCosts = HERO_STAR_FRAGMENT_COSTS;
-  const HERO_STAR_ACTION_DELAY_MS = 3000;
+  const HERO_STAR_ACTION_DELAY_MS = 1500;
   const HERO_STAR_RATE_LIMIT_DELAY_MS = 6000;
   const HERO_STAR_MAX_RATE_LIMIT_RETRIES = 4;
   const lastHeroStarActionAt = new Map();
