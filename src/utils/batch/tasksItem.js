@@ -1390,77 +1390,76 @@ export function createTasksItem(deps) {
         0,
       );
 
-  const smartBoxPointUnit = 10;
-
   const getSmartBoxCandidates = (inventory, selectedTypes) =>
     smartBoxDefinitions
       .filter((box) => selectedTypes.includes(box.id))
       .map((box) => ({
         ...box,
-        availableBatches: Math.floor(
-          Math.max(0, (inventory[box.id] || 0) - (box.reserve || 0)) /
-            box.batchSize,
+        availableCount: Math.max(
+          0,
+          Math.trunc(inventory[box.id] || 0) - (box.reserve || 0),
         ),
-        batchPoints: box.points * box.batchSize,
       }))
-      .filter((box) => box.availableBatches > 0)
+      .filter((box) => box.availableCount > 0)
       .sort((left, right) => right.points - left.points);
 
-  const buildSmartBoxStates = (candidates, maxUnits) => {
-    let states = Array(maxUnits + 1).fill(null);
-    states[0] = [];
-
-    for (const candidate of candidates) {
-      const nextStates = states.slice();
-      const batchUnits = candidate.batchPoints / smartBoxPointUnit;
-      const maxBatches = Math.min(
-        candidate.availableBatches,
-        Math.floor(maxUnits / batchUnits),
-      );
-
-      for (let currentUnits = 0; currentUnits <= maxUnits; currentUnits += 1) {
-        if (!states[currentUnits]) continue;
-
-        for (let count = 1; count <= maxBatches; count += 1) {
-          const nextUnits = currentUnits + count * batchUnits;
-          if (nextUnits > maxUnits) break;
-          if (!nextStates[nextUnits]) {
-            nextStates[nextUnits] = [
-              ...states[currentUnits],
-              { ...candidate, batches: count },
-            ];
-          }
-        }
-      }
-
-      states = nextStates;
-    }
-
-    return states;
-  };
-
-  // Build the largest available opening plan up to the requested limit. The
-  // task accumulates these partial plans until one group reaches 8000 points.
+  // 库存够时只开到目标分数；库存不够时开完当前全部可用宝箱。
+  // 开箱接口支持最后一批少于10个，因此规划按单个宝箱计算。
   const buildSmartBoxRefillPlan = (
     inventory,
     selectedTypes,
-    maxPoints = 7500,
+    targetPoints,
   ) => {
     const candidates = getSmartBoxCandidates(inventory, selectedTypes);
     if (candidates.length === 0) return null;
 
-    const maxUnits = Math.floor(maxPoints / smartBoxPointUnit);
-    const states = buildSmartBoxStates(candidates, maxUnits);
-    const planUnits = states.reduce(
-      (best, state, units) => (state && units > best ? units : best),
+    const safeTarget = Math.max(0, Math.trunc(Number(targetPoints) || 0));
+    const availablePoints = candidates.reduce(
+      (total, box) => total + box.availableCount * box.points,
       0,
     );
+    const boxes = [];
 
-    if (planUnits <= 0) return null;
+    if (availablePoints <= safeTarget) {
+      candidates.forEach((box) => {
+        boxes.push({ ...box, count: box.availableCount });
+      });
+    } else {
+      let remainingPoints = safeTarget;
+
+      candidates.forEach((box) => {
+        if (remainingPoints <= 0) return;
+        const count = Math.min(
+          box.availableCount,
+          Math.floor(remainingPoints / box.points),
+        );
+        if (count <= 0) return;
+        boxes.push({ ...box, count });
+        remainingPoints -= count * box.points;
+      });
+
+      if (remainingPoints > 0) {
+        const usedCounts = new Map(boxes.map((box) => [box.id, box.count]));
+        const tailBox = [...candidates]
+          .reverse()
+          .find((box) => (usedCounts.get(box.id) || 0) < box.availableCount);
+        if (tailBox) {
+          const existing = boxes.find((box) => box.id === tailBox.id);
+          if (existing) existing.count += 1;
+          else boxes.push({ ...tailBox, count: 1 });
+        }
+      }
+    }
+
+    const points = boxes.reduce(
+      (total, box) => total + box.count * box.points,
+      0,
+    );
+    if (points <= 0) return null;
 
     return {
-      boxes: states[planUnits],
-      points: planUnits * smartBoxPointUnit,
+      boxes,
+      points,
     };
   };
 
@@ -5121,6 +5120,8 @@ export function createTasksItem(deps) {
       5283,
       5284,
       5285,
+      5286,
+      5288,
       6001,
     ]);
     const useUniversalRed = batchSettings.useUniversalRed !== false;
@@ -5656,10 +5657,10 @@ export function createTasksItem(deps) {
     // 奖励领取后可能只补回少量宝箱，需要多轮补开才能凑出8000分。
     // 同时设置上限，避免奖励接口异常时任务无限循环。
     const maxCyclesPerGroup = 20;
-    const smartBoxActionDelayMs = Math.max(
-      2000,
-      Number(delayConfig.action) || 0,
-    );
+    const configuredSmartBoxDelay = Number(taskConfig.smartBoxActionDelayMs);
+    const smartBoxActionDelayMs = Number.isFinite(configuredSmartBoxDelay)
+      ? Math.max(0, configuredSmartBoxDelay)
+      : Math.max(2000, Number(delayConfig.action) || 0);
     const smartBoxRateLimitDelayMs = 6000;
     const smartBoxMaxRateLimitRetries = 3;
     const waitForSmartBoxAction = () =>
@@ -5807,9 +5808,7 @@ export function createTasksItem(deps) {
       for (const box of boxes) {
         if (shouldStop.value) break;
 
-        const count = box.batches
-          ? box.batches * box.batchSize
-          : Math.floor((box.count || 0) / box.batchSize) * box.batchSize;
+        const count = Math.max(0, Math.trunc(Number(box.count) || 0));
         if (count <= 0) continue;
 
         addLog({
@@ -5896,7 +5895,8 @@ export function createTasksItem(deps) {
             tokenId,
             "activity_claimweekactreward",
             {
-              selectRewardsMap: { 0: 1 },
+              // 原游戏接口使用 Map<number, number>；普通对象会把0编码为字符串键。
+              selectRewardsMap: new Map([[0, 1]]),
               typ: 2,
             },
             HELPER_COMMAND_TIMEOUT_MS,
@@ -6036,10 +6036,6 @@ export function createTasksItem(deps) {
           let cyclesForCurrentGroup = 0;
           let cachedRoleInfo = null;
 
-          if (currentProgress >= 8000) {
-            await claimPointsAndMail(tokenId, token);
-          }
-
           while (
             currentProgress < 8000 &&
             cyclesForCurrentGroup < maxCyclesPerGroup &&
@@ -6052,7 +6048,8 @@ export function createTasksItem(deps) {
             cachedRoleInfo = null;
             const inventory = getSmartBoxInventory(roleInfo);
             const selectedPoints = getSmartBoxPoints(inventory, selectedTypes);
-            const requiredStartPoints = Math.max(0, 4000 - currentProgress);
+            const remainingPoints = 8000 - currentProgress;
+            const requiredStartPoints = Math.ceil(remainingPoints / 2);
 
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -6066,31 +6063,27 @@ export function createTasksItem(deps) {
             ) {
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${token.name} 第${groupIndex}轮补到4000进度需要${requiredStartPoints}分，当前选中宝箱仅${selectedPoints}分，跳过后续任务`,
+                message: `${token.name} 第${groupIndex}轮距离8000分还差${remainingPoints}分，启动门槛为${requiredStartPoints}分，当前可用宝箱积分仅${selectedPoints}分，跳过后续任务`,
                 type: "warning",
               });
               break;
             }
 
-            const remainingPoints = 8000 - currentProgress;
             const plan = buildSmartBoxRefillPlan(
               inventory,
               selectedTypes,
-              Math.min(remainingPoints, 7500),
+              remainingPoints,
             );
 
             if (!plan) {
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${token.name} 没有满足批次要求的可开宝箱，停止任务`,
+                message: `${token.name} 当前没有可用宝箱，停止任务`,
                 type: "warning",
               });
               break;
             }
 
-            const beforeInventory = JSON.stringify(
-              selectedTypes.map((id) => inventory[id] || 0),
-            );
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${token.name} 第${groupIndex}/${groupCount}轮本次开箱${plan.points}分，预计进度${Math.min(8000, currentProgress + plan.points)}/8000`,
@@ -6105,12 +6098,34 @@ export function createTasksItem(deps) {
             );
             if (openResult.openedPoints <= 0) break;
 
-            await claimPointsAndMail(tokenId, token);
-
             activityResult = await fetchBoxActivity(
               tokenId,
               token.name,
+              true,
             );
+            boxWeekState = getBoxWeekState(activityResult);
+            currentProgress = boxWeekState.currentProgress;
+
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 第${groupIndex}/${groupCount}轮服务器进度${currentProgress}/8000`,
+              type: "info",
+            });
+
+            if (currentProgress >= 8000) break;
+
+            const inventoryAfterOpening = getSmartBoxInventory(
+              openResult.lastRoleInfo,
+            );
+            const pointsAfterOpening = getSmartBoxPoints(
+              inventoryAfterOpening,
+              selectedTypes,
+            );
+            const progressBeforeClaim = currentProgress;
+
+            await claimPointsAndMail(tokenId, token);
+
+            activityResult = await fetchBoxActivity(tokenId, token.name);
             boxWeekState = getBoxWeekState(activityResult);
             const refreshedProgress = boxWeekState.currentProgress;
             const refreshedRoleInfo = await fetchRoleInfo(
@@ -6120,8 +6135,9 @@ export function createTasksItem(deps) {
             );
             const refreshedInventory =
               getSmartBoxInventory(refreshedRoleInfo);
-            const afterInventory = JSON.stringify(
-              selectedTypes.map((id) => refreshedInventory[id] || 0),
+            const refreshedPoints = getSmartBoxPoints(
+              refreshedInventory,
+              selectedTypes,
             );
             cachedRoleInfo = refreshedRoleInfo;
 
@@ -6134,10 +6150,13 @@ export function createTasksItem(deps) {
 
             if (currentProgress >= 8000) break;
 
-            if (beforeInventory === afterInventory) {
+            if (
+              refreshedPoints <= pointsAfterOpening &&
+              currentProgress <= progressBeforeClaim
+            ) {
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${token.name} 领取积分和邮件后库存没有增加，停止任务避免重复执行`,
+                message: `${token.name} 领取积分和邮件后宝箱库存及活动进度均未增加，停止任务避免重复执行`,
                 type: "warning",
               });
               break;
@@ -6160,17 +6179,16 @@ export function createTasksItem(deps) {
             token,
             `宝箱周第${groupIndex}/${groupCount}轮`,
           );
+          await waitForSmartBoxAction();
+          activityResult = await fetchBoxActivity(tokenId, token.name);
+          const claimedWeekState = getBoxWeekState(activityResult);
+          if (
+            claimedWeekState.completedRounds <= boxWeekState.completedRounds
+          ) {
+            throw new Error("宝箱周自选大奖请求已返回，但服务端轮次未更新");
+          }
+          boxWeekState = claimedWeekState;
           completedGroups += 1;
-          boxWeekState = {
-            completedRounds: Math.min(
-              boxWeekState.totalRounds,
-              completedRounds + groupIndex,
-            ),
-            currentProgress: 0,
-            pendingGrandRewardCount: 0,
-            hasCurrentGrandReward: false,
-            totalRounds: boxWeekState.totalRounds,
-          };
         }
 
         tokenStatus.value[tokenId] =

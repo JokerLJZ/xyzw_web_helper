@@ -12,6 +12,7 @@ const createSmartBoxScenario = ({
   completedRounds = 0,
   currentRound = completedRounds + 1,
   finalRewardClaimCount = completedRounds,
+  claimAdvancesRound = true,
 }) => {
   const tokenId = "token-1";
   const token = { id: tokenId, name: "测试账号" };
@@ -25,7 +26,6 @@ const createSmartBoxScenario = ({
   const logs = [];
   let rewardIndex = 0;
   let boxWeekProgress = currentProgress;
-  let boxWeekCompletedRounds = completedRounds;
   let boxWeekCurrentRound = currentRound;
   let boxWeekFinalRewardClaimCount = finalRewardClaimCount;
 
@@ -86,14 +86,15 @@ const createSmartBoxScenario = ({
           boxWeekFinalRewardClaimCount < boxWeekCurrentRound - 1;
         if (!hasPreviousUnclaimedReward) {
           assert.equal(boxWeekProgress, 8000);
-          boxWeekProgress = 0;
+          if (claimAdvancesRound) boxWeekProgress = 0;
         }
-        boxWeekCompletedRounds += 1;
-        boxWeekFinalRewardClaimCount += 1;
-        boxWeekCurrentRound = Math.max(
-          boxWeekCurrentRound,
-          boxWeekFinalRewardClaimCount + 1,
-        );
+        if (claimAdvancesRound) {
+          boxWeekFinalRewardClaimCount += 1;
+          boxWeekCurrentRound = Math.max(
+            boxWeekCurrentRound,
+            boxWeekFinalRewardClaimCount + 1,
+          );
+        }
       }
 
       return {};
@@ -129,6 +130,7 @@ const createSmartBoxScenario = ({
       createTasksItem(deps).batchSmartBoxWeekly({
         smartBoxTypes: selectedTypes,
         smartBoxGroupCount: groupCount,
+        smartBoxActionDelayMs: 0,
       }),
     commands,
     logs,
@@ -140,14 +142,14 @@ const createSmartBoxScenario = ({
 const countCommands = (commands, command) =>
   commands.filter((item) => item.cmd === command).length;
 
-test("起始达到4000分后，按累计开箱分数完成8000分", async () => {
+test("起始达到剩余分数一半的门槛后，直接开到8000分", async () => {
   const scenario = createSmartBoxScenario({ inventory: { 2004: 160 } });
 
   await scenario.run();
 
-  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 2);
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 0);
   assert.equal(
-    scenario.logs.some((entry) => entry.message.includes("服务器进度7500/8000")),
+    scenario.logs.some((entry) => entry.message.includes("服务器进度8000/8000")),
     true,
   );
   assert.equal(countCommands(scenario.commands, "activity_get"), 3);
@@ -160,24 +162,18 @@ test("起始达到4000分后，按累计开箱分数完成8000分", async () => 
   assert.equal(scenario.getRoleInfo().role.items[2004].quantity, 0);
 });
 
-test("领取奖励后积分低于4000时，继续补开直到凑够8000分", async () => {
+test("库存不足时先开完，再领取积分和邮件继续开到8000分", async () => {
   const scenario = createSmartBoxScenario({
     inventory: { 2003: 225 },
-    // 每轮领取后分别得到144、255、396个黄金宝箱：
-    // 4500 -> 2980 -> 5280 -> 8000。
-    claimRewards: [144, 255, 396],
+    claimRewards: [144, 255],
   });
 
   await scenario.run();
 
-  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 3);
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 2);
   assert.equal(
-    scenario.logs.some((entry) => entry.message.includes("选中宝箱积分2980")),
+    scenario.logs.some((entry) => entry.message.includes("选中宝箱积分2880")),
     true,
-  );
-  assert.equal(
-    scenario.logs.some((entry) => entry.message.includes("选中宝箱积分不超过4000")),
-    false,
   );
   assert.equal(
     scenario.logs.some((entry) => entry.message.includes("完成1/1组")),
@@ -189,20 +185,37 @@ test("领取奖励后积分低于4000时，继续补开直到凑够8000分", asy
 test("领取后库存没有增加时，停止任务避免重复领取", async () => {
   const scenario = createSmartBoxScenario({
     inventory: { 2003: 225 },
-    claimRewards: [220],
+    claimRewards: [],
   });
 
   await scenario.run();
 
   assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 1);
   assert.equal(
-    scenario.logs.some((entry) => entry.message.includes("库存没有增加")),
+    scenario.logs.some((entry) => entry.message.includes("库存及活动进度均未增加")),
     true,
   );
   assert.equal(scenario.logs.some((entry) => entry.message.includes("完成0/1组")), true);
 });
 
-test("起始积分不足4000分时，不开始开箱和领取奖励", async () => {
+test("大奖接口返回但轮次未更新时判定失败", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2004: 160 },
+    claimAdvancesRound: false,
+  });
+
+  await scenario.run();
+
+  assert.equal(scenario.tokenStatus.value["token-1"], "failed");
+  assert.equal(
+    scenario.logs.some((entry) =>
+      entry.message.includes("服务端轮次未更新"),
+    ),
+    true,
+  );
+});
+
+test("起始积分不足剩余分数一半时，不开始开箱和领取奖励", async () => {
   const scenario = createSmartBoxScenario({
     inventory: { 2003: 199 },
   });
@@ -212,7 +225,7 @@ test("起始积分不足4000分时，不开始开箱和领取奖励", async () =
   assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
   assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 0);
   assert.equal(
-    scenario.logs.some((entry) => entry.message.includes("需要4000分，当前选中宝箱仅3980分")),
+    scenario.logs.some((entry) => entry.message.includes("启动门槛为4000分，当前可用宝箱积分仅3980分")),
     true,
   );
   assert.equal(scenario.logs.some((entry) => entry.message.includes("完成0/1组")), true);
@@ -283,7 +296,7 @@ test("当前进度7500时只补开500分", async () => {
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
 });
 
-test("当前进度8000时不再开箱并直接领取本轮万能红", async () => {
+test("当前进度8000时不再开箱并领取当前轮奖励", async () => {
   const scenario = createSmartBoxScenario({
     inventory: { 2003: 0 },
     currentProgress: 8000,
@@ -297,9 +310,41 @@ test("当前进度8000时不再开箱并直接领取本轮万能红", async () =
     (item) => item.cmd === "activity_claimweekactreward",
   );
   assert.deepEqual(rewardCommand.params, {
-    selectRewardsMap: { 0: 1 },
+    selectRewardsMap: new Map([[0, 1]]),
     typ: 2,
   });
+});
+
+test("不足10个宝箱时按现存数量开启", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2002: 7 },
+    currentProgress: 7930,
+  });
+
+  await scenario.run();
+
+  const openingCommands = scenario.commands.filter(
+    (item) => item.cmd === "item_openbox",
+  );
+  assert.deepEqual(openingCommands.map((item) => item.params.number), [7]);
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
+});
+
+test("当前进度3000时启动门槛为2500分", async () => {
+  const belowThreshold = createSmartBoxScenario({
+    inventory: { 2003: 124 },
+    currentProgress: 3000,
+  });
+  await belowThreshold.run();
+  assert.equal(countCommands(belowThreshold.commands, "item_openbox"), 0);
+
+  const reachesThreshold = createSmartBoxScenario({
+    inventory: { 2003: 125 },
+    currentProgress: 3000,
+    claimRewards: [250],
+  });
+  await reachesThreshold.run();
+  assert.equal(countCommands(reachesThreshold.commands, "item_openbox") > 0, true);
 });
 
 test("本周已完成三轮时即使配置四轮也只执行最后一轮", async () => {
