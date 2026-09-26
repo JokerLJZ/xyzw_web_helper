@@ -1,6 +1,6 @@
 /**
  * 挂机、答题、签到类任务
- * 包含: claimHangUpRewards, claimHangUpRewardsFiveTimes, batchAddHangUpTime, batchStudy, batchclubsign
+ * 包含: claimHangUpRewards, batchUpgradeHangUpAndClaimOrderRewards, claimHangUpRewardsFiveTimes, batchAddHangUpTime, batchStudy, batchclubsign
  */
 
 import {
@@ -146,11 +146,73 @@ export function createTasksHangUp(deps) {
     } catch (error) {
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `${tokenName} 整数关卡挂机奖励检查或领取失败，继续领取普通挂机收益：${error.message || error}`,
+        message: `${tokenName} 整数关卡挂机奖励检查或领取失败：${error.message || error}`,
         type: "warning",
       });
       return null;
     }
+  };
+
+  /**
+   * 小号任务：使用知识币升级挂机收益，并检查、领取整数关卡挂机奖励。
+   */
+  const batchUpgradeHangUpAndClaimOrderRewards = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始挂机升级及整数关卡奖励任务: ${tokenName} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+        await upgradeHangUpBeforeClaim(tokenId, tokenName);
+        if (!shouldStop.value) {
+          await claimHangUpOrderRewards(tokenId, tokenName);
+        }
+        tokenStatus.value[tokenId] = shouldStop.value
+          ? "stopped"
+          : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 挂机升级及整数关卡奖励任务完成 ===`,
+          type: "success",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 挂机升级及整数关卡奖励任务失败: ${error.message || error}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("挂机升级及整数关卡奖励任务结束");
   };
 
   /**
@@ -181,19 +243,6 @@ export function createTasksHangUp(deps) {
         });
 
         await ensureConnection(tokenId);
-
-        try {
-          await upgradeHangUpBeforeClaim(tokenId, token.name);
-        } catch (error) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 挂机升级检查失败，继续领取奖励：${error.message || error}`,
-            type: "warning",
-          });
-        }
-
-        await claimHangUpOrderRewards(tokenId, token.name);
-        await sleep(500);
 
         // 1. Claim reward
         addLog({
@@ -273,19 +322,6 @@ export function createTasksHangUp(deps) {
         });
 
         await ensureConnection(tokenId);
-
-        try {
-          await upgradeHangUpBeforeClaim(tokenId, tokenName);
-        } catch (error) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 挂机升级检查失败，继续领取奖励：${error.message || error}`,
-            type: "warning",
-          });
-        }
-
-        await claimHangUpOrderRewards(tokenId, tokenName);
-        await sleep(500);
 
         for (let i = 0; i < 5; i++) {
           if (shouldStop.value) break;
@@ -757,6 +793,7 @@ export function createTasksHangUp(deps) {
 
   return {
     claimHangUpRewards,
+    batchUpgradeHangUpAndClaimOrderRewards,
     claimHangUpRewardsFiveTimes,
     batchAddHangUpTime,
     batchStudy,

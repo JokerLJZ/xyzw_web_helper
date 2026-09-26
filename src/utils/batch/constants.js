@@ -87,6 +87,10 @@ export const availableTasks = [
   { label: "主线关卡信息获取", value: "batchPushMainLevelInfo" },
   { label: "小号前期推图阵容", value: "batchAdjustEarlyMainLevelFormation" },
   { label: "小号推图默认阵容调整", value: "batchAdjustMainLevelFormation" },
+  {
+    label: "挂机升级并领整数关卡奖励",
+    value: "batchUpgradeHangUpAndClaimOrderRewards",
+  },
   { label: "一键玄武赐福", value: "batchXuanwuBlessing" },
   {
     label: "玄武活动兑换宠物饼干",

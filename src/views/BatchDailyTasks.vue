@@ -671,6 +671,14 @@
               <n-space>
                 <n-button
                   size="small"
+                  @click="batchUpgradeHangUpAndClaimOrderRewards"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="使用知识币升级挂机收益，并检查、领取整数关卡挂机奖励"
+                >
+                  挂机升级及整数奖励
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchJoinLegion"
                   :disabled="isRunning || selectedTokens.length === 0"
                   title="俱乐部号请在任务设置中填写"
@@ -4719,6 +4727,7 @@ const taskGroupDefinitions = [
     name: "small-account",
     label: "小号任务",
     tasks: [
+      "batchUpgradeHangUpAndClaimOrderRewards",
       "batchJoinLegion",
       "batchUpgradeCrystal",
       "batchReplaceBestFishArtifact",
@@ -7642,6 +7651,7 @@ const createTaskDeps = () => ({
 const tasksHangUp = createTasksHangUp(createTaskDeps());
 const {
   claimHangUpRewards,
+  batchUpgradeHangUpAndClaimOrderRewards,
   batchAddHangUpTime,
   batchStudy,
   batchclubsign,

@@ -21,10 +21,6 @@ import {
   planDailyGenieRewards,
 } from "@/utils/dailyFeatureEligibility.js";
 import {
-  claimAvailableHangUpOrderRewards,
-  formatHangUpOrderRewards,
-} from "@/utils/hangUpOrderRewards.js";
-import {
   extractRolePatch,
   mergeRoleSnapshot,
 } from "@/utils/roleSnapshot.js";
@@ -207,37 +203,6 @@ export class DailyTaskRunner {
   }
 
   async claimHangUpRewardsFiveTimes(tokenId) {
-    await this.upgradeHangUpBeforeClaim(tokenId);
-    try {
-      const orderReward = await claimAvailableHangUpOrderRewards(
-        this.tokenStore,
-        tokenId,
-        8000,
-        { role: this.roleSnapshots.get(tokenId) },
-      );
-      if (orderReward.response) {
-        const rolePatch = extractRolePatch(orderReward.response);
-        const snapshot = this.roleSnapshots.get(tokenId);
-        if (snapshot && rolePatch) mergeRoleSnapshot(snapshot, rolePatch);
-      }
-      if (orderReward.claimed) {
-        const rewardText = formatHangUpOrderRewards(orderReward.rewards);
-        this.log(
-          `整数关卡挂机奖励领取完成：第${orderReward.before.lastClaimedOrder + 1}-${orderReward.before.activeOrder}档${rewardText ? `，${rewardText}` : ""}`,
-          "success",
-        );
-      } else {
-        this.log(
-          `当前没有可领取的整数关卡挂机奖励（已领取至第${orderReward.before.lastClaimedOrder}档）`,
-        );
-      }
-    } catch (error) {
-      this.log(
-        `整数关卡挂机奖励检查或领取失败，继续领取普通挂机收益：${error.message || error}`,
-        "warning",
-      );
-    }
-
     for (let i = 0; i < 5; i++) {
       await this.executeGameCommand(
         tokenId,
@@ -250,75 +215,6 @@ export class DailyTaskRunner {
       if (i < 4) {
         await sleep(6000);
       }
-    }
-  }
-
-  async upgradeHangUpBeforeClaim(tokenId) {
-    const itemId = 1024;
-    try {
-      const roleInfo = { role: await this.getLatestRole(tokenId) };
-      const items =
-        roleInfo?.role?.items ||
-        roleInfo?.body?.role?.items ||
-        roleInfo?.items ||
-        {};
-      const item = Array.isArray(items)
-        ? items.find(
-            (entry) => Number(entry?.id ?? entry?.itemId) === itemId,
-          )
-        : (items[itemId] ?? items[String(itemId)]);
-      let remaining =
-        Number(item?.quantity ?? item?.num ?? item?.count ?? item ?? 0) || 0;
-      let used = 0;
-
-      if (remaining <= 0) {
-        this.log("当前没有可用知识币，跳过挂机升级");
-        return 0;
-      }
-
-      while (remaining > 0) {
-        const upgradeNum = remaining >= 50 ? 50 : remaining >= 10 ? 10 : 1;
-        let succeeded = false;
-        for (let attempt = 0; attempt <= 4; attempt += 1) {
-          try {
-            await this.tokenStore.sendMessageWithPromise(
-              tokenId,
-              "system_hangupupgrade",
-              { upgradeNum },
-              5000,
-            );
-            succeeded = true;
-            break;
-          } catch (error) {
-            const text = String(error?.message || error || "");
-            const rateLimited =
-              text.includes("200400") || text.includes("操作太快");
-            if (!rateLimited || attempt >= 4) {
-              this.log(
-                `当前无法继续挂机升级，已使用${used}个知识币：${text}`,
-                "warning",
-              );
-              return used;
-            }
-            await sleep(6000);
-          }
-        }
-        if (!succeeded) break;
-        remaining -= upgradeNum;
-        used += upgradeNum;
-        await sleep(1200);
-      }
-
-      if (used > 0) {
-        this.log(`挂机升级完成，共使用${used}个知识币`, "success");
-      }
-      return used;
-    } catch (error) {
-      this.log(
-        `挂机升级检查失败，继续领取挂机奖励：${error.message || error}`,
-        "warning",
-      );
-      return 0;
     }
   }
 
