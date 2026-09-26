@@ -373,6 +373,10 @@ export function registerDefaultCommands(reg) {
       quantity: 1,
     })
     .register("activity_claimsignreward")
+    .register("activity_claimtaskreward", {
+      activityId: 0,
+      missionId: 0,
+    })
     .register("activity_commonbuygoods")
     .register("legion_getpayloadtask")
     .register("legion_getpayloadkillrecord")
@@ -1226,7 +1230,10 @@ export class XyzwWebSocketClient {
       activity_lotteryresp: "activity_lottery",
       activity_claimlotterycumulativeresp: "activity_claimlotterycumulative",
       common_rewardresp: "activity_exchange",
-      activity_rewardresp: "activity_claimsignreward",
+      activity_rewardresp: [
+        "activity_claimtaskreward",
+        "activity_claimsignreward",
+      ],
       arena_getarearankresp: "arena_getarearank",
       // 功法相关响应映射
       legacy_getinforesp: "legacy_getinfo",

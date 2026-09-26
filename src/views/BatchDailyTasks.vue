@@ -462,6 +462,14 @@
                 >
                   一键玄武赐福
                 </n-button>
+                <n-button
+                  size="small"
+                  @click="batchClaimConsumptionRewards"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="先查询当前消耗活动，仅领取已达标且尚未领取的任务档位"
+                >
+                  领取消耗活动奖励
+                </n-button>
               </n-space>
               <n-space>
                 <n-popselect
@@ -4679,6 +4687,7 @@ const taskGroupDefinitions = [
       "skinChallenge",
       "batchClaimPeachTasks",
       "batchXuanwuBlessing",
+      "batchClaimConsumptionRewards",
     ],
   },
   {
@@ -7722,7 +7731,11 @@ const confirmUpgradeLordTo6000 = () => {
 };
 
 const tasksDungeon = createTasksDungeon(createTaskDeps());
-const { batchmengjing, batchBuyDreamItems } = tasksDungeon;
+const {
+  batchmengjing,
+  batchBuyDreamItems,
+  batchClaimConsumptionRewards,
+} = tasksDungeon;
 
 const tasksArena = createTasksArena(createTaskDeps());
 const { batcharenafight, batchTopUpFish, batchTopUpGoldFish, batchTopUpArena } =

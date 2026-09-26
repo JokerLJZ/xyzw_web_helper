@@ -93,6 +93,10 @@ export const availableTasks = [
   },
   { label: "一键玄武赐福", value: "batchXuanwuBlessing" },
   {
+    label: "领取消耗活动奖励",
+    value: "batchClaimConsumptionRewards",
+  },
+  {
     label: "玄武活动兑换宠物饼干",
     value: "batchExchangeXuanwuPetCookies",
   },
