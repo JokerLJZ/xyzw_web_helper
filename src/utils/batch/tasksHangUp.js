@@ -139,7 +139,7 @@ export function createTasksHangUp(deps) {
       const rewardText = formatHangUpOrderRewards(result.rewards);
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `${tokenName} 整数关卡挂机奖励领取完成：第${result.before.lastClaimedOrder + 1}-${result.before.activeOrder}档${rewardText ? `，${rewardText}` : ""}`,
+        message: `${tokenName} 整数关卡挂机奖励领取完成：第${result.before.lastClaimedOrder + 1}-${result.after.lastClaimedOrder}档${rewardText ? `，${rewardText}` : ""}`,
         type: "success",
       });
       return result;

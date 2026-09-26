@@ -1254,28 +1254,9 @@ export function createTasksItem(deps) {
         }
         let gold = Math.max(0, Number(role.gold) || 0);
         const currentResearch = role.legionResearch || {};
-        let legionCoins = 0;
-        if (!stopReason) {
-          const legionResult = await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "legion_getinfo",
-            {},
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
-          const legionInfo =
-            legionResult?.info ||
-            legionResult?.body?.info ||
-            legionResult?.data?.info ||
-            legionResult?.data?.body?.info ||
-            {};
-          const member =
-            legionInfo.members?.[role.roleId] ??
-            legionInfo.members?.[String(role.roleId)];
-          legionCoins = Math.max(
-            0,
-            Number(member?.custom?.legion_coin_cnt) || 0,
-          );
-        }
+        // 俱乐部科技消耗的是角色背包中的军团币（物品 1014）。
+        // legion_getinfo 的成员 custom 数据不保证包含该字段，曾导致有币时仍被判定为 0。
+        let legionCoins = Math.max(0, getItemQuantity(roleInfo, 1014));
 
         for (const researchId of researchIds) {
           if (stopReason || shouldStop.value) {
