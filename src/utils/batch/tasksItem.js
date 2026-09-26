@@ -5736,7 +5736,21 @@ export function createTasksItem(deps) {
       }
     };
 
-    const getBoxWeekState = (activityResult) => {
+    const getBoxWeekClaimedRounds = (roleResult) => {
+      const role =
+        roleResult?.role ||
+        roleResult?.data?.role ||
+        roleResult?.body?.role ||
+        roleResult?._raw?.body?.role ||
+        roleResult?.rawData?.role ||
+        {};
+      return Math.max(
+        0,
+        Number(role?.statistics?.["week:act:cr:cnt:2"]) || 0,
+      );
+    };
+
+    const getBoxWeekState = (activityResult, claimedRoundsOverride = null) => {
       const activity =
         activityResult?.activity ||
         activityResult?.data?.activity ||
@@ -5775,28 +5789,35 @@ export function createTasksItem(deps) {
         totalRounds,
         Math.max(0, currentRound - 1),
       );
-      const pendingPreviousRewardCount = Math.max(
+      const earnedRounds = Math.min(
+        totalRounds,
+        Math.max(
+          completedByFinalReward,
+          previousRoundCount,
+          currentProgress >= finalRewardTarget ? currentRound : 0,
+        ),
+      );
+      const claimedRounds = Math.min(
+        totalRounds,
+        Math.max(
+          0,
+          claimedRoundsOverride === null
+            ? completedByFinalReward
+            : Number(claimedRoundsOverride) || 0,
+        ),
+      );
+      const pendingGrandRewardCount = Math.max(
         0,
-        previousRoundCount - completedByFinalReward,
+        earnedRounds - claimedRounds,
       );
       const hasCurrentGrandReward =
-        currentRound <= totalRounds &&
-        currentProgress >= finalRewardTarget &&
-        completedByFinalReward < currentRound;
-      const pendingThroughCurrentRound = hasCurrentGrandReward
-        ? Math.max(
-            0,
-            Math.min(totalRounds, currentRound) - completedByFinalReward,
-          )
-        : 0;
+        currentProgress >= finalRewardTarget && pendingGrandRewardCount > 0;
 
       return {
-        completedRounds: Math.min(totalRounds, completedByFinalReward),
+        completedRounds: claimedRounds,
+        earnedRounds,
         currentProgress,
-        pendingGrandRewardCount: Math.max(
-          pendingPreviousRewardCount,
-          pendingThroughCurrentRound,
-        ),
+        pendingGrandRewardCount,
         hasCurrentGrandReward,
         totalRounds,
       };
@@ -5938,7 +5959,7 @@ export function createTasksItem(deps) {
 
     const claimBoxGrandReward = async (tokenId, token, description) => {
       await waitForSmartBoxAction();
-      await runSmartBoxOperation(
+      const claimResult = await runSmartBoxOperation(
         token.name,
         "领取宝箱周自选大奖",
         () =>
@@ -5984,6 +6005,7 @@ export function createTasksItem(deps) {
           type: "info",
         });
       }
+      return claimResult;
     };
 
     const claimAndVerifyBoxGrandReward = async (
@@ -5993,14 +6015,39 @@ export function createTasksItem(deps) {
       previousState,
     ) => {
       const claimedBefore = previousState.completedRounds;
-      await claimBoxGrandReward(tokenId, token, description);
-      await waitForSmartBoxAction();
-      const activityResult = await fetchBoxActivity(tokenId, token.name);
-      const boxWeekState = getBoxWeekState(activityResult);
-      if (boxWeekState.completedRounds <= claimedBefore) {
-        throw new Error("宝箱周自选大奖请求已返回，但服务端轮次未更新");
+      const claimResult = await claimBoxGrandReward(
+        tokenId,
+        token,
+        description,
+      );
+      const responseClaimedRounds = getBoxWeekClaimedRounds(claimResult);
+      const maxVerificationAttempts = 5;
+      let activityResult;
+      let boxWeekState = previousState;
+
+      for (let attempt = 1; attempt <= maxVerificationAttempts; attempt += 1) {
+        await waitForSmartBoxAction();
+        const roleInfo =
+          attempt === 1 && responseClaimedRounds > claimedBefore
+            ? claimResult
+            : await fetchRoleInfo(tokenId, token.name);
+        const claimedRounds = getBoxWeekClaimedRounds(roleInfo);
+        activityResult = await fetchBoxActivity(tokenId, token.name);
+        boxWeekState = getBoxWeekState(activityResult, claimedRounds);
+        if (boxWeekState.completedRounds > claimedBefore) {
+          return { activityResult, boxWeekState };
+        }
+
+        if (attempt < maxVerificationAttempts) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 自选大奖已领取，服务器轮次状态尚未同步，等待后进行第${attempt + 1}/${maxVerificationAttempts}次核对`,
+            type: "info",
+          });
+        }
       }
-      return { activityResult, boxWeekState };
+
+      throw new Error("宝箱周自选大奖请求已返回，但服务器轮次状态持续未更新");
     };
 
     const taskPromises = selectedTokens.value.map(async (tokenId) => {
@@ -6027,7 +6074,11 @@ export function createTasksItem(deps) {
         await ensureConnection(tokenId);
 
         let activityResult = await fetchBoxActivity(tokenId, token.name);
-        let boxWeekState = getBoxWeekState(activityResult);
+        const initialRoleInfo = await fetchRoleInfo(tokenId, token.name, true);
+        let boxWeekState = getBoxWeekState(
+          activityResult,
+          getBoxWeekClaimedRounds(initialRoleInfo),
+        );
         let recoveredRewardCount = 0;
 
         while (
@@ -6094,7 +6145,10 @@ export function createTasksItem(deps) {
               token.name,
               true,
             );
-            boxWeekState = getBoxWeekState(activityResult);
+            boxWeekState = getBoxWeekState(
+              activityResult,
+              boxWeekState.completedRounds,
+            );
           }
 
           let currentProgress = boxWeekState.currentProgress;
@@ -6183,7 +6237,10 @@ export function createTasksItem(deps) {
               token.name,
               true,
             );
-            boxWeekState = getBoxWeekState(activityResult);
+            boxWeekState = getBoxWeekState(
+              activityResult,
+              boxWeekState.completedRounds,
+            );
             currentProgress = boxWeekState.currentProgress;
 
             addLog({
@@ -6216,7 +6273,10 @@ export function createTasksItem(deps) {
             await claimPointsAndMail(tokenId, token);
 
             activityResult = await fetchBoxActivity(tokenId, token.name);
-            boxWeekState = getBoxWeekState(activityResult);
+            boxWeekState = getBoxWeekState(
+              activityResult,
+              boxWeekState.completedRounds,
+            );
             const refreshedProgress = boxWeekState.currentProgress;
 
             addLog({

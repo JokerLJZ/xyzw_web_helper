@@ -10,11 +10,13 @@ const createSmartBoxScenario = ({
   selectedTypes = [2002, 2003, 2004],
   currentProgress = 0,
   completedRounds = 0,
+  earnedRounds = completedRounds,
   currentRound = completedRounds + 1,
   finalRewardClaimCount = completedRounds,
   claimAdvancesRound = true,
   autoAdvanceRoundAt8000 = false,
   rejectSmallOpenWhenStockAtLeast10 = false,
+  claimStateDelayQueries = 0,
 }) => {
   const tokenId = "token-1";
   const token = { id: tokenId, name: "测试账号" };
@@ -29,13 +31,34 @@ const createSmartBoxScenario = ({
   let rewardIndex = 0;
   let boxWeekProgress = currentProgress;
   let boxWeekCurrentRound = currentRound;
+  let boxWeekEarnedRoundCount = Math.max(
+    earnedRounds,
+    currentRound - 1,
+    currentProgress >= 8000 ? currentRound : 0,
+  );
   let boxWeekFinalRewardClaimCount = finalRewardClaimCount;
+  let pendingClaimQueries = 0;
+  let pendingClaimResetsProgress = false;
+
+  const applyClaimAdvance = () => {
+    if (pendingClaimResetsProgress) boxWeekProgress = 0;
+    boxWeekFinalRewardClaimCount += 1;
+    boxWeekCurrentRound = Math.max(
+      boxWeekCurrentRound,
+      boxWeekFinalRewardClaimCount + 1,
+    );
+    pendingClaimQueries = 0;
+    pendingClaimResetsProgress = false;
+  };
 
   const getRoleInfo = () => ({
     role: {
       items: Object.fromEntries(
         Array.from(items, ([itemId, quantity]) => [itemId, { quantity }]),
       ),
+      statistics: {
+        "week:act:cr:cnt:2": boxWeekFinalRewardClaimCount,
+      },
     },
   });
 
@@ -48,13 +71,17 @@ const createSmartBoxScenario = ({
       }
 
       if (cmd === "activity_get") {
+        if (pendingClaimQueries > 0) {
+          pendingClaimQueries -= 1;
+          if (pendingClaimQueries === 0) applyClaimAdvance();
+        }
         return {
           activity: {
             myTotalInfo: {
               2: {
                 num: boxWeekProgress,
                 rounds: boxWeekCurrentRound,
-                complete: { 4: boxWeekFinalRewardClaimCount },
+                complete: { 4: boxWeekEarnedRoundCount },
               },
             },
             activity: [{ id: 2, data: { rewards: Array(5).fill({}) } }],
@@ -83,6 +110,12 @@ const createSmartBoxScenario = ({
           8000,
           boxWeekProgress + params.number * points,
         );
+        if (nextProgress >= 8000) {
+          boxWeekEarnedRoundCount = Math.max(
+            boxWeekEarnedRoundCount,
+            boxWeekCurrentRound,
+          );
+        }
         if (autoAdvanceRoundAt8000 && nextProgress >= 8000) {
           boxWeekProgress = 0;
           boxWeekCurrentRound += 1;
@@ -97,19 +130,18 @@ const createSmartBoxScenario = ({
       }
 
       if (cmd === "activity_claimweekactreward") {
-        const hasPreviousUnclaimedReward =
-          boxWeekFinalRewardClaimCount < boxWeekCurrentRound - 1;
-        if (!hasPreviousUnclaimedReward) {
-          assert.equal(boxWeekProgress, 8000);
-          if (claimAdvancesRound) boxWeekProgress = 0;
-        }
+        const hasUnclaimedReward =
+          boxWeekFinalRewardClaimCount < boxWeekEarnedRoundCount;
+        assert.equal(hasUnclaimedReward, true);
         if (claimAdvancesRound) {
-          boxWeekFinalRewardClaimCount += 1;
-          boxWeekCurrentRound = Math.max(
-            boxWeekCurrentRound,
-            boxWeekFinalRewardClaimCount + 1,
-          );
+          pendingClaimResetsProgress = boxWeekProgress >= 8000;
+          if (claimStateDelayQueries > 0) {
+            pendingClaimQueries = claimStateDelayQueries;
+          } else {
+            applyClaimAdvance();
+          }
         }
+        return getRoleInfo();
       }
 
       return {};
@@ -223,9 +255,7 @@ test("大奖接口返回但轮次未更新时判定失败", async () => {
 
   assert.equal(scenario.tokenStatus.value["token-1"], "failed");
   assert.equal(
-    scenario.logs.some((entry) =>
-      entry.message.includes("服务端轮次未更新"),
-    ),
+    scenario.logs.some((entry) => entry.message.includes("轮次状态持续未更新")),
     true,
   );
 });
@@ -341,6 +371,32 @@ test("补足8000后服务端自动进入下一轮时立即领奖且不继续开�
   );
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
   assert.equal(scenario.getRoleInfo().role.items[2004].quantity, 550);
+});
+
+test("大奖已领取但服务器轮次延迟更新时只重查状态不重复领奖", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2002: 10 },
+    currentProgress: 7900,
+    completedRounds: 3,
+    currentRound: 4,
+    finalRewardClaimCount: 3,
+    claimStateDelayQueries: 2,
+  });
+
+  await scenario.run();
+
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
+  assert.equal(
+    scenario.logs.some((entry) =>
+      entry.message.includes("服务器轮次状态尚未同步"),
+    ),
+    true,
+  );
+  assert.equal(
+    scenario.logs.some((entry) => entry.message.includes("完成1/1组")),
+    true,
+  );
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
 });
 
 test("当前进度8000时不再开箱并领取当前轮奖励", async () => {
@@ -536,4 +592,26 @@ test("存在多轮历史漏领时不受本次执行轮数限制并全部补领",
     scenario.logs.some((entry) => entry.message.includes("已补领2轮自选大奖")),
     true,
   );
+});
+
+test("已完成四轮但只领取一轮时补领剩余三轮大奖", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2003: 0 },
+    groupCount: 1,
+    currentProgress: 0,
+    completedRounds: 1,
+    earnedRounds: 4,
+    currentRound: 4,
+    finalRewardClaimCount: 1,
+  });
+
+  await scenario.run();
+
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 3);
+  assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
+  assert.equal(
+    scenario.logs.some((entry) => entry.message.includes("已补领3轮自选大奖")),
+    true,
+  );
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
 });
