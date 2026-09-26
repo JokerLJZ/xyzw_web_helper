@@ -66,11 +66,32 @@ import {
   TrendingUp,
   Add,
   Cloud,
+  GameController,
 } from "@vicons/ionicons5";
+import useIndexedDB from "@/hooks/useIndexedDB";
+import { persistGameBin } from "@/utils/gameBin";
 
 const router = useRouter();
 const message = useMessage();
 const tokenStore = useTokenStore();
+const { getArrayBuffer } = useIndexedDB();
+
+const openGame = async () => {
+  const token = tokenStore.selectedToken;
+  if (!token) {
+    message.warning("请先选择一个Token");
+    return;
+  }
+
+  const binData = await getArrayBuffer(token.id);
+  if (!binData) {
+    message.error("未找到该Token的BIN数据");
+    return;
+  }
+
+  persistGameBin(token, binData);
+  router.push("/game");
+};
 
 // 响应式数据
 // const recentActivities = ref([]);
@@ -88,27 +109,34 @@ const currentDate = computed(() => {
 const quickActions = ref([
   {
     id: 1,
+    icon: GameController,
+    title: "打开游戏",
+    description: "使用当前Token直接进入游戏",
+    action: "open-game",
+  },
+  {
+    id: 2,
     icon: Cube,
     title: "游戏功能",
     description: "访问所有游戏功能模块",
     action: "game-features",
   },
   {
-    id: 2,
+    id: 3,
     icon: Add,
     title: "添加Token",
     description: "快速添加新的游戏Token",
     action: "add-token",
   },
   {
-    id: 3,
+    id: 4,
     icon: CheckmarkCircle,
     title: "批量任务",
     description: "批量执行任务",
     action: "batch-daily-tasks",
   },
   {
-    id: 4,
+    id: 5,
     icon: Cloud,
     title: "WebSocket测试",
     description: "测试WebSocket连接和游戏命令",
@@ -135,6 +163,9 @@ const handleManageTokens = () => {
 
 const handleQuickAction = (action) => {
   switch (action.action) {
+    case "open-game":
+      openGame();
+      break;
     case "game-features":
       router.push("/admin/game-features");
       break;

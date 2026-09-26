@@ -1,4 +1,29 @@
 import { useTokenStore } from "@/stores/tokenStore";
+import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
+import {
+  DREAM_PUSH_INTERVAL_MS,
+  isDreamEnabled,
+  runAutomaticDream,
+} from "@/utils/dreamTaskRunner.js";
+import { goldItemsConfig, merchantConfig } from "@/utils/dreamConstants";
+import {
+  BLACK_MARKET_MODES,
+  loadBlackMarketSettings,
+  runBlackMarketPurchase,
+} from "@/utils/blackMarket.js";
+import {
+  DREAM_MIN_MAIN_LEVEL,
+  GENIE_MIN_MAIN_LEVEL,
+  getGenieProgress,
+  getMainLevel,
+  isDreamMainLevelUnlocked,
+  isGenieMainLevelUnlocked,
+  planDailyGenieRewards,
+} from "@/utils/dailyFeatureEligibility.js";
+import {
+  extractRolePatch,
+  mergeRoleSnapshot,
+} from "@/utils/roleSnapshot.js";
 
 // 辅助函数
 const pickArenaTargetId = (targets) => {
@@ -43,9 +68,70 @@ const getTodayBossId = () => {
   return DAY_BOSS_MAP[dayOfWeek];
 };
 
+const isFreeGachaOpenDay = () => {
+  const dayOfWeek = new Date().getDay();
+  return dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 6;
+};
+
+const isMonday = () => {
+  return new Date().getDay() === 1;
+};
+
+const DIAMOND_BOX_ITEM_ID = 2005;
+const AUTO_DAILY_DIAMOND_BOX_COUNT = 10;
+
+const getRoleItemQuantity = (roleData, itemId) => {
+  const item = roleData?.items?.[itemId] || roleData?.items?.[String(itemId)];
+  const quantity = Number(item?.quantity ?? item?.count ?? item?.num ?? 0);
+  return Number.isFinite(quantity) ? Math.max(0, Math.trunc(quantity)) : 0;
+};
+
+const getDefaultDreamPurchaseList = () => {
+  const list = [];
+  for (const merchantId in goldItemsConfig) {
+    goldItemsConfig[merchantId].forEach((index) => {
+      list.push(`${merchantId}-${index}`);
+    });
+  }
+  return list;
+};
+
+const calculateMonthShouldBe = (target) => {
+  const now = new Date();
+  const daysInMonth = new Date(
+    now.getFullYear(),
+    now.getMonth() + 1,
+    0,
+  ).getDate();
+  const dayOfMonth = now.getDate();
+  const remainingDays = Math.max(0, daysInMonth - dayOfMonth);
+
+  if (remainingDays === 0) return target;
+  return Math.min(target, Math.ceil((dayOfMonth / daysInMonth) * target));
+};
+
+const isTimestampInCurrentWeek = (timestamp) => {
+  if (!timestamp) return false;
+
+  const date = new Date(timestamp);
+  const now = new Date();
+  const day = now.getDay() || 7;
+  const weekStart = new Date(now);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(now.getDate() - day + 1);
+
+  const nextWeekStart = new Date(weekStart);
+  nextWeekStart.setDate(weekStart.getDate() + 7);
+
+  return date >= weekStart && date < nextWeekStart;
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class DailyTaskRunner {
   constructor(tokenStore, delaySettings = null) {
     this.tokenStore = tokenStore;
+    this.roleSnapshots = new Map();
     this.delaySettings = delaySettings || {
       commandDelay: 500,
       taskDelay: 500
@@ -77,6 +163,9 @@ export class DailyTaskRunner {
         params,
         timeout,
       );
+      const rolePatch = extractRolePatch(result);
+      const snapshot = this.roleSnapshots.get(tokenId);
+      if (snapshot && rolePatch) mergeRoleSnapshot(snapshot, rolePatch);
       await new Promise((resolve) => setTimeout(resolve, this.delaySettings.commandDelay));
       if (description) this.log(`${description} - 成功`, "success");
       return result;
@@ -87,6 +176,45 @@ export class DailyTaskRunner {
         this.log(`[${tokenName}] ${description} - 失败: ${error.message}`, "error");
       }
       throw error;
+    }
+  }
+
+  async runBlackMarketTask(tokenId, mode = BLACK_MARKET_MODES.LEGACY) {
+    const blackMarketSettings = {
+      ...loadBlackMarketSettings(),
+      blackMarketPurchaseMode: mode,
+    };
+    return runBlackMarketPurchase({
+      settings: blackMarketSettings,
+      send: (cmd, params) =>
+        this.executeGameCommand(
+          tokenId,
+          cmd,
+          params,
+          cmd === "store_goodslist"
+            ? "读取黑市当前商品与折扣"
+            : cmd === "store_buy"
+              ? "购买符合折扣阈值的黑市商品"
+              : cmd === "store_refresh"
+                ? "刷新黑市商品"
+              : "执行原有黑市自动采购",
+        ),
+    });
+  }
+
+  async claimHangUpRewardsFiveTimes(tokenId) {
+    for (let i = 0; i < 5; i++) {
+      await this.executeGameCommand(
+        tokenId,
+        "system_claimhangupreward",
+        {},
+        `领取挂机奖励 ${i + 1}/5`,
+        5000,
+      );
+
+      if (i < 4) {
+        await sleep(6000);
+      }
     }
   }
 
@@ -149,6 +277,616 @@ export class DailyTaskRunner {
     }
   }
 
+  async runStudyTask(tokenId, roleData) {
+    const study = roleData.study;
+    const isCompleted =
+      study?.maxCorrectNum >= 10 &&
+      isTimestampInCurrentWeek((study.beginTime || 0) * 1000);
+
+    if (isCompleted) {
+      this.log("本周答题已完成，跳过", "success");
+      return;
+    }
+
+    const { preloadQuestions } = await import("@/utils/studyQuestionsFromJSON.js");
+    this.log("正在加载题库...");
+    await preloadQuestions();
+
+    this.tokenStore.gameData.studyStatus = {
+      isAnswering: false,
+      questionCount: 0,
+      answeredCount: 0,
+      status: "",
+      timestamp: null,
+    };
+
+    await this.executeGameCommand(
+      tokenId,
+      "study_startgame",
+      {},
+      "一键答题",
+      5000,
+    );
+
+    let maxWait = 90;
+    let lastStatus = "";
+
+    while (maxWait > 0) {
+      const status = this.tokenStore.gameData.studyStatus;
+
+      if (status.status !== lastStatus) {
+        lastStatus = status.status;
+        if (status.status === "answering") {
+          this.log("开始答题...");
+        } else if (status.status === "claiming_rewards") {
+          this.log("领取答题奖励...");
+        }
+      }
+
+      if (status.status === "completed") {
+        this.log("答题完成", "success");
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      maxWait--;
+    }
+
+    throw new Error("答题超时或未开始");
+  }
+
+  async runGenieSweepTask(tokenId) {
+    const role = await this.getLatestRole(tokenId, "读取灯神扫荡信息");
+    const mainLevel = getMainLevel(role);
+    if (!isGenieMainLevelUnlocked(role)) {
+      this.log(
+        `当前主线关卡${mainLevel}，未达到灯神开启条件${GENIE_MIN_MAIN_LEVEL}关，跳过一键灯神扫荡`,
+        "info",
+      );
+      return;
+    }
+    const genieData = role.genie || {};
+    const sweepTicketCount = role.items?.[1021]?.quantity || 0;
+
+    this.log(`当前扫荡券数量: ${sweepTicketCount}`);
+
+    if (sweepTicketCount <= 0) {
+      this.log("扫荡券不足，跳过一键灯神扫荡", "warning");
+      return;
+    }
+
+    let maxLayer = -1;
+    let bestGenieId = -1;
+
+    for (let genieId = 1; genieId <= 4; genieId++) {
+      if (genieData[genieId] !== undefined) {
+        const currentLayer = genieData[genieId] + 1;
+        if (currentLayer > maxLayer) {
+          maxLayer = currentLayer;
+          bestGenieId = genieId;
+        }
+      }
+    }
+
+    if (bestGenieId === -1) {
+      this.log("未找到可扫荡的灯神关卡", "warning");
+      return;
+    }
+
+    const genieNames = { 1: "魏国", 2: "蜀国", 3: "吴国", 4: "群雄" };
+    this.log(
+      `开始扫荡: ${genieNames[bestGenieId]}灯神 (第${maxLayer}层)`,
+    );
+
+    let remainingTickets = sweepTicketCount;
+
+    while (remainingTickets > 0) {
+      const sweepCnt = Math.min(remainingTickets, 20);
+      const res = await this.executeGameCommand(
+        tokenId,
+        "genie_sweep",
+        { genieId: bestGenieId, sweepCnt },
+        `灯神扫荡 ${sweepCnt} 次`,
+        5000,
+      );
+
+      const nextTicketCount = res?.role?.items?.[1021]?.quantity;
+      if (
+        typeof nextTicketCount === "number" &&
+        nextTicketCount < remainingTickets
+      ) {
+        remainingTickets = nextTicketCount;
+      } else {
+        remainingTickets -= sweepCnt;
+      }
+    }
+
+    this.log("一键灯神扫荡完成", "success");
+  }
+
+  async runDailyGenieRewards(tokenId) {
+    const role = await this.getLatestRole(tokenId, "读取灯神每日奖励");
+    const mainLevel = getMainLevel(role);
+    if (!isGenieMainLevelUnlocked(role)) {
+      this.log(
+        `当前主线关卡${mainLevel}，未达到灯神开启条件${GENIE_MIN_MAIN_LEVEL}关，跳过灯神每日奖励`,
+        "info",
+      );
+      return;
+    }
+
+    const genieNames = { 1: "魏国", 2: "蜀国", 3: "吴国", 4: "群雄" };
+    const { claimableGenieIds, remainingTicketClaims } =
+      planDailyGenieRewards(role);
+
+    if (claimableGenieIds.length === 0) {
+      this.log("四个阵营当前没有可领取的灯神免费扫荡奖励", "info");
+    } else {
+      this.log(
+        `检测到可领取灯神免费扫荡奖励：${claimableGenieIds.map((id) => genieNames[id]).join("、")}`,
+      );
+      for (const genieId of claimableGenieIds) {
+        await this.executeGameCommand(
+          tokenId,
+          "genie_sweep",
+          { genieId },
+          `${genieNames[genieId]}灯神免费扫荡`,
+        );
+      }
+    }
+
+    if (remainingTicketClaims === 0) {
+      this.log("今日免费扫荡券已全部领取", "info");
+      return;
+    }
+
+    for (let i = 0; i < remainingTicketClaims; i++) {
+      await this.executeGameCommand(
+        tokenId,
+        "genie_buysweep",
+        {},
+        `领取免费扫荡券 ${i + 1}/${remainingTicketClaims}`,
+      );
+    }
+  }
+
+  async runHolyBeastFragmentPurchase(tokenId) {
+    this.log("开始购买四圣碎片");
+
+    const result = await this.executeGameCommand(
+      tokenId,
+      "legion_storebuygoods",
+      { id: 6 },
+      "购买四圣碎片",
+      5000,
+    );
+
+    if (result?.error) {
+      if (result.error.includes("俱乐部商品购买数量超出上限")) {
+        this.log("本周已购买过四圣碎片，跳过", "info");
+        return;
+      }
+
+      if (result.error.includes("物品不存在")) {
+        this.log("盐锭不足或未加入军团，购买四圣碎片失败", "warning");
+        return;
+      }
+
+      throw new Error(result.error);
+    }
+
+    this.log("四圣碎片购买成功", "success");
+  }
+
+  async runWhiteJadePurchase(tokenId) {
+    this.log("开始购买白玉");
+
+    const result = await this.executeGameCommand(
+      tokenId,
+      "legion_storebuygoods",
+      { id: 5 },
+      "购买白玉",
+      5000,
+    );
+
+    if (result?.error) {
+      if (result.error.includes("俱乐部商品购买数量超出上限")) {
+        this.log("本周已购买过白玉，跳过", "info");
+        return;
+      }
+
+      if (result.error.includes("物品不存在")) {
+        this.log("盐锭不足或未加入军团，购买白玉失败", "warning");
+        return;
+      }
+
+      throw new Error(result.error);
+    }
+
+    this.log("白玉购买成功", "success");
+  }
+
+  async getLatestRole(tokenId, description = "获取最新角色信息") {
+    const snapshot = this.roleSnapshots.get(tokenId);
+    if (snapshot) return snapshot;
+
+    // 独立调用某个子功能时没有日常任务初始快照，允许在入口补查一次。
+    const roleInfoRes = await this.tokenStore.sendGetRoleInfo(tokenId);
+    const role = extractRolePatch(roleInfoRes) || {};
+    this.roleSnapshots.set(tokenId, role);
+    this.log(`${description}：已建立角色快照`);
+    return role;
+  }
+
+  async getActivityInfo(tokenId, description = "获取月度任务进度") {
+    const result = await this.executeGameCommand(
+      tokenId,
+      "activity_get",
+      {},
+      description,
+      10000,
+    );
+
+    return result?.activity || result?.body?.activity || result;
+  }
+
+  async runMonthlyFishTopUp(tokenId) {
+    this.log("开始月度钓鱼补齐");
+
+    const act = await this.getActivityInfo(tokenId);
+    if (!act) {
+      this.log("获取月度任务进度失败，跳过钓鱼补齐", "error");
+      return;
+    }
+
+    const fishNum = Number(act.myMonthInfo?.["2"]?.num || 0);
+    const shouldBe = calculateMonthShouldBe(FISH_TARGET);
+    let need = Math.max(0, shouldBe - fishNum);
+    this.log(`钓鱼月度进度: ${fishNum}/${FISH_TARGET}，今日应达: ${shouldBe}，需补齐: ${need}`);
+
+    if (need <= 0) {
+      this.log("钓鱼月度进度已达标，跳过", "success");
+      return;
+    }
+
+    let role = await this.getLatestRole(tokenId, "获取钓鱼库存信息");
+    const lastFreeTime = Number(
+      role?.statistics?.["artifact:normal:lottery:time"] || 0,
+    );
+
+    if (isTodayAvailable(lastFreeTime)) {
+      this.log("检测到今日免费钓鱼次数，开始消耗 3 次");
+      let freeUsed = 0;
+      for (let i = 0; i < 3 && freeUsed < need; i++) {
+        try {
+          await this.executeGameCommand(
+            tokenId,
+            "artifact_lottery",
+            { lotteryNumber: 1, newFree: true, type: 1 },
+            `免费钓鱼 ${i + 1}/3`,
+            8000,
+          );
+          freeUsed++;
+        } catch (error) {
+          this.log(`免费钓鱼失败: ${error.message}`, "warning");
+          break;
+        }
+      }
+    }
+
+    const updatedAct = await this.getActivityInfo(
+      tokenId,
+      "刷新钓鱼月度进度",
+    );
+    const updatedFishNum = Number(updatedAct?.myMonthInfo?.["2"]?.num || 0);
+    let remaining = Math.max(0, shouldBe - updatedFishNum);
+    this.log(`免费次数后钓鱼进度: ${updatedFishNum}/${FISH_TARGET}，还需: ${remaining}`);
+
+    if (remaining <= 0) {
+      this.log("钓鱼补齐完成", "success");
+      return;
+    }
+
+    role = await this.getLatestRole(tokenId, "刷新普通鱼竿库存");
+    const rodCount = role?.items?.[1011]?.quantity || 0;
+    this.log(`当前普通鱼竿: ${rodCount}`);
+
+    if (rodCount < remaining) {
+      this.log(`普通鱼竿不足 (${rodCount} < ${remaining})，将仅使用现有鱼竿`, "warning");
+      remaining = rodCount;
+    }
+
+    while (remaining > 0) {
+      const batch = Math.min(10, remaining);
+      await this.executeGameCommand(
+        tokenId,
+        "artifact_lottery",
+        { lotteryNumber: batch, newFree: true, type: 1 },
+        `付费钓鱼 ${batch} 次`,
+        12000,
+      );
+      remaining -= batch;
+    }
+
+    const finalAct = await this.getActivityInfo(
+      tokenId,
+      "确认钓鱼月度进度",
+    );
+    const finalFishNum = Number(finalAct?.myMonthInfo?.["2"]?.num || 0);
+    if (finalFishNum >= shouldBe || finalFishNum >= FISH_TARGET) {
+      this.log(`钓鱼补齐完成，最终进度: ${finalFishNum}/${FISH_TARGET}`, "success");
+    } else {
+      this.log(`钓鱼补齐已停止，最终进度: ${finalFishNum}/${FISH_TARGET}`, "warning");
+    }
+
+    try {
+      const currentRole = await this.getLatestRole(tokenId, "检查鱼竿累计奖励");
+      const points = currentRole?.statistics?.["artifact:point"] || 0;
+      const exchangeCount = Math.floor(points / 20);
+
+      if (exchangeCount > 0) {
+        this.log(`检测到鱼竿累计使用 ${points}，开始领取 ${exchangeCount} 次累计奖励`);
+        for (let i = 0; i < exchangeCount; i++) {
+          await this.executeGameCommand(
+            tokenId,
+            "artifact_exchange",
+            {},
+            `领取鱼竿累计奖励 ${i + 1}/${exchangeCount}`,
+            3000,
+          );
+        }
+        this.log("鱼竿累计奖励领取结束", "success");
+      }
+    } catch (error) {
+      this.log(`检查鱼竿累计奖励失败: ${error.message}`, "warning");
+    }
+  }
+
+  async runMonthlyArenaTopUp(tokenId, settings) {
+    const hour = new Date().getHours();
+    if (hour < 6 || hour >= 22) {
+      this.log("当前不在竞技场开放时间 (6:00-22:00)，跳过月度竞技场补齐", "warning");
+      return;
+    }
+
+    this.log("开始月度竞技场补齐");
+    await this.switchToFormationIfNeeded(
+      tokenId,
+      settings.arenaFormation,
+      "竞技场阵容",
+    );
+
+    const act = await this.getActivityInfo(tokenId);
+    if (!act) {
+      this.log("获取月度任务进度失败，跳过竞技场补齐", "error");
+      return;
+    }
+
+    const arenaNum = Number(act.myArenaInfo?.num || 0);
+    const shouldBe = calculateMonthShouldBe(ARENA_TARGET);
+    const need = Math.max(0, shouldBe - arenaNum);
+    this.log(`竞技场月度进度: ${arenaNum}/${ARENA_TARGET}，今日应达: ${shouldBe}，需补齐: ${need}`);
+
+    if (need <= 0) {
+      this.log("竞技场月度进度已达标，跳过", "success");
+      return;
+    }
+
+    let role = await this.getLatestRole(tokenId, "获取咸神门票库存");
+    let ticketsLeft = role?.items?.[1007]?.quantity || 0;
+    this.log(`当前咸神门票: ${ticketsLeft}`);
+
+    if (ticketsLeft <= 0) {
+      this.log("咸神门票不足，跳过竞技场补齐", "warning");
+      return;
+    }
+
+    if (ticketsLeft < need) {
+      this.log(`咸神门票不足 (${ticketsLeft} < ${need})，将仅使用现有门票`, "warning");
+    }
+
+    await this.executeGameCommand(
+      tokenId,
+      "arena_startarea",
+      {},
+      "开始竞技场",
+      6000,
+    );
+
+    let remaining = Math.min(need, ticketsLeft);
+    let safetyCounter = 0;
+    const safetyMaxFights = 100;
+    let round = 1;
+
+    while (remaining > 0 && ticketsLeft > 0 && safetyCounter < safetyMaxFights) {
+      const planFights = Math.min(Math.ceil(remaining / 2), ticketsLeft);
+      this.log(`竞技场补齐第${round}轮：计划战斗 ${planFights} 场，剩余门票 ${ticketsLeft}`);
+
+      for (let i = 0; i < planFights && safetyCounter < safetyMaxFights; i++) {
+        let targets;
+        try {
+          targets = await this.executeGameCommand(
+            tokenId,
+            "arena_getareatarget",
+            {},
+            `获取竞技场目标 ${i + 1}/${planFights}`,
+            8000,
+          );
+        } catch (error) {
+          this.log(`获取竞技场目标失败: ${error.message}`, "error");
+          break;
+        }
+
+        const targetId = pickArenaTargetId(targets);
+        if (!targetId) {
+          this.log(`未找到可用的竞技场目标: ${JSON.stringify(targets)}`, "warning");
+          break;
+        }
+
+        try {
+          await this.executeGameCommand(
+            tokenId,
+            "fight_startareaarena",
+            { targetId },
+            `竞技场补齐战斗 ${i + 1}/${planFights}`,
+            15000,
+          );
+          ticketsLeft--;
+        } catch (error) {
+          this.log(`竞技场对决失败: ${error.message}`, "error");
+        }
+
+        safetyCounter++;
+      }
+
+      const updatedAct = await this.getActivityInfo(
+        tokenId,
+        "刷新竞技场月度进度",
+      );
+      const updatedArenaNum = Number(updatedAct?.myArenaInfo?.num || 0);
+
+      role = await this.getLatestRole(tokenId, "读取咸神门票快照");
+      const latestTickets = role?.items?.[1007]?.quantity;
+      if (
+        typeof latestTickets === "number" &&
+        latestTickets >= 0 &&
+        latestTickets < ticketsLeft
+      ) {
+        this.log(`按服务器响应同步门票数量: ${latestTickets}`);
+        ticketsLeft = latestTickets;
+      }
+
+      remaining = Math.min(Math.max(0, shouldBe - updatedArenaNum), ticketsLeft);
+      this.log(`第${round}轮后竞技场进度: ${updatedArenaNum}/${ARENA_TARGET}，还需: ${remaining}`);
+      round++;
+    }
+
+    const finalAct = await this.getActivityInfo(
+      tokenId,
+      "确认竞技场月度进度",
+    );
+    const finalArenaNum = Number(finalAct?.myArenaInfo?.num || 0);
+    if (finalArenaNum >= shouldBe || finalArenaNum >= ARENA_TARGET) {
+      this.log(`竞技场补齐完成，最终进度: ${finalArenaNum}/${ARENA_TARGET}`, "success");
+    } else if (safetyCounter >= safetyMaxFights) {
+      this.log(`达到安全上限，竞技场补齐已停止，最终进度: ${finalArenaNum}/${ARENA_TARGET}`, "warning");
+    } else {
+      this.log(`竞技场补齐已停止，最终进度: ${finalArenaNum}/${ARENA_TARGET}`, "warning");
+    }
+  }
+
+  loadDreamPurchaseList() {
+    try {
+      const raw = localStorage.getItem("batchSettings");
+      const saved = raw ? JSON.parse(raw) : null;
+      return saved?.dreamPurchaseList || getDefaultDreamPurchaseList();
+    } catch (error) {
+      console.error("Failed to load dream purchase list:", error);
+      return getDefaultDreamPurchaseList();
+    }
+  }
+
+  async runDreamPurchaseForToken(tokenId, purchaseList) {
+    if (purchaseList.length === 0) {
+      this.log("未配置梦境购买清单，跳过购买", "warning");
+      return;
+    }
+
+    const role = await this.getLatestRole(tokenId, "读取梦境商店数据");
+
+    if (!role?.dungeon?.merchant) {
+      throw new Error("无法获取梦境商店数据");
+    }
+
+    const merchantData = role.dungeon.merchant;
+
+    let successCount = 0;
+    let failCount = 0;
+    const operations = [];
+
+    for (const itemKey of purchaseList) {
+      const [targetMerchantId, targetItemIndex] = itemKey
+        .split("-")
+        .map(Number);
+      const merchantItems = merchantData[targetMerchantId];
+
+      if (merchantItems) {
+        for (let pos = 0; pos < merchantItems.length; pos++) {
+          if (merchantItems[pos] === targetItemIndex) {
+            operations.push({
+              merchantId: targetMerchantId,
+              index: targetItemIndex,
+              pos,
+            });
+          }
+        }
+      }
+    }
+
+    operations.sort((a, b) => {
+      if (a.merchantId !== b.merchantId) return a.merchantId - b.merchantId;
+      return b.pos - a.pos;
+    });
+
+    for (const op of operations) {
+      if (this.callbacks?.shouldStop?.()) return;
+      try {
+        const response = await this.executeGameCommand(
+          tokenId,
+          "dungeon_buymerchant",
+          {
+            id: op.merchantId,
+            index: op.index,
+            pos: op.pos,
+          },
+          "购买梦境商品",
+          5000,
+        );
+
+        if (response?.reward) {
+          successCount++;
+          const merchantName =
+            merchantConfig[op.merchantId]?.name || `商人${op.merchantId}`;
+          const itemName =
+            merchantConfig[op.merchantId]?.items?.[op.index] ||
+            `商品${op.index}`;
+          this.log(`梦境购买成功: ${merchantName} - ${itemName}`, "success");
+        } else {
+          failCount++;
+        }
+      } catch (error) {
+        failCount++;
+      }
+    }
+
+    this.log(`梦境购买完成: 成功${successCount}, 失败${failCount}`, "success");
+  }
+
+  async runDreamTask(tokenId) {
+    const result = await runAutomaticDream({
+      purchase: () => this.runDreamPurchaseForToken(tokenId, this.loadDreamPurchaseList()),
+      enabled: isDreamEnabled(tokenId),
+      initialRole: this.roleSnapshots.get(tokenId) || null,
+      send: async (cmd, params) => {
+        const response = await this.tokenStore.sendMessageWithPromise(
+          tokenId,
+          cmd,
+          params,
+          15000,
+        );
+        const rolePatch = extractRolePatch(response);
+        const snapshot = this.roleSnapshots.get(tokenId);
+        if (snapshot && rolePatch) mergeRoleSnapshot(snapshot, rolePatch);
+        return response;
+      },
+      stopped: () => this.callbacks?.shouldStop?.() === true,
+      pause: () => sleep(DREAM_PUSH_INTERVAL_MS),
+      log: (text) => this.log(text),
+    });
+    this.log(`自动梦境：${result.reason}，当前层数 ${result.floor ?? "未知"}`);
+    return result;
+  }
+
   loadSettings(roleId) {
     try {
       const raw = localStorage.getItem(`daily-settings:${roleId}`);
@@ -157,12 +895,22 @@ export class DailyTaskRunner {
         bossFormation: 1,
         bossTimes: 2,
         claimBottle: true,
-        payRecruit: true,
-        openBox: true,
+        payRecruit: false,
+        openBox: false,
+        autoDiamondBoxPaidRecruit: false,
         arenaEnable: true,
         claimHangUp: true,
         claimEmail: true,
         blackMarketPurchase: true,
+        blackMarketDiscountPurchase: false,
+        holyBeastFragmentPurchase: false,
+        whiteJadePurchase: false,
+        freeGachaEnable: true,
+        studyEnable: true,
+        dreamEnable: true,
+        genieSweepEnable: false,
+        monthlyFishTopUpEnable: true,
+        monthlyArenaTopUpEnable: true,
       };
       return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
     } catch (error) {
@@ -186,10 +934,12 @@ export class DailyTaskRunner {
       throw error;
     }
 
-    const roleData = roleInfoResp?.role;
+    const roleData = extractRolePatch(roleInfoResp);
     if (!roleData) {
       throw new Error("角色数据不存在");
     }
+    // 日常任务期间仅在入口查询一次；后续命令返回的 role 增量持续合并到此快照。
+    this.roleSnapshots.set(tokenId, roleData);
 
     // 重新加载设置，使用正确的 roleId (虽然通常 tokenId 就是 roleId 或者一一对应，但为了保险)
     // 在这个项目中，tokenId 似乎就是 roleId 或者用于标识
@@ -218,10 +968,76 @@ export class DailyTaskRunner {
     const isTaskCompleted = (taskId) => completedTasks[taskId] === -1;
     const statistics = roleData.statistics ?? {};
     const statisticsTime = roleData.statisticsTime ?? {};
+    const diamondBoxCount = getRoleItemQuantity(roleData, DIAMOND_BOX_ITEM_ID);
+    const isRecruitTaskCompleted = isTaskCompleted(4);
+    const isOpenBoxTaskCompleted = isTaskCompleted(7);
+    const shouldRunDiamondBoxPaidRecruit =
+      settings.autoDiamondBoxPaidRecruit === true;
+    const canRunDiamondBoxPaidRecruit =
+      shouldRunDiamondBoxPaidRecruit &&
+      !isRecruitTaskCompleted &&
+      !isOpenBoxTaskCompleted &&
+      diamondBoxCount >= AUTO_DAILY_DIAMOND_BOX_COUNT;
 
     const taskList = [];
 
+    if (canRunDiamondBoxPaidRecruit) {
+      this.log(
+        `自动钻石宝箱与付费招募已触发：钻石宝箱 ${diamondBoxCount} 个`,
+        "info",
+      );
+      taskList.push(
+        {
+          name: "开启钻石宝箱",
+          execute: () =>
+            this.executeGameCommand(
+              tokenId,
+              "item_openbox",
+              {
+                itemId: DIAMOND_BOX_ITEM_ID,
+                number: AUTO_DAILY_DIAMOND_BOX_COUNT,
+              },
+              `开启钻石宝箱${AUTO_DAILY_DIAMOND_BOX_COUNT}个`,
+            ),
+        },
+        {
+          name: "付费招募",
+          execute: () =>
+            this.executeGameCommand(
+              tokenId,
+              "hero_recruit",
+              { recruitType: 1, recruitNumber: 1 },
+              "付费招募",
+            ),
+        },
+      );
+    } else if (shouldRunDiamondBoxPaidRecruit) {
+      const skipReasons = [];
+      if (isOpenBoxTaskCompleted) skipReasons.push("开宝箱日常已完成");
+      if (isRecruitTaskCompleted) skipReasons.push("招募日常已完成");
+      if (diamondBoxCount < AUTO_DAILY_DIAMOND_BOX_COUNT) {
+        skipReasons.push(
+          `钻石宝箱不足${AUTO_DAILY_DIAMOND_BOX_COUNT}个（当前${diamondBoxCount}个）`,
+        );
+      }
+      this.log(
+        `自动钻石宝箱与付费招募跳过：${skipReasons.join("，")}`,
+        "info",
+      );
+    }
+
     // 1. 基础任务
+    taskList.push({
+      name: "分享火把",
+      execute: () =>
+        this.executeGameCommand(
+          tokenId,
+          "system_mysharecallback",
+          { isSkipShareCard: false, type: 1 },
+          "分享火把",
+        ),
+    });
+
     if (!isTaskCompleted(2)) {
       taskList.push({
         name: "分享一次游戏",
@@ -255,7 +1071,7 @@ export class DailyTaskRunner {
           ),
       });
 
-      if (settings.payRecruit) {
+      if (settings.payRecruit && !canRunDiamondBoxPaidRecruit) {
         taskList.push({
           name: "付费招募",
           execute: () =>
@@ -286,14 +1102,8 @@ export class DailyTaskRunner {
 
     if (!isTaskCompleted(5) && settings.claimHangUp) {
       taskList.push({
-        name: "领取挂机奖励",
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "system_claimhangupreward",
-            {},
-            "领取挂机奖励",
-          ),
+        name: "领取5次挂机奖励",
+        execute: () => this.claimHangUpRewardsFiveTimes(tokenId),
       });
       for (let i = 0; i < 4; i++) {
         taskList.push({
@@ -309,7 +1119,11 @@ export class DailyTaskRunner {
       }
     }
 
-    if (!isTaskCompleted(7) && settings.openBox) {
+    if (
+      !isTaskCompleted(7) &&
+      settings.openBox &&
+      !canRunDiamondBoxPaidRecruit
+    ) {
       taskList.push({
         name: "开启木质宝箱",
         execute: () =>
@@ -489,7 +1303,6 @@ export class DailyTaskRunner {
       { name: "福利签到", cmd: "system_signinreward" },
       { name: "俱乐部", cmd: "legion_signin" },
       { name: "领取每日礼包", cmd: "discount_claimreward" },
-      { name: "领取每日免费奖励", cmd: "collection_claimfreereward" },
       { name: "领取免费礼包", cmd: "card_claimreward" },
       {
         name: "领取永久卡礼包",
@@ -518,6 +1331,28 @@ export class DailyTaskRunner {
       });
     });
 
+    if (settings.holyBeastFragmentPurchase === true) {
+      if (isMonday()) {
+        taskList.push({
+          name: "购买四圣碎片",
+          execute: () => this.runHolyBeastFragmentPurchase(tokenId),
+        });
+      } else {
+        this.log("四圣碎片购买跳过：仅周一执行", "info");
+      }
+    }
+
+    if (settings.whiteJadePurchase === true) {
+      if (isMonday()) {
+        taskList.push({
+          name: "购买白玉",
+          execute: () => this.runWhiteJadePurchase(tokenId),
+        });
+      } else {
+        this.log("白玉购买跳过：仅周一执行", "info");
+      }
+    }
+
     taskList.push({
       name: "开始领取珍宝阁礼包",
       execute: () =>
@@ -539,6 +1374,36 @@ export class DailyTaskRunner {
         ),
     });
 
+    if (
+      settings.freeGachaEnable !== false
+      && isFreeGachaOpenDay()
+      && isTodayAvailable(statistics["gacha:free"])
+    ) {
+      taskList.push({
+        name: "免费扭蛋",
+        execute: async () => {
+          await this.executeGameCommand(
+            tokenId,
+            "gacha_getinfo",
+            {},
+            "初始化扭蛋信息",
+          );
+          return this.executeGameCommand(
+            tokenId,
+            "gacha_drawreward",
+            { num: 1, isGroup: false },
+            "免费扭蛋",
+          );
+        },
+      });
+    } else if (
+      settings.freeGachaEnable !== false
+      && !isFreeGachaOpenDay()
+      && isTodayAvailable(statistics["gacha:free"])
+    ) {
+      this.log("免费扭蛋跳过：仅周二、周四、周六执行", "info");
+    }
+
     // 5. 免费活动
     if (isTodayAvailable(statistics["artifact:normal:lottery:time"])) {
       for (let i = 0; i < 3; i++) {
@@ -555,32 +1420,22 @@ export class DailyTaskRunner {
       }
     }
 
-    const kingdoms = ["魏国", "蜀国", "吴国", "群雄"];
-    for (let gid = 1; gid <= 4; gid++) {
-      if (isTodayAvailable(statisticsTime[`genie:daily:free:${gid}`])) {
-        taskList.push({
-          name: `${kingdoms[gid - 1]}灯神免费扫荡`,
-          execute: () =>
-            this.executeGameCommand(
-              tokenId,
-              "genie_sweep",
-              { genieId: gid },
-              `${kingdoms[gid - 1]}灯神免费扫荡`,
-            ),
-        });
-      }
+    if (isGenieMainLevelUnlocked(roleData)) {
+      taskList.push({
+        name: "灯神每日奖励检查",
+        execute: () => this.runDailyGenieRewards(tokenId),
+      });
+    } else {
+      this.log(
+        `当前主线关卡${getMainLevel(roleData)}，未达到灯神开启条件${GENIE_MIN_MAIN_LEVEL}关，跳过灯神任务`,
+        "info",
+      );
     }
 
-    for (let i = 0; i < 3; i++) {
+    if (settings.studyEnable !== false) {
       taskList.push({
-        name: `领取免费扫荡卷 ${i + 1}/3`,
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "genie_buysweep",
-            {},
-            `领取免费扫荡卷 ${i + 1}`,
-          ),
+        name: "一键答题",
+        execute: () => this.runStudyTask(tokenId, roleData),
       });
     }
 
@@ -589,39 +1444,43 @@ export class DailyTaskRunner {
       taskList.push({
         name: "黑市购买1次物品",
         execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "store_purchase",
-            { goodsId: 1 },
-            "黑市购买1次物品",
-          ),
+          this.runBlackMarketTask(tokenId, BLACK_MARKET_MODES.LEGACY),
+      });
+    }
+
+    if (settings.blackMarketDiscountPurchase === true) {
+      taskList.push({
+        name: "黑市按折扣直购",
+        execute: () =>
+          this.runBlackMarketTask(tokenId, BLACK_MARKET_MODES.DISCOUNT),
       });
     }
 
     // 咸王梦境
-    const mengyandayOfWeek = new Date().getDay();
     if (
-      (mengyandayOfWeek === 0) |
-      (mengyandayOfWeek === 1) |
-      (mengyandayOfWeek === 3) |
-      (mengyandayOfWeek === 4)
+      settings.dreamEnable !== false
+      && isDreamMainLevelUnlocked(roleData)
     ) {
-      const mjbattleTeam = { 0: 107 };
       taskList.push({
         name: "咸王梦境",
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "dungeon_selecthero",
-            { battleTeam: mjbattleTeam },
-            "咸王梦境",
-          ),
+        execute: () => this.runDreamTask(tokenId),
       });
+    } else if (
+      settings.dreamEnable !== false
+      && !isDreamMainLevelUnlocked(roleData)
+    ) {
+      this.log(
+        `当前主线关卡${getMainLevel(roleData)}，未达到梦境开启条件${DREAM_MIN_MAIN_LEVEL}关，跳过咸王梦境`,
+        "info",
+      );
     }
 
     // 深海灯神
+    const dayOfWeek = new Date().getDay();
     if (
-      mengyandayOfWeek === 1 &&
+      dayOfWeek === 1 &&
+      isGenieMainLevelUnlocked(roleData) &&
+      getGenieProgress(roleData, 5) !== null &&
       isTodayAvailable(statisticsTime[`genie:daily:free:5`])
     ) {
       taskList.push({
@@ -633,6 +1492,20 @@ export class DailyTaskRunner {
             { genieId: 5, sweepCnt: 1 },
             "深海灯神",
           ),
+      });
+    }
+
+    if (settings.monthlyFishTopUpEnable !== false) {
+      taskList.push({
+        name: "月度钓鱼补齐",
+        execute: () => this.runMonthlyFishTopUp(tokenId),
+      });
+    }
+
+    if (settings.monthlyArenaTopUpEnable !== false) {
+      taskList.push({
+        name: "月度竞技场补齐",
+        execute: () => this.runMonthlyArenaTopUp(tokenId, settings),
       });
     }
 
@@ -697,11 +1570,25 @@ export class DailyTaskRunner {
       },
     );
 
+    if (
+      settings.genieSweepEnable === true
+      && isGenieMainLevelUnlocked(roleData)
+    ) {
+      taskList.push({
+        name: "一键灯神扫荡",
+        execute: () => this.runGenieSweepTask(tokenId),
+      });
+    }
+
     // 执行
     const totalTasks = taskList.length;
     this.log(`共有 ${totalTasks} 个任务待执行`);
 
     for (let i = 0; i < taskList.length; i++) {
+      if (this.callbacks?.shouldStop?.()) {
+        this.log("日常任务已停止", "warning");
+        return;
+      }
       const task = taskList[i];
       try {
         await task.execute();

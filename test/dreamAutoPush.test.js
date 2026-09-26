@@ -1,0 +1,488 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { isDungeonOpen } from "../src/utils/dreamConstants.js";
+import {
+  DREAM_FINAL_FLOOR,
+  DREAM_PUSH_INTERVAL_MS,
+  DREAM_RATE_LIMIT_COOLDOWN_MS,
+  getDreamPeriod,
+  isDreamCompleted,
+  isDreamEnabled,
+  runDreamAutoPush,
+  runAutomaticDream,
+} from "../src/utils/dreamTaskRunner.js";
+import { createTasksDungeon } from "../src/utils/batch/tasksDungeon.js";
+
+const now = () => new Date("2026-09-23T10:00:00+08:00");
+function fixture({ fresh = false, win = true, kill = false, fail = null } = {}) {
+  const role = {
+    battleTeam: { 0: { heroId: 107 }, 1: { heroId: 106 } },
+    dungeon: {
+      beginTime: getDreamPeriod(now()), id: 41, currMonsterId: 2010,
+      activeHeroId: 107,
+      battleTeam: { 0: { heroId: 107, hp: 100, attack: 200 }, 1: { heroId: 106, hp: 100, attack: 100 } },
+    },
+  };
+  if (fresh) { role.dungeon.beginTime -= 7 * 86400; role.dungeon.battleTeam = {}; }
+  const calls = [];
+  const send = async (cmd, params) => {
+    calls.push({ cmd, params });
+    if (cmd === "role_getroleinfo") return { role: structuredClone(role) };
+    if (cmd === "dungeon_selecthero") {
+      role.dungeon.beginTime = getDreamPeriod(now());
+      role.dungeon.battleTeam = { 0: { heroId: 107, hp: 100, attack: 200 } };
+      return { role: { dungeon: { id: 41 } } };
+    }
+    assert.equal(cmd, "fight_startdungeon");
+    if (fail) throw new Error(fail);
+    if (win) role.dungeon.id++;
+    if (kill) {
+      const hero = Object.values(role.dungeon.battleTeam).find((h) => h.heroId === params.heroId);
+      hero.hp = 0;
+    }
+    // 实际抓包为增量响应：battleTeam 只有 energy，不含 heroId/hp。
+    return { isWin: win, role: { dungeon: { id: role.dungeon.id, battleTeam: { 0: { energy: 100 } } } } };
+  };
+  return { role, calls, send, now, pause: async () => {} };
+}
+
+test("梦境开关按Token独立读取，关闭时完全不请求接口", async () => {
+  const storage = { getItem: (key) => key === "daily-settings:off" ? '{"dreamEnable":false}' : null };
+  assert.equal(isDreamEnabled("off", storage), false);
+  assert.equal(isDreamEnabled("on", storage), true);
+  const result = await runDreamAutoPush({ enabled: false, send: () => assert.fail("关闭时不能发请求") });
+  assert.equal(result.status, "skipped");
+});
+
+test("梦境使用北京时间日/一/三/四及正确的本期开始时间", async () => {
+  for (let day = 20; day <= 26; day++) {
+    const date = new Date(`2026-09-${day}T10:00:00+08:00`);
+    assert.equal(isDungeonOpen(date), [20, 21, 23, 24].includes(day));
+  }
+  const midnight = new Date("2026-09-22T16:00:00Z");
+  assert.equal(isDungeonOpen(midnight), true);
+  assert.equal(getDreamPeriod(midnight), midnight.getTime() / 1000);
+  assert.equal(getDreamPeriod(new Date("2026-09-24T13:00:00+08:00")), getDreamPeriod(now()));
+  const result = await runDreamAutoPush({ now: () => new Date("2026-09-25T10:00:00+08:00"), send: () => assert.fail("关闭日不能发请求") });
+  assert.equal(result.status, "skipped");
+});
+
+test("新期梦境只选择吕布并逐层推进", async () => {
+  const f = fixture({ fresh: true });
+  const result = await runDreamAutoPush({ ...f, maxBattles: 3 });
+  assert.equal(result.initialFloor, 41);
+  assert.equal(result.floor, 44);
+  assert.equal(result.battles, 3);
+  assert.deepEqual(f.calls.find((c) => c.cmd === "dungeon_selecthero").params, { battleTeam: { 0: 107 } });
+  assert.deepEqual(f.calls.filter((c) => c.cmd === "fight_startdungeon").map((c) => c.params.heroId), [107, 107, 107]);
+});
+
+test("本期已选阵容不会被覆盖，增量战报不丢失英雄身份", async () => {
+  const f = fixture();
+  const result = await runDreamAutoPush({ ...f, maxBattles: 2 });
+  assert.equal(result.floor, 43);
+  assert.equal(f.calls.some((c) => c.cmd === "dungeon_selecthero"), false);
+});
+
+test("日常任务传入初始角色快照后梦境不重复执行入口查询", async () => {
+  const f = fixture();
+  await runDreamAutoPush({
+    ...f,
+    initialRole: structuredClone(f.role),
+    maxBattles: 1,
+  });
+  assert.equal(
+    f.calls.filter((call) => call.cmd === "role_getroleinfo").length,
+    1,
+    "只保留战斗后的必要状态核对",
+  );
+});
+
+test("已经超过195层时仍继续使用吕布推层，再自动采购", async () => {
+  const f = fixture();
+  f.role.dungeon.id = 196;
+  let purchased = 0;
+  const result = await runAutomaticDream({
+    ...f,
+    maxBattles: 2,
+    purchase: async () => {
+      purchased++;
+    },
+  });
+  assert.equal(result.floor, 198);
+  assert.equal(result.battles, 2);
+  assert.equal(purchased, 1);
+  assert.equal(
+    f.calls.filter((c) => c.cmd === "fight_startdungeon").length,
+    2,
+  );
+});
+
+test("195层可连续向后推层，采购严格晚于全部战斗", async () => {
+  const f = fixture();
+  f.role.dungeon.id = 195;
+  const result = await runAutomaticDream({
+    ...f,
+    maxBattles: 3,
+    purchase: async () => {
+      assert.equal(f.role.dungeon.id, 198);
+      f.calls.push({ cmd: "purchase" });
+    },
+  });
+  assert.equal(result.battles, 3);
+  assert.equal(
+    f.calls.filter((c) => c.cmd === "fight_startdungeon").length,
+    3,
+  );
+  assert.equal(f.calls.at(-1).cmd, "purchase");
+});
+
+test("200关通关后层数字段消失时按已通关处理并继续采购", async () => {
+  const f = fixture();
+  delete f.role.dungeon.id;
+  f.role.dungeon.merchant = { 1: [5] };
+  let purchased = 0;
+
+  assert.equal(
+    isDreamCompleted(f.role.dungeon, getDreamPeriod(now())),
+    true,
+  );
+  const result = await runAutomaticDream({
+    ...f,
+    purchase: async () => {
+      purchased++;
+    },
+  });
+
+  assert.equal(result.floor, DREAM_FINAL_FLOOR);
+  assert.equal(result.battles, 0);
+  assert.match(result.reason, /已通关/);
+  assert.equal(purchased, 1);
+  assert.equal(
+    f.calls.some((call) => call.cmd === "fight_startdungeon"),
+    false,
+  );
+});
+
+test("最后一战通关导致层数字段消失时结束推层并继续采购", async () => {
+  const f = fixture();
+  f.role.dungeon.id = 199;
+  f.role.dungeon.merchant = { 1: [5] };
+  const send = async (cmd, params) => {
+    const response = await f.send(cmd, params);
+    if (cmd === "fight_startdungeon") delete f.role.dungeon.id;
+    return response;
+  };
+  let purchased = 0;
+
+  const result = await runAutomaticDream({
+    ...f,
+    send,
+    purchase: async () => {
+      purchased++;
+    },
+  });
+
+  assert.equal(result.floor, DREAM_FINAL_FLOOR);
+  assert.equal(result.battles, 1);
+  assert.match(result.reason, /已通关/);
+  assert.equal(purchased, 1);
+});
+
+test("超过195层且主线不足4000关时仍执行梦境采购", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: now() });
+  const calls = [];
+  const role = {
+    levelId: 3999,
+    dungeon: {
+      beginTime: getDreamPeriod(now()),
+      id: 196,
+      merchant: { 1: [5] },
+      activeHeroId: 106,
+      battleTeam: { 0: { heroId: 106, hp: 100, attack: 100 } },
+    },
+  };
+  const deps = {
+    selectedTokens: { value: ["low-level"] },
+    tokens: { value: [{ id: "low-level", name: "低关卡账号" }] },
+    tokenStatus: { value: {} },
+    isRunning: { value: false },
+    shouldStop: { value: false },
+    currentRunningTokenId: { value: null },
+    batchSettings: {
+      dreamPurchaseList: ["1-5"],
+      commandDelay: 0,
+      maxActive: 2,
+    },
+    tokenStore: {
+      getWebSocketStatus: () => "disconnected",
+      sendMessageWithPromise: async (_tokenId, cmd, params) => {
+        calls.push({ cmd, params });
+        if (cmd === "role_getroleinfo") return { role: structuredClone(role) };
+        if (cmd === "dungeon_buymerchant") return { reward: [{ itemId: 1 }] };
+        assert.fail(`不应发送命令 ${cmd}`);
+      },
+      closeWebSocketConnection: () => {},
+    },
+    ensureConnection: async () => {},
+    releaseConnectionSlot: () => {},
+    connectionQueue: { active: 0 },
+    addLog: () => {},
+    message: { success: () => {}, info: () => {}, warning: () => {} },
+  };
+
+  await createTasksDungeon(deps).batchmengjing();
+
+  assert.deepEqual(
+    calls.filter((call) => call.cmd === "dungeon_buymerchant"),
+    [{ cmd: "dungeon_buymerchant", params: { id: 1, index: 5, pos: 0 } }],
+  );
+  assert.equal(deps.tokenStatus.value["low-level"], "completed");
+});
+
+test("自动梦境推层的相邻挑战固定间隔3秒", async () => {
+  assert.equal(DREAM_PUSH_INTERVAL_MS, 3000);
+  const f = fixture();
+  let pauses = 0;
+  const result = await runDreamAutoPush({
+    ...f,
+    maxBattles: 3,
+    pause: async () => {
+      pauses++;
+    },
+  });
+  assert.equal(result.battles, 3);
+  assert.equal(pauses, 2);
+});
+
+test("梦境触发200400时冷却核对状态并只重试当前层一次", async () => {
+  assert.equal(DREAM_RATE_LIMIT_COOLDOWN_MS, 6000);
+  const f = fixture();
+  let fightCalls = 0;
+  let cooldowns = 0;
+  const send = async (cmd, params) => {
+    if (cmd === "fight_startdungeon" && fightCalls++ === 0) {
+      f.calls.push({ cmd, params });
+      throw new Error("服务器错误: 200400 - 操作太快，请稍后再试");
+    }
+    return f.send(cmd, params);
+  };
+
+  const result = await runDreamAutoPush({
+    ...f,
+    send,
+    maxBattles: 2,
+    rateLimitPause: async () => {
+      cooldowns++;
+    },
+  });
+
+  assert.equal(result.floor, 42);
+  assert.equal(result.battles, 2);
+  assert.equal(fightCalls, 2);
+  assert.equal(cooldowns, 1);
+});
+
+test("战斗成功后的状态查询触发200400时冷却重查而不中断任务", async () => {
+  const f = fixture();
+  let roleQueries = 0;
+  let cooldowns = 0;
+  const send = async (cmd, params) => {
+    if (cmd === "role_getroleinfo" && roleQueries++ === 1) {
+      f.calls.push({ cmd, params });
+      throw new Error("服务器错误: 200400 - 操作太快，请稍后再试");
+    }
+    return f.send(cmd, params);
+  };
+
+  const result = await runDreamAutoPush({
+    ...f,
+    send,
+    maxBattles: 1,
+    rateLimitPause: async () => {
+      cooldowns++;
+    },
+  });
+
+  assert.equal(result.floor, 42);
+  assert.equal(result.battles, 1);
+  assert.equal(roleQueries, 3);
+  assert.equal(cooldowns, 1);
+});
+
+test("战斗后的状态查询持续限频时仍转入采购", async () => {
+  const f = fixture();
+  let roleQueries = 0;
+  let purchased = 0;
+  const send = async (cmd, params) => {
+    if (cmd === "role_getroleinfo" && roleQueries++ > 0) {
+      f.calls.push({ cmd, params });
+      throw new Error("服务器错误: 200400 - 操作太快，请稍后再试");
+    }
+    return f.send(cmd, params);
+  };
+
+  const result = await runAutomaticDream({
+    ...f,
+    send,
+    maxBattles: 1,
+    rateLimitPause: async () => {},
+    purchase: async () => {
+      purchased++;
+    },
+  });
+
+  assert.match(result.reason, /持续限频/);
+  assert.equal(result.battles, 1);
+  assert.equal(roleQueries, 3);
+  assert.equal(purchased, 1);
+});
+
+test("梦境限频重试仍失败时停止推层并继续采购", async () => {
+  const f = fixture();
+  let purchased = 0;
+  let fightCalls = 0;
+  const send = async (cmd, params) => {
+    if (cmd === "fight_startdungeon") {
+      fightCalls++;
+      f.calls.push({ cmd, params });
+      throw new Error("服务器错误: 200400 - 操作太快，请稍后再试");
+    }
+    return f.send(cmd, params);
+  };
+
+  const result = await runAutomaticDream({
+    ...f,
+    send,
+    rateLimitPause: async () => {},
+    purchase: async () => {
+      purchased++;
+    },
+  });
+
+  assert.equal(fightCalls, 2);
+  assert.equal(result.battles, 2);
+  assert.match(result.reason, /仍触发服务器限频/);
+  assert.equal(purchased, 1);
+});
+
+test("已选阵容没有吕布时不使用其他武将，仍按清单采购", async () => {
+  const f = fixture();
+  delete f.role.dungeon.battleTeam[0];
+  let purchased = false;
+  const result = await runAutomaticDream({ ...f, purchase: async () => { purchased = true; } });
+  assert.equal(result.battles, 0);
+  assert.equal(purchased, true);
+  assert.equal(f.calls.some((c) => c.cmd === "fight_startdungeon" || c.cmd === "dungeon_selecthero"), false);
+});
+
+test("当前激活武将不是吕布时仍仅用吕布战斗", async () => {
+  const f = fixture();
+  f.role.dungeon.activeHeroId = 106;
+  await runDreamAutoPush({ ...f, maxBattles: 1 });
+  assert.equal(f.calls.find((c) => c.cmd === "fight_startdungeon").params.heroId, 107);
+});
+
+test("关闭、战斗异常或用户停止时不自动采购", async () => {
+  const purchase = () => assert.fail("不应采购");
+  await runAutomaticDream({ ...fixture(), enabled: false, purchase });
+  await assert.rejects(runAutomaticDream({ ...fixture({ fail: "timeout" }), purchase }), /无法确认/);
+  const f = fixture();
+  f.role.dungeon.activeHeroId = 106;
+  f.role.dungeon.battleTeam = {
+    0: { heroId: 106, hp: 100, attack: 100 },
+  };
+  // 推层结果已经返回，但用户在采购开始前停止。
+  let checks = 0;
+  await runAutomaticDream({ ...f, purchase, stopped: () => ++checks > 3 });
+});
+
+test("吕布阵亡后停止，不切换其他存活英雄", async () => {
+  const f = fixture({ win: false, kill: true });
+  const result = await runDreamAutoPush(f);
+  assert.equal(result.battles, 1);
+  assert.deepEqual(f.calls.filter((c) => c.cmd === "fight_startdungeon").map((c) => c.params.heroId), [107]);
+});
+
+test("吕布连续3次未推进后停止，不换人或无限重试", async () => {
+  const f = fixture({ win: false });
+  const result = await runDreamAutoPush(f);
+  assert.equal(result.battles, 3);
+  assert.equal(result.floor, 41);
+});
+
+test("服务器终止码作为停止原因而不是假报通关", async () => {
+  for (const code of [2600080, 2600050]) {
+    const f = fixture({ fail: `服务器错误: ${code} - 不可挑战` });
+    const result = await runDreamAutoPush(f);
+    assert.equal(result.battles, 1);
+    assert.equal(result.status, "stopped");
+    assert.match(result.reason, new RegExp(String(code)));
+  }
+});
+
+test("超时未确认结果不重复战斗；已推进时可对账继续", async () => {
+  const f = fixture({ fail: "timeout" });
+  await assert.rejects(runDreamAutoPush(f), /无法确认/);
+  assert.equal(f.calls.filter((c) => c.cmd === "fight_startdungeon").length, 1);
+  const g = fixture();
+  const send = async (cmd, params) => {
+    const result = await g.send(cmd, params);
+    if (cmd === "fight_startdungeon") throw new Error("timeout");
+    return result;
+  };
+  assert.equal((await runDreamAutoPush({ ...g, send, maxBattles: 2 })).floor, 43);
+});
+
+test("停止和开放周期变化会终止后续请求", async () => {
+  const f = fixture();
+  await assert.rejects(runDreamAutoPush({ ...f, stopped: () => true }), /已停止/);
+  assert.equal(f.calls.length, 0);
+  let stopped = false;
+  const send = async (cmd, params) => {
+    const result = await f.send(cmd, params);
+    if (cmd === "fight_startdungeon") stopped = true;
+    return result;
+  };
+  await assert.rejects(runDreamAutoPush({ ...f, send, stopped: () => stopped }), /已停止/);
+  assert.equal(f.calls.filter((c) => c.cmd === "fight_startdungeon").length, 1);
+});
+
+test("未解锁、期次未更新和未知错误不继续发送战斗", async () => {
+  await assert.rejects(runDreamAutoPush({ now, pause: async () => {}, send: async () => ({ role: {} }) }), /未获取到/);
+  const f = fixture({ fresh: true });
+  const send = async (cmd, params) => {
+    if (cmd === "dungeon_selecthero") throw new Error("服务器错误: 2600040 - 已选定");
+    return f.send(cmd, params);
+  };
+  await assert.rejects(runDreamAutoPush({ ...f, send }), /期次尚未更新/);
+  assert.equal(f.calls.some((c) => c.cmd === "fight_startdungeon"), false);
+});
+
+test("批量梦境和独立购买遵守Token开关，不连接、不购买、不误释放连接槽", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: now() });
+  const oldStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: { getItem: () => '{"dreamEnable":false}' },
+  });
+  t.after(() => {
+    if (oldStorage) Object.defineProperty(globalThis, "localStorage", oldStorage);
+    else delete globalThis.localStorage;
+  });
+  const fail = () => assert.fail("已关闭梦境时不得发送请求或操作连接");
+  const deps = {
+    selectedTokens: { value: ["off"] }, tokens: { value: [{ id: "off", name: "关闭账号" }] },
+    tokenStatus: { value: {} }, isRunning: { value: false }, shouldStop: { value: false },
+    currentRunningTokenId: { value: null },
+    batchSettings: { dreamPurchaseList: ["1-5"] },
+    tokenStore: { getWebSocketStatus: () => "connected", sendMessageWithPromise: fail, closeWebSocketConnection: fail },
+    ensureConnection: fail, releaseConnectionSlot: fail,
+    addLog: () => {}, message: { success: () => {}, info: () => {}, warning: () => {} },
+  };
+  const tasks = createTasksDungeon(deps);
+  await tasks.batchmengjing();
+  await tasks.batchBuyDreamItems();
+  assert.equal(deps.tokenStatus.value.off, "completed");
+  assert.equal(deps.isRunning.value, false);
+});
