@@ -13,6 +13,7 @@ const createSmartBoxScenario = ({
   earnedRounds = completedRounds,
   currentRound = completedRounds + 1,
   finalRewardClaimCount = completedRounds,
+  claimStatisticsTime = Math.floor(Date.now() / 1000),
   claimAdvancesRound = true,
   autoAdvanceRoundAt8000 = false,
   rejectSmallOpenWhenStockAtLeast10 = false,
@@ -37,12 +38,19 @@ const createSmartBoxScenario = ({
     currentProgress >= 8000 ? currentRound : 0,
   );
   let boxWeekFinalRewardClaimCount = finalRewardClaimCount;
+  let boxWeekClaimStatisticsTime = claimStatisticsTime;
   let pendingClaimQueries = 0;
   let pendingClaimResetsProgress = false;
+  const getCurrentCycleClaimCount = () =>
+    boxWeekClaimStatisticsTime < Math.floor(Date.now() / 1000) - 7 * 86400
+      ? 0
+      : boxWeekFinalRewardClaimCount;
 
   const applyClaimAdvance = () => {
     if (pendingClaimResetsProgress) boxWeekProgress = 0;
-    boxWeekFinalRewardClaimCount += 1;
+    const currentCycleClaimCount = getCurrentCycleClaimCount();
+    boxWeekFinalRewardClaimCount = currentCycleClaimCount + 1;
+    boxWeekClaimStatisticsTime = Math.floor(Date.now() / 1000);
     boxWeekCurrentRound = Math.max(
       boxWeekCurrentRound,
       boxWeekFinalRewardClaimCount + 1,
@@ -58,6 +66,9 @@ const createSmartBoxScenario = ({
       ),
       statistics: {
         "week:act:cr:cnt:2": boxWeekFinalRewardClaimCount,
+      },
+      statisticsTime: {
+        "week:act:cr:cnt:2": boxWeekClaimStatisticsTime,
       },
     },
   });
@@ -131,7 +142,7 @@ const createSmartBoxScenario = ({
 
       if (cmd === "activity_claimweekactreward") {
         const hasUnclaimedReward =
-          boxWeekFinalRewardClaimCount < boxWeekEarnedRoundCount;
+          getCurrentCycleClaimCount() < boxWeekEarnedRoundCount;
         assert.equal(hasUnclaimedReward, true);
         if (claimAdvancesRound) {
           pendingClaimResetsProgress = boxWeekProgress >= 8000;
@@ -527,6 +538,36 @@ test("本周已完成四轮时不再开箱", async () => {
 
   assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
   assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 0);
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
+
+test("上期四轮领奖统计不会让本期误判为已完成四轮", async () => {
+  const scenario = createSmartBoxScenario({
+    inventory: { 2004: 160 },
+    groupCount: 1,
+    completedRounds: 0,
+    earnedRounds: 0,
+    currentRound: 1,
+    finalRewardClaimCount: 4,
+    claimStatisticsTime: Math.floor(Date.now() / 1000) - 8 * 86400,
+  });
+
+  await scenario.run();
+
+  assert.equal(countCommands(scenario.commands, "item_openbox") > 0, true);
+  assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
+  assert.equal(
+    scenario.logs.some((entry) =>
+      entry.message.includes("检测到上期宝箱周领奖统计4轮，本期按0轮重新计算"),
+    ),
+    true,
+  );
+  assert.equal(
+    scenario.logs.some((entry) =>
+      entry.message.includes("本周已领取0/4轮大奖，本次继续执行1轮"),
+    ),
+    true,
+  );
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
 });
 

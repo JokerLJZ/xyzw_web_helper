@@ -5736,7 +5736,26 @@ export function createTasksItem(deps) {
       }
     };
 
-    const getBoxWeekClaimedRounds = (roleResult) => {
+    const boxWeekClaimStatisticKey = "week:act:cr:cnt:2";
+    const chinaTimezoneOffsetMs = 8 * 60 * 60 * 1000;
+    const weekDurationMs = 7 * 24 * 60 * 60 * 1000;
+    const getCurrentBoxWeekCycleStart = (now = Date.now()) => {
+      // 游戏活动按北京时间周五12点刷新。将北京时间平移为UTC字段计算，
+      // 避免运行设备所在时区影响周期判断。
+      const chinaNow = new Date(now + chinaTimezoneOffsetMs);
+      const daysSinceFriday = (chinaNow.getUTCDay() - 5 + 7) % 7;
+      let cycleStart =
+        Date.UTC(
+          chinaNow.getUTCFullYear(),
+          chinaNow.getUTCMonth(),
+          chinaNow.getUTCDate() - daysSinceFriday,
+          12,
+        ) - chinaTimezoneOffsetMs;
+      if (cycleStart > now) cycleStart -= weekDurationMs;
+      return Math.floor(cycleStart / 1000);
+    };
+
+    const getBoxWeekClaimStats = (roleResult) => {
       const role =
         roleResult?.role ||
         roleResult?.data?.role ||
@@ -5744,11 +5763,37 @@ export function createTasksItem(deps) {
         roleResult?._raw?.body?.role ||
         roleResult?.rawData?.role ||
         {};
-      return Math.max(
+      const claimedRounds = Math.max(
         0,
-        Number(role?.statistics?.["week:act:cr:cnt:2"]) || 0,
+        Number(role?.statistics?.[boxWeekClaimStatisticKey]) || 0,
       );
+      const rawStatisticsTime =
+        role?.statisticsTime?.[boxWeekClaimStatisticKey];
+      const statisticsTime = Number(rawStatisticsTime);
+      const hasStatisticsTime =
+        rawStatisticsTime !== undefined &&
+        rawStatisticsTime !== null &&
+        Number.isFinite(statisticsTime) &&
+        statisticsTime > 0;
+      const normalizedStatisticsTime =
+        statisticsTime > 1e12
+          ? Math.floor(statisticsTime / 1000)
+          : statisticsTime;
+      const cycleStart = getCurrentBoxWeekCycleStart();
+      const isStale =
+        claimedRounds > 0 &&
+        hasStatisticsTime &&
+        normalizedStatisticsTime < cycleStart;
+
+      return {
+        claimedRounds: isStale ? 0 : claimedRounds,
+        rawClaimedRounds: claimedRounds,
+        isStale,
+      };
     };
+
+    const getBoxWeekClaimedRounds = (roleResult) =>
+      getBoxWeekClaimStats(roleResult).claimedRounds;
 
     const getBoxWeekState = (activityResult, claimedRoundsOverride = null) => {
       const activity =
@@ -6075,9 +6120,17 @@ export function createTasksItem(deps) {
 
         let activityResult = await fetchBoxActivity(tokenId, token.name);
         const initialRoleInfo = await fetchRoleInfo(tokenId, token.name, true);
+        const initialClaimStats = getBoxWeekClaimStats(initialRoleInfo);
+        if (initialClaimStats.isStale) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 检测到上期宝箱周领奖统计${initialClaimStats.rawClaimedRounds}轮，本期按0轮重新计算`,
+            type: "info",
+          });
+        }
         let boxWeekState = getBoxWeekState(
           activityResult,
-          getBoxWeekClaimedRounds(initialRoleInfo),
+          initialClaimStats.claimedRounds,
         );
         let recoveredRewardCount = 0;
 
