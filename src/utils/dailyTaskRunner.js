@@ -63,6 +63,33 @@ const isTodayAvailable = (statisticsTime) => {
 
 const PERMANENT_CARD_ID = 4003;
 const PERMANENT_CARD_BENEFIT = 4;
+export const DAILY_TASK_REWARD_IDS = Object.freeze(
+  Array.from({ length: 10 }, (_, index) => index + 1),
+);
+const TASK_REWARD_POINT_RULES = {
+  daily: { field: "dailyPoint", target: 100 },
+  weekly: { field: "weekPoint", target: 500 },
+};
+
+/**
+ * 游戏把领奖状态编码在积分字段中：达到目标值时可领取，领取后数值会大于目标值。
+ * 只读取协议中的明确字段；缺失或异常值一律视为未知，不发送领奖指令。
+ */
+export const getTaskRewardClaimState = (dailyTask, rewardType) => {
+  const rule = TASK_REWARD_POINT_RULES[rewardType];
+  if (!rule || !dailyTask || typeof dailyTask !== "object") return "unknown";
+
+  const rawPoint = dailyTask[rule.field];
+  if (rawPoint === undefined || rawPoint === null || rawPoint === "") {
+    return "unknown";
+  }
+
+  const point = Number(rawPoint);
+  if (!Number.isFinite(point) || point < 0) return "unknown";
+  if (point === rule.target) return "claimable";
+  if (point > rule.target) return "claimed";
+  return "unavailable";
+};
 const normalizeStateKey = (key) =>
   String(key ?? "")
     .replace(/[^a-zA-Z0-9]/g, "")
@@ -778,29 +805,44 @@ export class DailyTaskRunner {
     );
   }
 
-  async claimWeeklyTaskReward(tokenId) {
-    const description = "领取周常任务奖励";
-    this.log(`执行: ${description}`);
-    try {
-      const result = await this.tokenStore.sendMessageWithPromise(
-        tokenId,
-        "task_claimweekreward",
-        {},
-        8000,
-      );
-      const rolePatch = extractRolePatch(result);
-      const snapshot = this.roleSnapshots.get(tokenId);
-      if (snapshot && rolePatch) mergeRoleSnapshot(snapshot, rolePatch);
-      await sleep(this.delaySettings.commandDelay);
-      this.log(`${description} - 成功`, "success");
-      return result;
-    } catch (error) {
-      if (getServerErrorCode(error) === 200020) {
-        this.log(`${description} - 已领取或服务器已处理，跳过`, "info");
-        return { skipped: true, reason: "already-processed" };
-      }
-      throw error;
+  async claimTaskRewardIfAvailable(tokenId, rewardType) {
+    const isDaily = rewardType === "daily";
+    const description = isDaily ? "领取日常任务奖励" : "领取周常任务奖励";
+    const command = isDaily ? "task_claimdailyreward" : "task_claimweekreward";
+
+    this.log(`执行: 检查${description.slice(2)}状态`);
+    const roleInfoRes = await this.tokenStore.sendGetRoleInfo(tokenId);
+    const latestRole = extractRolePatch(roleInfoRes) || {};
+    const snapshot = this.roleSnapshots.get(tokenId);
+    if (snapshot) mergeRoleSnapshot(snapshot, latestRole);
+    else this.roleSnapshots.set(tokenId, latestRole);
+
+    const claimState = getTaskRewardClaimState(
+      latestRole.dailyTask,
+      rewardType,
+    );
+    if (claimState === "claimed") {
+      this.log(`${description} - 已领取，跳过`, "info");
+      return { skipped: true, reason: "claimed" };
     }
+    if (claimState === "unavailable") {
+      this.log(`${description} - 积分未达标，跳过`, "info");
+      return { skipped: true, reason: "unavailable" };
+    }
+    if (claimState !== "claimable") {
+      this.log(`${description} - API未返回明确的可领取状态，跳过`, "warning");
+      return { skipped: true, reason: "unknown" };
+    }
+
+    return this.executeGameCommand(tokenId, command, {}, description);
+  }
+
+  claimDailyTaskReward(tokenId) {
+    return this.claimTaskRewardIfAvailable(tokenId, "daily");
+  }
+
+  claimWeeklyTaskReward(tokenId) {
+    return this.claimTaskRewardIfAvailable(tokenId, "weekly");
   }
 
   async getActivityInfo(tokenId, description = "获取月度任务进度") {
@@ -1792,7 +1834,7 @@ export class DailyTaskRunner {
     }
 
     // 7. 任务奖励
-    for (let taskId = 1; taskId <= 10; taskId++) {
+    for (const taskId of DAILY_TASK_REWARD_IDS) {
       taskList.push({
         name: `领取任务奖励${taskId}`,
         execute: () =>
@@ -1809,13 +1851,7 @@ export class DailyTaskRunner {
     taskList.push(
       {
         name: "领取日常任务奖励",
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "task_claimdailyreward",
-            {},
-            "领取日常任务奖励",
-          ),
+        execute: () => this.claimDailyTaskReward(tokenId),
       },
       {
         name: "领取周常任务奖励",

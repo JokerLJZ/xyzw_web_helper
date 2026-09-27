@@ -2,17 +2,23 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  DAILY_TASK_REWARD_IDS,
   DailyTaskRunner,
   getCollectionFreeRewardClaimState,
   getPermanentCardClaimState,
+  getTaskRewardClaimState,
 } from "../src/utils/dailyTaskRunner.js";
 
-const createRunner = (sendMessageWithPromise) => {
+const createRunner = (
+  sendMessageWithPromise,
+  sendGetRoleInfo = async () => ({}),
+) => {
   const logs = [];
   const runner = new DailyTaskRunner(
     {
       gameTokens: [{ id: "token-1", name: "测试账号" }],
       sendMessageWithPromise,
+      sendGetRoleInfo,
     },
     { commandDelay: 0, taskDelay: 0 },
   );
@@ -136,30 +142,60 @@ test("珍宝阁状态不可识别时只查询、不盲目领取", async () => {
   assert.deepEqual(commands, ["collection_goodslist"]);
 });
 
-test("周常奖励 200020 按已处理记录，不再抛出失败", async () => {
-  const { runner, logs } = createRunner(async () => {
-    throw new Error("服务器错误: 200020 - 出了点小问题，请尝试重启游戏解决～");
-  });
-
-  const result = await runner.claimWeeklyTaskReward("token-1");
-
-  assert.deepEqual(result, { skipped: true, reason: "already-processed" });
-  assert.equal(logs.some((entry) => entry.type === "error"), false);
-  assert.equal(
-    logs.some((entry) => entry.message.includes("已领取或服务器已处理")),
-    true,
-  );
+test("日常和周常奖励严格按API积分状态判断", () => {
+  assert.equal(getTaskRewardClaimState({ dailyPoint: 99 }, "daily"), "unavailable");
+  assert.equal(getTaskRewardClaimState({ dailyPoint: 100 }, "daily"), "claimable");
+  assert.equal(getTaskRewardClaimState({ dailyPoint: 101 }, "daily"), "claimed");
+  assert.equal(getTaskRewardClaimState({ weekPoint: 499 }, "weekly"), "unavailable");
+  assert.equal(getTaskRewardClaimState({ weekPoint: 500 }, "weekly"), "claimable");
+  assert.equal(getTaskRewardClaimState({ weekPoint: 501 }, "weekly"), "claimed");
+  assert.equal(getTaskRewardClaimState({}, "daily"), "unknown");
 });
 
-test("周常奖励的其他错误仍交给任务层统一记录", async () => {
-  const expectedError = new Error("连接断开");
-  const { runner, logs } = createRunner(async () => {
-    throw expectedError;
-  });
+test("单项任务奖励严格限制为1到10", () => {
+  assert.deepEqual([...DAILY_TASK_REWARD_IDS], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+});
 
-  await assert.rejects(
-    () => runner.claimWeeklyTaskReward("token-1"),
-    expectedError,
+test("日常和周常奖励先查询API，只在明确可领取时发送指令", async () => {
+  const commands = [];
+  const roleStates = [
+    { role: { dailyTask: { dailyPoint: 100, weekPoint: 400 } } },
+    { role: { dailyTask: { dailyPoint: 101, weekPoint: 500 } } },
+  ];
+  const { runner } = createRunner(
+    async (_tokenId, cmd) => {
+      commands.push(cmd);
+      return {};
+    },
+    async () => roleStates.shift(),
   );
-  assert.equal(logs.some((entry) => entry.type === "error"), false);
+
+  const dailyResult = await runner.claimDailyTaskReward("token-1");
+  const weeklyResult = await runner.claimWeeklyTaskReward("token-1");
+
+  assert.equal(dailyResult.skipped, undefined);
+  assert.equal(weeklyResult.skipped, undefined);
+  assert.deepEqual(commands, ["task_claimdailyreward", "task_claimweekreward"]);
+});
+
+test("状态不明确或积分未达标时不发送日常周常领奖指令", async () => {
+  const commands = [];
+  const roleStates = [
+    { role: { dailyTask: {} } },
+    { role: { dailyTask: { weekPoint: 499 } } },
+  ];
+  const { runner } = createRunner(
+    async (_tokenId, cmd) => {
+      commands.push(cmd);
+      return {};
+    },
+    async () => roleStates.shift(),
+  );
+
+  const dailyResult = await runner.claimDailyTaskReward("token-1");
+  const weeklyResult = await runner.claimWeeklyTaskReward("token-1");
+
+  assert.deepEqual(dailyResult, { skipped: true, reason: "unknown" });
+  assert.deepEqual(weeklyResult, { skipped: true, reason: "unavailable" });
+  assert.deepEqual(commands, []);
 });
