@@ -1,4 +1,3 @@
-import { useTokenStore } from "@/stores/tokenStore";
 import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
 import {
   DREAM_PUSH_INTERVAL_MS,
@@ -60,6 +59,204 @@ const isTodayAvailable = (statisticsTime) => {
   const recordDate = new Date(statisticsTime * 1000).toDateString();
 
   return today !== recordDate;
+};
+
+const PERMANENT_CARD_ID = 4003;
+const PERMANENT_CARD_BENEFIT = 4;
+
+const normalizeStateKey = (key) =>
+  String(key ?? "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+
+const toTimestampMs = (value) => {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+  return timestamp < 1e12 ? timestamp * 1000 : timestamp;
+};
+
+const isTimestampToday = (value, now = new Date()) => {
+  const timestamp = toTimestampMs(value);
+  if (!timestamp) return false;
+  return new Date(timestamp).toDateString() === now.toDateString();
+};
+
+const findContainerEntry = (container, ids) => {
+  if (!container) return null;
+  if (Array.isArray(container)) {
+    return (
+      container.find((item) => {
+        if (ids.includes(Number(item))) return true;
+        const itemId = Number(
+          item?.cardId ?? item?.benefitId ?? item?.type ?? item?.id,
+        );
+        return ids.includes(itemId);
+      }) ?? null
+    );
+  }
+  if (typeof container !== "object") return null;
+  for (const id of ids) {
+    if (Object.prototype.hasOwnProperty.call(container, id)) {
+      return container[id];
+    }
+    if (Object.prototype.hasOwnProperty.call(container, String(id))) {
+      return container[String(id)];
+    }
+  }
+  return null;
+};
+
+const readExplicitClaimState = (value) => {
+  if (!value || typeof value !== "object") return null;
+
+  const claimableKeys = new Set([
+    "canclaim",
+    "canclaimreward",
+    "canclaimfreereward",
+    "canreceive",
+    "canget",
+    "claimable",
+    "available",
+    "isavailable",
+    "freereward",
+    "freerewardavailable",
+    "hasfreereward",
+  ]);
+  const claimedKeys = new Set([
+    "claimed",
+    "isclaimed",
+    "hasclaimed",
+    "received",
+    "isreceived",
+    "hasreceived",
+    "freerewardclaimed",
+    "hasclaimedfreereward",
+    "isfreerewardclaimed",
+  ]);
+
+  for (const [key, fieldValue] of Object.entries(value)) {
+    const normalizedKey = normalizeStateKey(key);
+    if (claimableKeys.has(normalizedKey) && typeof fieldValue === "boolean") {
+      return fieldValue ? "claimable" : "claimed";
+    }
+    if (claimedKeys.has(normalizedKey) && typeof fieldValue === "boolean") {
+      return fieldValue ? "claimed" : "claimable";
+    }
+  }
+  return null;
+};
+
+const findCollectionClaimState = (value, depth = 0, visited = new Set()) => {
+  if (!value || typeof value !== "object" || depth > 5 || visited.has(value)) {
+    return null;
+  }
+  visited.add(value);
+
+  const directState = readExplicitClaimState(value);
+  if (directState) return directState;
+
+  const wrapperKeys = new Set([
+    "body",
+    "data",
+    "rawdata",
+    "result",
+    "collection",
+    "collectioninfo",
+    "rewardinfo",
+  ]);
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const normalizedKey = normalizeStateKey(key);
+    if (
+      !wrapperKeys.has(normalizedKey)
+      && !normalizedKey.includes("freereward")
+    ) {
+      continue;
+    }
+    if (
+      normalizedKey.includes("freereward")
+      && typeof nestedValue === "boolean"
+    ) {
+      return nestedValue ? "claimable" : "claimed";
+    }
+    const nestedState = findCollectionClaimState(
+      nestedValue,
+      depth + 1,
+      visited,
+    );
+    if (nestedState) return nestedState;
+  }
+  return null;
+};
+
+export const getPermanentCardClaimState = (roleData, now = new Date()) => {
+  if (!roleData || typeof roleData !== "object") return "unavailable";
+
+  const statisticsTime = roleData.statisticsTime ?? {};
+  const claimedToday = Object.entries(statisticsTime).some(([key, value]) => {
+    const normalizedKey = normalizeStateKey(key);
+    const isPermanentCardKey =
+      normalizedKey.includes("card")
+      && (normalizedKey.includes(String(PERMANENT_CARD_ID))
+        || normalizedKey.includes("forever")
+        || normalizedKey.includes("permanent"));
+    return isPermanentCardKey && isTimestampToday(value, now);
+  });
+  if (claimedToday) return "claimed";
+
+  const cardContainers = [
+    roleData.card,
+    roleData.cards,
+    roleData.cardInfo,
+    roleData.cardMap,
+    roleData.cardList,
+  ];
+  let cardEntry = null;
+  for (const container of cardContainers) {
+    cardEntry = findContainerEntry(container, [PERMANENT_CARD_ID]);
+    if (cardEntry !== null && cardEntry !== undefined) break;
+  }
+
+  if (cardEntry === null || cardEntry === undefined) {
+    cardEntry = findContainerEntry(
+      roleData.benefit ?? roleData.benefits,
+      [PERMANENT_CARD_BENEFIT],
+    );
+  }
+  if (cardEntry === null || cardEntry === undefined || cardEntry === false) {
+    return "unavailable";
+  }
+
+  if (typeof cardEntry === "object") {
+    const explicitState = readExplicitClaimState(cardEntry);
+    if (explicitState) return explicitState;
+
+    const lastClaimTime =
+      cardEntry.lastClaimTime
+      ?? cardEntry.claimTime
+      ?? cardEntry.lastRewardTime
+      ?? cardEntry.dailyRewardTime
+      ?? cardEntry.receiveTime;
+    if (isTimestampToday(lastClaimTime, now)) return "claimed";
+
+    const expireTime =
+      cardEntry.expireTime ?? cardEntry.expiredAt ?? cardEntry.endTime;
+    const expireTimeMs = toTimestampMs(expireTime);
+    if (expireTimeMs && expireTimeMs <= now.getTime()) return "unavailable";
+  }
+
+  return "claimable";
+};
+
+export const getCollectionFreeRewardClaimState = (response) => {
+  if (!response || typeof response !== "object") return "unknown";
+  return findCollectionClaimState(response) ?? "unknown";
+};
+
+const getServerErrorCode = (error) => {
+  const directCode = Number(error?.code ?? error?.errorCode);
+  if (Number.isFinite(directCode) && directCode > 0) return directCode;
+  const match = String(error?.message ?? error).match(/服务器错误:\s*(\d+)/);
+  return match ? Number(match[1]) : null;
 };
 
 const getTodayBossId = () => {
@@ -516,6 +713,78 @@ export class DailyTaskRunner {
     this.roleSnapshots.set(tokenId, role);
     this.log(`${description}：已建立角色快照`);
     return role;
+  }
+
+  async claimPermanentCardRewardIfAvailable(tokenId) {
+    const role = await this.getLatestRole(tokenId, "检查永久卡礼包状态");
+    const claimState = getPermanentCardClaimState(role);
+
+    if (claimState === "claimed") {
+      this.log("领取永久卡礼包 - 今日已领取，跳过", "info");
+      return { skipped: true, reason: "claimed" };
+    }
+    if (claimState !== "claimable") {
+      this.log("领取永久卡礼包 - 未持有或当前不可领取，跳过", "info");
+      return { skipped: true, reason: "unavailable" };
+    }
+
+    return this.executeGameCommand(
+      tokenId,
+      "card_claimreward",
+      { cardId: PERMANENT_CARD_ID },
+      "领取永久卡礼包",
+    );
+  }
+
+  async claimCollectionFreeRewardIfAvailable(tokenId) {
+    const goodsList = await this.executeGameCommand(
+      tokenId,
+      "collection_goodslist",
+      {},
+      "检查珍宝阁免费礼包状态",
+    );
+    const claimState = getCollectionFreeRewardClaimState(goodsList);
+
+    if (claimState === "claimed") {
+      this.log("领取珍宝阁免费礼包 - 今日已领取，跳过", "info");
+      return { skipped: true, reason: "claimed" };
+    }
+    if (claimState !== "claimable") {
+      this.log("领取珍宝阁免费礼包 - 未返回明确的可领取状态，跳过", "info");
+      return { skipped: true, reason: "unknown" };
+    }
+
+    return this.executeGameCommand(
+      tokenId,
+      "collection_claimfreereward",
+      {},
+      "领取珍宝阁免费礼包",
+    );
+  }
+
+  async claimWeeklyTaskReward(tokenId) {
+    const description = "领取周常任务奖励";
+    this.log(`执行: ${description}`);
+    try {
+      const result = await this.tokenStore.sendMessageWithPromise(
+        tokenId,
+        "task_claimweekreward",
+        {},
+        8000,
+      );
+      const rolePatch = extractRolePatch(result);
+      const snapshot = this.roleSnapshots.get(tokenId);
+      if (snapshot && rolePatch) mergeRoleSnapshot(snapshot, rolePatch);
+      await sleep(this.delaySettings.commandDelay);
+      this.log(`${description} - 成功`, "success");
+      return result;
+    } catch (error) {
+      if (getServerErrorCode(error) === 200020) {
+        this.log(`${description} - 已领取或服务器已处理，跳过`, "info");
+        return { skipped: true, reason: "already-processed" };
+      }
+      throw error;
+    }
   }
 
   async getActivityInfo(tokenId, description = "获取月度任务进度") {
@@ -1304,11 +1573,6 @@ export class DailyTaskRunner {
       { name: "俱乐部", cmd: "legion_signin" },
       { name: "领取每日礼包", cmd: "discount_claimreward" },
       { name: "领取免费礼包", cmd: "card_claimreward" },
-      {
-        name: "领取永久卡礼包",
-        cmd: "card_claimreward",
-        params: { cardId: 4003 },
-      },
     ];
 
     if (settings.claimEmail) {
@@ -1329,6 +1593,11 @@ export class DailyTaskRunner {
             reward.name,
           ),
       });
+    });
+
+    taskList.push({
+      name: "领取永久卡礼包",
+      execute: () => this.claimPermanentCardRewardIfAvailable(tokenId),
     });
 
     if (settings.holyBeastFragmentPurchase === true) {
@@ -1354,24 +1623,8 @@ export class DailyTaskRunner {
     }
 
     taskList.push({
-      name: "开始领取珍宝阁礼包",
-      execute: () =>
-        this.executeGameCommand(
-          tokenId,
-          "collection_goodslist",
-          {},
-          "开始领取珍宝阁礼包",
-        ),
-    });
-    taskList.push({
       name: "领取珍宝阁免费礼包",
-      execute: () =>
-        this.executeGameCommand(
-          tokenId,
-          "collection_claimfreereward",
-          {},
-          "领取珍宝阁免费礼包",
-        ),
+      execute: () => this.claimCollectionFreeRewardIfAvailable(tokenId),
     });
 
     if (
@@ -1550,13 +1803,7 @@ export class DailyTaskRunner {
       },
       {
         name: "领取周常任务奖励",
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "task_claimweekreward",
-            {},
-            "领取周常任务奖励",
-          ),
+        execute: () => this.claimWeeklyTaskReward(tokenId),
       },
       {
         name: "领取通行证奖励",
