@@ -3,16 +3,21 @@ import { test } from "node:test";
 
 import {
   DailyTaskRunner,
+  getClaimableDailyTaskRewardIds,
   getCollectionFreeRewardClaimState,
   getPermanentCardClaimState,
 } from "../src/utils/dailyTaskRunner.js";
 
-const createRunner = (sendMessageWithPromise) => {
+const createRunner = (
+  sendMessageWithPromise,
+  sendGetRoleInfo = async () => ({}),
+) => {
   const logs = [];
   const runner = new DailyTaskRunner(
     {
       gameTokens: [{ id: "token-1", name: "测试账号" }],
       sendMessageWithPromise,
+      sendGetRoleInfo,
     },
     { commandDelay: 0, taskDelay: 0 },
   );
@@ -136,19 +141,63 @@ test("珍宝阁状态不可识别时只查询、不盲目领取", async () => {
   assert.deepEqual(commands, ["collection_goodslist"]);
 });
 
-test("周常奖励 200020 按已处理记录，不再抛出失败", async () => {
+test("周常奖励 200020 标记为状态未确认，不再冒充已领取", async () => {
   const { runner, logs } = createRunner(async () => {
     throw new Error("服务器错误: 200020 - 出了点小问题，请尝试重启游戏解决～");
   });
 
   const result = await runner.claimWeeklyTaskReward("token-1");
 
-  assert.deepEqual(result, { skipped: true, reason: "already-processed" });
+  assert.deepEqual(result, { skipped: true, reason: "unconfirmed" });
   assert.equal(logs.some((entry) => entry.type === "error"), false);
   assert.equal(
-    logs.some((entry) => entry.message.includes("已领取或服务器已处理")),
+    logs.some((entry) => entry.message.includes("领取状态未确认")),
     true,
   );
+});
+
+test("只规划进度达标且尚未领取的每日任务奖励", () => {
+  assert.deepEqual(
+    getClaimableDailyTaskRewardIds({
+      complete: {
+        1: 1,
+        2: 0,
+        3: 3,
+        4: -1,
+        5: 4,
+        12: 1,
+        13: 0,
+        14: 1,
+      },
+    }),
+    [1, 3, 12, 14],
+  );
+});
+
+test("领取任务奖励前刷新状态并只发送对应任务指令", async () => {
+  const commands = [];
+  const { runner } = createRunner(
+    async (_tokenId, cmd, params) => {
+      commands.push({ cmd, params });
+      return { role: { dailyTask: { complete: { [params.taskId]: -1 } } } };
+    },
+    async () => ({
+      role: {
+        dailyTask: {
+          complete: { 1: 1, 2: 0, 3: 3, 12: -1, 14: 1 },
+        },
+      },
+    }),
+  );
+
+  const result = await runner.claimAvailableDailyTaskRewards("token-1");
+
+  assert.deepEqual(result, { skipped: false, taskIds: [1, 3, 14] });
+  assert.deepEqual(commands, [
+    { cmd: "task_claimdailypoint", params: { taskId: 1 } },
+    { cmd: "task_claimdailypoint", params: { taskId: 3 } },
+    { cmd: "task_claimdailypoint", params: { taskId: 14 } },
+  ]);
 });
 
 test("周常奖励的其他错误仍交给任务层统一记录", async () => {
