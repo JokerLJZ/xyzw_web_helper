@@ -63,34 +63,6 @@ const isTodayAvailable = (statisticsTime) => {
 
 const PERMANENT_CARD_ID = 4003;
 const PERMANENT_CARD_BENEFIT = 4;
-const DAILY_TASK_TARGETS = {
-  1: 1,
-  2: 1,
-  3: 3,
-  4: 2,
-  5: 5,
-  6: 3,
-  7: 3,
-};
-
-/** 根据每日任务实时进度，仅返回已经达标且尚未领取积分的任务 ID。 */
-export const getClaimableDailyTaskRewardIds = (dailyTask) => {
-  const complete = dailyTask?.complete;
-  if (!complete || typeof complete !== "object") return [];
-
-  return Object.entries(complete)
-    .map(([taskId, progress]) => ({
-      taskId: Number(taskId),
-      progress: Number(progress),
-    }))
-    .filter(({ taskId, progress }) => {
-      const target = DAILY_TASK_TARGETS[taskId];
-      return Number.isFinite(target) && progress >= target;
-    })
-    .map(({ taskId }) => taskId)
-    .sort((left, right) => left - right);
-};
-
 const normalizeStateKey = (key) =>
   String(key ?? "")
     .replace(/[^a-zA-Z0-9]/g, "")
@@ -806,32 +778,6 @@ export class DailyTaskRunner {
     );
   }
 
-  async claimAvailableDailyTaskRewards(tokenId) {
-    const roleInfoRes = await this.tokenStore.sendGetRoleInfo(tokenId);
-    const latestRole = extractRolePatch(roleInfoRes) || {};
-    const snapshot = this.roleSnapshots.get(tokenId);
-    if (snapshot) mergeRoleSnapshot(snapshot, latestRole);
-    else this.roleSnapshots.set(tokenId, latestRole);
-
-    const taskIds = getClaimableDailyTaskRewardIds(latestRole.dailyTask);
-    if (taskIds.length === 0) {
-      this.log("领取任务奖励 - 当前没有可领取的任务奖励，跳过", "info");
-      return { skipped: true, reason: "none-claimable", taskIds: [] };
-    }
-
-    this.log(`检测到可领取任务奖励：${taskIds.join("、")}`);
-    for (const taskId of taskIds) {
-      await this.executeGameCommand(
-        tokenId,
-        "task_claimdailypoint",
-        { taskId },
-        `领取任务奖励${taskId}`,
-        5000,
-      );
-    }
-    return { skipped: false, taskIds };
-  }
-
   async claimWeeklyTaskReward(tokenId) {
     const description = "领取周常任务奖励";
     this.log(`执行: ${description}`);
@@ -850,8 +796,8 @@ export class DailyTaskRunner {
       return result;
     } catch (error) {
       if (getServerErrorCode(error) === 200020) {
-        this.log(`${description} - 服务器返回200020，领取状态未确认，跳过`, "warning");
-        return { skipped: true, reason: "unconfirmed" };
+        this.log(`${description} - 已领取或服务器已处理，跳过`, "info");
+        return { skipped: true, reason: "already-processed" };
       }
       throw error;
     }
@@ -1846,10 +1792,19 @@ export class DailyTaskRunner {
     }
 
     // 7. 任务奖励
-    taskList.push({
-      name: "领取可领取任务奖励",
-      execute: () => this.claimAvailableDailyTaskRewards(tokenId),
-    });
+    for (let taskId = 1; taskId <= 10; taskId++) {
+      taskList.push({
+        name: `领取任务奖励${taskId}`,
+        execute: () =>
+          this.executeGameCommand(
+            tokenId,
+            "task_claimdailypoint",
+            { taskId },
+            `领取任务奖励${taskId}`,
+            5000,
+          ),
+      });
+    }
 
     taskList.push(
       {
