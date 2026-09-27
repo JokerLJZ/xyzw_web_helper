@@ -41,7 +41,8 @@ export function isDreamCompleted(dungeon, period) {
     rawFloor === null ||
     rawFloor === "" ||
     !Number.isInteger(floor) ||
-    floor < 0
+    floor < 0 ||
+    floor >= DREAM_FINAL_FLOOR
   );
 }
 

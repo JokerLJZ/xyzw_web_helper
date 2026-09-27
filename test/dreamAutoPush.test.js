@@ -164,6 +164,33 @@ test("200关通关后层数字段消失时按已通关处理并继续采购", as
   );
 });
 
+test("已达到200层且服务端保留层数字段时跳过战斗并继续采购", async () => {
+  const f = fixture();
+  f.role.dungeon.id = DREAM_FINAL_FLOOR;
+  f.role.dungeon.merchant = { 1: [5] };
+  let purchased = 0;
+
+  assert.equal(
+    isDreamCompleted(f.role.dungeon, getDreamPeriod(now())),
+    true,
+  );
+  const result = await runAutomaticDream({
+    ...f,
+    purchase: async () => {
+      purchased++;
+    },
+  });
+
+  assert.equal(result.floor, DREAM_FINAL_FLOOR);
+  assert.equal(result.battles, 0);
+  assert.match(result.reason, /已通关/);
+  assert.equal(purchased, 1);
+  assert.equal(
+    f.calls.some((call) => call.cmd === "fight_startdungeon"),
+    false,
+  );
+});
+
 test("最后一战通关导致层数字段消失时结束推层并继续采购", async () => {
   const f = fixture();
   f.role.dungeon.id = 199;
@@ -187,6 +214,29 @@ test("最后一战通关导致层数字段消失时结束推层并继续采购",
   assert.equal(result.battles, 1);
   assert.match(result.reason, /已通关/);
   assert.equal(purchased, 1);
+});
+
+test("最后一战达到200层且服务端保留层数字段时结束推层并继续采购", async () => {
+  const f = fixture();
+  f.role.dungeon.id = DREAM_FINAL_FLOOR - 1;
+  f.role.dungeon.merchant = { 1: [5] };
+  let purchased = 0;
+
+  const result = await runAutomaticDream({
+    ...f,
+    purchase: async () => {
+      purchased++;
+    },
+  });
+
+  assert.equal(result.floor, DREAM_FINAL_FLOOR);
+  assert.equal(result.battles, 1);
+  assert.match(result.reason, /已通关/);
+  assert.equal(purchased, 1);
+  assert.equal(
+    f.calls.filter((call) => call.cmd === "fight_startdungeon").length,
+    1,
+  );
 });
 
 test("超过195层且主线不足4000关时仍执行梦境采购", async (t) => {
