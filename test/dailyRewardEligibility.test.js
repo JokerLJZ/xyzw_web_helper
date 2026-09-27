@@ -156,7 +156,7 @@ test("周常奖励 200020 标记为状态未确认，不再冒充已领取", asy
   );
 });
 
-test("只规划进度达标且尚未领取的每日任务奖励", () => {
+test("只规划存在、进度达标且尚未领取的每日任务奖励", () => {
   assert.deepEqual(
     getClaimableDailyTaskRewardIds({
       complete: {
@@ -170,7 +170,7 @@ test("只规划进度达标且尚未领取的每日任务奖励", () => {
         14: 1,
       },
     }),
-    [1, 3, 12, 14],
+    [1, 3],
   );
 });
 
@@ -184,7 +184,7 @@ test("领取任务奖励前刷新状态并只发送对应任务指令", async ()
     async () => ({
       role: {
         dailyTask: {
-          complete: { 1: 1, 2: 0, 3: 3, 12: -1, 14: 1 },
+          complete: { 1: 1, 2: 0, 3: 3, 12: -1, 13: 1, 14: 1 },
         },
       },
     }),
@@ -192,11 +192,10 @@ test("领取任务奖励前刷新状态并只发送对应任务指令", async ()
 
   const result = await runner.claimAvailableDailyTaskRewards("token-1");
 
-  assert.deepEqual(result, { skipped: false, taskIds: [1, 3, 14] });
+  assert.deepEqual(result, { skipped: false, taskIds: [1, 3] });
   assert.deepEqual(commands, [
     { cmd: "task_claimdailypoint", params: { taskId: 1 } },
     { cmd: "task_claimdailypoint", params: { taskId: 3 } },
-    { cmd: "task_claimdailypoint", params: { taskId: 14 } },
   ]);
 });
 

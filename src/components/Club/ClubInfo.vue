@@ -17,7 +17,7 @@
           <n-button size="small" @click="refreshClub">刷新</n-button>
         </div>
       </div>
-      <div v-else>
+      <div v-else class="club-layout">
         <div class="toolbar">
           <n-space size="small">
             <!-- 申请列表按钮 -->
@@ -120,7 +120,12 @@
           </div>
         </n-modal>
 
-        <n-tabs v-model:value="activeTab" type="line" animated>
+        <div class="club-main">
+          <div class="section-head">
+            <span class="section-title">俱乐部资料</span>
+            <span class="section-sub">概览 · 成员 · 申请 · 怪异塔</span>
+          </div>
+          <n-tabs v-model:value="activeTab" type="line" animated>
           <n-tab-pane name="overview" tab="概览" display-directive="show:lazy">
             <div class="overview">
               <n-grid x-gap="12" y-gap="12" cols="2" item-responsive>
@@ -300,7 +305,21 @@
             <ClubWeirdTowerInfo inline />
           </n-tab-pane>
 
-        </n-tabs>
+          </n-tabs>
+        </div>
+
+        <aside class="club-side">
+          <div class="section-head">
+            <span class="section-title">盐场积分榜</span>
+            <span class="section-sub">岛屿 · 小组 · 排名</span>
+          </div>
+          <div class="club-side-body">
+            <n-alert v-if="childError" type="error" title="盐场面板加载失败">
+              {{ childError }}
+            </n-alert>
+            <ClubIslandPanel v-else />
+          </div>
+        </aside>
       </div>
     </template>
   </MyCard>
@@ -585,13 +604,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, h, reactive, watch, nextTick } from "vue";
+import { ref, computed, h, reactive, watch, nextTick, onErrorCaptured } from "vue";
 import { useMessage, useDialog, NDataTable, NModal, NAvatar, NTag, NDescriptions, NDescriptionsItem, NButton, NSpace, NIcon, NGrid, NGi, NStatistic, NThing, NAlert, NCollapse, NCollapseItem, NCard } from "naive-ui";
 import { useTokenStore } from "@/stores/tokenStore";
 import { Copy, Refresh, People, BarChart, Flame, Skull, Megaphone, Person, ShieldCheckmark } from "@vicons/ionicons5";
 import ClubHistoryRecords from "./ClubHistoryRecords.vue";
 import ClubWeirdTowerInfo from "./ClubWeirdTowerInfo.vue";
-import { $emit } from "@/stores/events";
+import ClubIslandPanel from "./ClubIslandPanel.vue";
 import { HERO_DICT, legacycolor, HeroFillInfo, getLineupType, LINEUP_RULES } from "@/utils/HeroList";
 import html2canvas from 'html2canvas';
 import { downloadCanvasAsImage } from "@/utils/imageExport";
@@ -599,6 +618,13 @@ import { downloadCanvasAsImage } from "@/utils/imageExport";
 const tokenStore = useTokenStore();
 const message = useMessage();
 const dialog = useDialog();
+const childError = ref("");
+
+onErrorCaptured((error, _instance, info) => {
+  console.error("俱乐部盐场面板渲染失败:", error, info);
+  if (!childError.value) childError.value = `${info}｜${error?.message || error}`;
+  return false;
+});
 
 const info = computed(() => tokenStore.gameData?.legionInfo || null);
 const club = computed(() => info.value?.info || null);
@@ -1500,12 +1526,6 @@ const handleApplyListResp = (session) => {
   }
 };
 
-// 组件挂载时添加事件监听器
-onMounted(() => {
-  // 监听申请列表响应事件（已改为Promise直接处理，不再监听）
-  // $emit.on("legion_applylistresp", handleApplyListResp);
-});
-
 watch(activeTab, (val) => {
   if (val === "members" && !batchLoading.value) {
     const hasLineup = members.value.some((m) => m.lineupType);
@@ -1513,12 +1533,6 @@ watch(activeTab, (val) => {
       fetchAllMembersLineup();
     }
   }
-});
-
-// 组件卸载时移除事件监听器
-onUnmounted(() => {
-  // 移除申请列表响应事件监听（已改为Promise直接处理，不再监听）
-  // $emit.off("legion_applylistresp", handleApplyListResp);
 });
 
 // 今日是否已进行俱乐部签到
@@ -1567,8 +1581,9 @@ const clubOverview = computed(() => {
   const currentHP = formatNumber(boss.currentHP || 0);
   const currentBossId = boss.bossId || 0;
   const unfoughtBosses = [];
+  const roleStats = tokenStore.gameData?.roleInfo?.role?.statistics || {};
   for (let k = 1; k <= 150; k++) {
-    if (!tokenStore.gameData?.roleInfo?.role?.statistics[`lb:${k}`]) {
+    if (!roleStats[`lb:${k}`]) {
       unfoughtBosses.push(k);
     }
   }
@@ -1617,10 +1632,49 @@ const formatNumber = (num) => {
 
 <style scoped lang="scss">
 .club-info {
+  grid-column: 1 / -1;
+
+  .club-layout {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 16px;
+    width: 100%;
+  }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .section-title { font-size: 15px; font-weight: 600; }
+  .section-sub { color: var(--text-tertiary); font-size: 12px; }
+  .club-main { flex: 1 1 0; min-width: 0; }
+  .club-side {
+    flex: 0 0 380px;
+    width: 380px;
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 32px);
+  }
+  .club-side-body { min-height: 0; overflow-y: auto; padding-right: 2px; }
+
+  @media (max-width: 1280px) {
+    .club-main, .club-side { flex: 0 0 100%; width: 100%; }
+    .club-side { position: static; max-height: none; }
+    .club-side-body { overflow-y: visible; }
+  }
+
   .toolbar {
     display: flex;
     justify-content: flex-end;
     margin-bottom: var(--spacing-sm);
+    flex: 0 0 100%;
   }
 
   .overview {
