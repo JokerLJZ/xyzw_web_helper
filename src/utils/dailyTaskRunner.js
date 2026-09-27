@@ -146,11 +146,21 @@ const readExplicitClaimState = (value) => {
   return null;
 };
 
-const findCollectionClaimState = (value, depth = 0, visited = new Set()) => {
+const findCollectionClaimState = (
+  value,
+  now = new Date(),
+  depth = 0,
+  visited = new Set(),
+) => {
   if (!value || typeof value !== "object" || depth > 5 || visited.has(value)) {
     return null;
   }
   visited.add(value);
+
+  for (const [key, fieldValue] of Object.entries(value)) {
+    if (normalizeStateKey(key) !== "freerewardtime") continue;
+    return isTimestampToday(fieldValue, now) ? "claimed" : "claimable";
+  }
 
   const directState = readExplicitClaimState(value);
   if (directState) return directState;
@@ -158,11 +168,13 @@ const findCollectionClaimState = (value, depth = 0, visited = new Set()) => {
   const wrapperKeys = new Set([
     "body",
     "data",
+    "raw",
     "rawdata",
     "result",
     "collection",
     "collectioninfo",
     "rewardinfo",
+    "storeinfo",
   ]);
   for (const [key, nestedValue] of Object.entries(value)) {
     const normalizedKey = normalizeStateKey(key);
@@ -180,6 +192,7 @@ const findCollectionClaimState = (value, depth = 0, visited = new Set()) => {
     }
     const nestedState = findCollectionClaimState(
       nestedValue,
+      now,
       depth + 1,
       visited,
     );
@@ -204,6 +217,7 @@ export const getPermanentCardClaimState = (roleData, now = new Date()) => {
   if (claimedToday) return "claimed";
 
   const cardContainers = [
+    roleData.cardTime,
     roleData.card,
     roleData.cards,
     roleData.cardInfo,
@@ -247,9 +261,12 @@ export const getPermanentCardClaimState = (roleData, now = new Date()) => {
   return "claimable";
 };
 
-export const getCollectionFreeRewardClaimState = (response) => {
+export const getCollectionFreeRewardClaimState = (
+  response,
+  now = new Date(),
+) => {
   if (!response || typeof response !== "object") return "unknown";
-  return findCollectionClaimState(response) ?? "unknown";
+  return findCollectionClaimState(response, now) ?? "unknown";
 };
 
 const getServerErrorCode = (error) => {
