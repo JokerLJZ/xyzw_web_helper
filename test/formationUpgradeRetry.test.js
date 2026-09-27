@@ -58,6 +58,28 @@ test("进阶返回临时错误且服务器未生效时才重试", async () => {
   assert.deepEqual(result.result, { success: true });
 });
 
+test("重试前把最新服务器状态交给调用方重新规划参数", async () => {
+  const contexts = [];
+
+  await runUpgradeCommandWithReconciliation({
+    execute: async (context) => {
+      contexts.push(context);
+      if (context.attempt === 0) throw new Error("服务器错误: 20002 - 未知错误");
+      return { success: true };
+    },
+    queryState: async () => ({ level: 2100, gold: 100 }),
+    hasApplied: () => false,
+    isTransientError: () => true,
+    maxRetries: 1,
+    sleep: async () => {},
+  });
+
+  assert.deepEqual(contexts, [
+    { attempt: 0, state: null },
+    { attempt: 1, state: { level: 2100, gold: 100 } },
+  ]);
+});
+
 test("非临时升级错误直接抛出且不查询状态", async () => {
   let queryCount = 0;
 

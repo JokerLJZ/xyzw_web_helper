@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   getAffordableLevelCount,
+  getAffordableUpgradeStep,
   getHeroLevelCost,
   getHeroOrderCost,
   getLordLevelCost,
@@ -25,6 +26,31 @@ test("武将和主公升级按配置计算可负担等级数", () => {
     getCost: getHeroLevelCost,
   });
   assert.deepEqual(plan, { count: 2, goldCost: 34 });
+});
+
+test("阵容升级只选择50、10、5、1合法档位", () => {
+  const unitCost = () => 1;
+
+  assert.deepEqual(
+    getAffordableUpgradeStep({
+      currentLevel: 2100,
+      maximumLevel: 2138,
+      maximumCount: 50,
+      gold: 38,
+      getCost: unitCost,
+    }),
+    { count: 10, goldCost: 10 },
+  );
+  assert.deepEqual(
+    getAffordableUpgradeStep({
+      currentLevel: 2950,
+      maximumLevel: 3200,
+      maximumCount: 50,
+      gold: 2,
+      getCost: unitCost,
+    }),
+    { count: 1, goldCost: 1 },
+  );
 });
 
 test("主公和武将进阶读取当前阶对应的进阶石消耗", () => {

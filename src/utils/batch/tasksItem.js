@@ -7,7 +7,8 @@ import {
   runInventoryVerifiedGameCommand,
 } from "@/utils/helperTaskRunner";
 import {
-  getAffordableLevelCount,
+  LEVEL_UPGRADE_STEPS,
+  getAffordableUpgradeStep,
   getHeroLevelCost,
   getHeroOrderCost,
   getLordLevelCost,
@@ -78,10 +79,11 @@ export async function runUpgradeCommandWithReconciliation({
   maxRetries = 3,
   sleep = wait,
 }) {
+  let lastCheckedState = null;
   for (let attempt = 0; ; attempt += 1) {
     await sleep(actionDelayMs);
     try {
-      const result = await execute();
+      const result = await execute({ attempt, state: lastCheckedState });
       return { result, reconciledState: null, reconciled: false };
     } catch (error) {
       if (!isTransientError(error)) throw error;
@@ -98,6 +100,7 @@ export async function runUpgradeCommandWithReconciliation({
       if (hasApplied(state)) {
         return { result: null, reconciledState: state, reconciled: true };
       }
+      lastCheckedState = state;
       if (!willRetry) throw error;
     }
   }
@@ -1663,35 +1666,44 @@ export function createTasksItem(deps) {
   };
 
   const isFormationUpgradeTransientError = (error) =>
-    /200020|200050|200400|操作太快|操作过快|未知错误|重启游戏/.test(
+    /20002|200020|200050|200400|操作太快|操作过快|未知错误|重启游戏/.test(
       getErrorMessage(error),
     );
+
+  const getNextSmallerUpgradeMaximum = (count) => {
+    const currentIndex = LEVEL_UPGRADE_STEPS.indexOf(Number(count));
+    return LEVEL_UPGRADE_STEPS[currentIndex + 1] || 1;
+  };
 
   const runFormationUpgradeCommand = async ({
     tokenId,
     tokenName,
     command,
     params,
+    getParams,
     operationName,
     hasApplied,
   }) =>
     runUpgradeCommandWithReconciliation({
-      execute: () =>
+      execute: (context) =>
         tokenStore.sendMessageWithPromise(
           tokenId,
           command,
-          params,
+          getParams ? getParams(context) : params,
           HELPER_COMMAND_TIMEOUT_MS,
         ),
       queryState: () => tokenStore.sendGetRoleInfo(tokenId),
       hasApplied,
       isTransientError: isFormationUpgradeTransientError,
+      maxRetries: 1,
       onRetry: ({ error, attempt, maxRetries, willRetry }) => {
+        const currentOperationName =
+          typeof operationName === "function" ? operationName() : operationName;
         addLog({
           time: new Date().toLocaleTimeString(),
           message: willRetry
-            ? `${tokenName} ${operationName}触发临时错误，等待6秒后核对服务器状态；若未生效再进行第${attempt}/${maxRetries}次重试：${getErrorMessage(error)}`
-            : `${tokenName} ${operationName}重试后仍返回临时错误，等待6秒进行最后一次服务器状态核对：${getErrorMessage(error)}`,
+            ? `${tokenName} ${currentOperationName}触发临时错误，等待6秒后核对服务器状态；若未生效将重新规划合法升级档位后进行第${attempt}/${maxRetries}次重试：${getErrorMessage(error)}`
+            : `${tokenName} ${currentOperationName}重试后仍返回临时错误，等待6秒进行最后一次服务器状态核对：${getErrorMessage(error)}`,
           type: "warning",
         });
       },
@@ -2452,14 +2464,19 @@ export function createTasksItem(deps) {
         targetLevel,
         nextOrder?.level || targetLevel,
       );
-      const affordable = getAffordableLevelCount({
-        currentLevel,
+      let commandLevel = currentLevel;
+      let commandOrder = currentOrder;
+      let commandGold = remainingGold;
+      let commandStones = remainingStones;
+      let maximumCount = 50;
+      let upgradePlan = getAffordableUpgradeStep({
+        currentLevel: commandLevel,
         maximumLevel: levelBoundary,
-        maximumCount: 50,
-        gold: remainingGold,
+        maximumCount,
+        gold: commandGold,
         getCost: getHeroLevelCost,
       });
-      const upgradeNum = affordable.count;
+      const upgradeNum = upgradePlan.count;
 
       if (upgradeNum <= 0) {
         const nextCost = getHeroLevelCost(currentLevel);
@@ -2472,8 +2489,31 @@ export function createTasksItem(deps) {
         tokenId,
         tokenName,
         command: "hero_heroupgradelevel",
-        params: { heroId, upgradeNum },
-        operationName: `${heroName}${currentLevel}级升级${upgradeNum}级`,
+        getParams: ({ attempt, state }) => {
+          if (state) {
+            const latestHero = getHeroFromRoleInfo(state, heroId);
+            commandLevel = Number(latestHero?.level) || commandLevel;
+            commandOrder = Number(latestHero?.order) || commandOrder;
+            commandGold = Math.max(0, Number(state?.role?.gold) || 0);
+            commandStones = getItemQuantity(state, 1003);
+          }
+          if (attempt > 0) {
+            maximumCount = getNextSmallerUpgradeMaximum(upgradePlan.count);
+          }
+          upgradePlan = getAffordableUpgradeStep({
+            currentLevel: commandLevel,
+            maximumLevel: levelBoundary,
+            maximumCount,
+            gold: commandGold,
+            getCost: getHeroLevelCost,
+          });
+          if (upgradePlan.count <= 0) {
+            throw new Error("核对服务器状态后金币不足，停止升级");
+          }
+          return { heroId, upgradeNum: upgradePlan.count };
+        },
+        operationName: () =>
+          `${heroName}${commandLevel}级升级${upgradePlan.count}级`,
         hasApplied: (latestRoleInfo) =>
           Number(getHeroFromRoleInfo(latestRoleInfo, heroId)?.level) >
           previousLevel,
@@ -2483,7 +2523,9 @@ export function createTasksItem(deps) {
         !commandResult.reconciled &&
         !isSuccessfulHeroCommand(commandResult.result)
       ) {
-        throw new Error(`升级${upgradeNum}级失败（当前${currentLevel}级）`);
+        throw new Error(
+          `升级${upgradePlan.count}级失败（当前${commandLevel}级）`,
+        );
       }
 
       if (commandResult.reconciled) {
@@ -2499,8 +2541,10 @@ export function createTasksItem(deps) {
           1003,
         );
       } else {
-        remainingGold -= affordable.goldCost;
-        currentLevel += upgradeNum;
+        remainingGold = commandGold - upgradePlan.goldCost;
+        remainingStones = commandStones;
+        currentLevel = commandLevel + upgradePlan.count;
+        currentOrder = commandOrder;
       }
       performedActions += 1;
       addLog({
@@ -2526,7 +2570,7 @@ export function createTasksItem(deps) {
         : stopReason
           ? `${tokenName} ${heroName}升级停止：${stopReason}，当前${currentLevel}级/${currentOrder}阶`
           : `${tokenName} ${heroName}已完成至${currentLevel}级`,
-      type: shouldStop.value || stopReason ? "warning" : "success",
+      type: shouldStop.value ? "warning" : stopReason ? "info" : "success",
     });
     return {
       reachedTarget: currentLevel >= targetLevel,
@@ -2596,14 +2640,19 @@ export function createTasksItem(deps) {
           targetLevel,
           nextOrder?.level || targetLevel,
         );
-        const affordable = getAffordableLevelCount({
-          currentLevel,
+        let commandLevel = currentLevel;
+        let commandOrder = currentOrder;
+        let commandGold = remainingGold;
+        let commandStones = remainingStones;
+        let maximumCount = 50;
+        let upgradePlan = getAffordableUpgradeStep({
+          currentLevel: commandLevel,
           maximumLevel: levelBoundary,
-          maximumCount: 50,
-          gold: remainingGold,
+          maximumCount,
+          gold: commandGold,
           getCost: getLordLevelCost,
         });
-        const upgradeNum = affordable.count;
+        const upgradeNum = upgradePlan.count;
         if (upgradeNum <= 0) {
           const nextCost = getLordLevelCost(currentLevel);
           stopReason = `金币不足：当前${remainingGold}，主公升至下一级需要${nextCost ?? "未知"}`;
@@ -2614,8 +2663,31 @@ export function createTasksItem(deps) {
           tokenId,
           tokenName,
           command: "hero_lordupgradelevel",
-          params: { upgradeNum },
-          operationName: `主公${currentLevel}级升级${upgradeNum}级`,
+          getParams: ({ attempt, state }) => {
+            if (state) {
+              const latestLord = state?.role?.lord;
+              commandLevel = Number(latestLord?.level) || commandLevel;
+              commandOrder = Number(latestLord?.order) || commandOrder;
+              commandGold = Math.max(0, Number(state?.role?.gold) || 0);
+              commandStones = getItemQuantity(state, 1003);
+            }
+            if (attempt > 0) {
+              maximumCount = getNextSmallerUpgradeMaximum(upgradePlan.count);
+            }
+            upgradePlan = getAffordableUpgradeStep({
+              currentLevel: commandLevel,
+              maximumLevel: levelBoundary,
+              maximumCount,
+              gold: commandGold,
+              getCost: getLordLevelCost,
+            });
+            if (upgradePlan.count <= 0) {
+              throw new Error("核对服务器状态后金币不足，停止主公升级");
+            }
+            return { upgradeNum: upgradePlan.count };
+          },
+          operationName: () =>
+            `主公${commandLevel}级升级${upgradePlan.count}级`,
           hasApplied: (latestRoleInfo) =>
             Number(latestRoleInfo?.role?.lord?.level) > previousLevel,
         });
@@ -2632,8 +2704,10 @@ export function createTasksItem(deps) {
             1003,
           );
         } else {
-          remainingGold -= affordable.goldCost;
-          currentLevel += upgradeNum;
+          remainingGold = commandGold - upgradePlan.goldCost;
+          remainingStones = commandStones;
+          currentLevel = commandLevel + upgradePlan.count;
+          currentOrder = commandOrder;
         }
         performedActions += 1;
       }
@@ -2651,7 +2725,7 @@ export function createTasksItem(deps) {
       message: stopReason
         ? `${tokenName} 主公升级停止：${stopReason}，当前${currentLevel}级（${currentOrder}阶）`
         : `${tokenName} 主公已升级至${currentLevel}级（${currentOrder}阶）`,
-      type: stopReason ? "warning" : "success",
+      type: stopReason ? "info" : "success",
     });
     return {
       reachedTarget: currentLevel >= targetLevel,
@@ -2691,7 +2765,7 @@ export function createTasksItem(deps) {
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${tokenName} 吕布进阶石不足：当前${stones}个，需要${orderCost?.stones ?? "未知"}个，停止主公和吕布升级`,
-              type: "warning",
+              type: "info",
             });
             break;
           }

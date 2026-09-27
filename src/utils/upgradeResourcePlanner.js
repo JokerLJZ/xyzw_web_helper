@@ -66,3 +66,19 @@ export const getAffordableLevelCount = ({ currentLevel, maximumLevel, maximumCou
   }
   return { count, goldCost: spent };
 };
+
+export const LEVEL_UPGRADE_STEPS = [50, 10, 5, 1];
+
+/**
+ * 游戏升级接口只接受 50/10/5/1 四种档位。先计算资源允许的级数，
+ * 再选择不超过该级数的最大合法档位，并返回该档位的实际金币消耗。
+ */
+export const getAffordableUpgradeStep = (options) => {
+  const affordable = getAffordableLevelCount(options);
+  const count = LEVEL_UPGRADE_STEPS.find((step) => step <= affordable.count) || 0;
+  let goldCost = 0;
+  for (let offset = 0; offset < count; offset += 1) {
+    goldCost += options.getCost(Number(options.currentLevel) + offset);
+  }
+  return { count, goldCost };
+};
