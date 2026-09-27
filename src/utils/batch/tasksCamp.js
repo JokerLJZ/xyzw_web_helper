@@ -152,6 +152,64 @@ export function createTasksCamp(deps, {
   now = () => new Date(),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
+  const batchCampSignup = async () => {
+    const { selectedTokens, tokens, tokenStatus, isRunning, shouldStop,
+      ensureConnection, releaseConnectionSlot, tokenStore, addLog,
+      currentRunningTokenId, batchSettings, message } = deps;
+    if (!selectedTokens.value.length) return;
+    isRunning.value = true;
+    shouldStop.value = false;
+    const ids = [...selectedTokens.value];
+    ids.forEach((id) => { tokenStatus.value[id] = "waiting"; });
+    const log = (text, type = "info") => addLog({ time: new Date().toLocaleTimeString(), message: text, type });
+    let success = 0;
+    let failed = 0;
+    try {
+      for (const id of ids) {
+        if (shouldStop.value) break;
+        const name = tokens.value.find((token) => token.id === id)?.name || id;
+        currentRunningTokenId.value = id;
+        tokenStatus.value[id] = "running";
+        let connected = false;
+        const ownedSlot = tokenStore.getWebSocketStatus(id) !== "connected";
+        try {
+          await ensureConnection(id);
+          connected = true;
+          if (shouldStop.value) throw new Error("任务已停止");
+          await tokenStore.sendMessageWithPromise(
+            id,
+            "legionmatch_rolesignup",
+            {},
+            10000,
+          );
+          await sleep(Math.max(500, Number(batchSettings.commandDelay) || 500));
+          success++;
+          tokenStatus.value[id] = "completed";
+          log(`${name}：营地报名成功`, "success");
+        } catch (error) {
+          tokenStatus.value[id] = shouldStop.value ? "idle" : "failed";
+          if (!shouldStop.value) failed++;
+          log(`${name}：营地报名失败 - ${error.message}`, shouldStop.value ? "warning" : "error");
+        } finally {
+          if (connected) {
+            tokenStore.closeWebSocketConnection(id);
+            if (ownedSlot) releaseConnectionSlot();
+          }
+        }
+      }
+    } finally {
+      ids.forEach((id) => { if (tokenStatus.value[id] === "waiting") tokenStatus.value[id] = "idle"; });
+      const stopped = shouldStop.value;
+      isRunning.value = false;
+      currentRunningTokenId.value = null;
+      log(stopped
+        ? "营地报名批量任务已停止"
+        : `营地报名批量任务结束，成功 ${success} 个，失败 ${failed} 个`,
+      failed || stopped ? "warning" : "success");
+      if (!stopped) message[failed ? "warning" : "success"]("营地报名批量任务已结束，请查看日志");
+    }
+  };
+
   const batchCampChallenge = async () => {
     const { selectedTokens, tokens, tokenStatus, isRunning, shouldStop,
       ensureConnection, releaseConnectionSlot, tokenStore, addLog,
@@ -209,5 +267,5 @@ export function createTasksCamp(deps, {
       if (!stopped) message[failed ? "warning" : "success"]("营地批量任务已结束，请查看日志");
     }
   };
-  return { batchCampChallenge };
+  return { batchCampSignup, batchCampChallenge };
 }

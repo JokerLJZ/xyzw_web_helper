@@ -375,6 +375,13 @@
                 >
                   一键盐场报名
                 </n-button>
+                <n-button
+                  size="small"
+                  @click="batchCampSignup"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键营地报名
+                </n-button>
                 <n-tooltip>
                   <template #trigger>
                     <n-button
@@ -4671,6 +4678,7 @@ const taskGroupDefinitions = [
       "batchlingguanzi",
       "batchclubsign",
       "batchSaltSignup",
+      "batchCampSignup",
       "batchCampChallenge",
       "batcharenafight",
       "store_purchase",
@@ -7763,7 +7771,7 @@ const {
 
 const tasksSalt = createTasksSalt(createTaskDeps());
 const { batchSaltSignup } = tasksSalt;
-const { batchCampChallenge } = createTasksCamp(createTaskDeps());
+const { batchCampSignup, batchCampChallenge } = createTasksCamp(createTaskDeps());
 
 const tasksMainLevel = createTasksMainLevel(createTaskDeps());
 const { batchPushMainLevelInfo, pushMainLevelInfo } = tasksMainLevel;

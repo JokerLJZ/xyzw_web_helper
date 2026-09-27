@@ -167,6 +167,39 @@ test("多账号串行执行并释放自建连接；失败后继续下一个账�
   assert.equal(deps.currentRunningTokenId.value, null);
 });
 
+test("营地报名批量任务逐账号发送角色报名并释放自建连接", async () => {
+  const events = [];
+  const deps = {
+    selectedTokens: { value: ["a", "b"] },
+    tokens: { value: [{ id: "a", name: "甲" }, { id: "b", name: "乙" }] },
+    tokenStatus: { value: {} }, isRunning: { value: false }, shouldStop: { value: false },
+    currentRunningTokenId: { value: null }, batchSettings: { commandDelay: 0 },
+    addLog: () => {}, message: { success: () => {}, warning: () => {} },
+    ensureConnection: async (id) => events.push(`connect:${id}`),
+    releaseConnectionSlot: () => events.push("release"),
+    tokenStore: {
+      getWebSocketStatus: () => "disconnected",
+      closeWebSocketConnection: (id) => events.push(`close:${id}`),
+      sendMessageWithPromise: async (id, cmd, params) => {
+        events.push(`signup:${id}:${cmd}`);
+        assert.deepEqual(params, {});
+        if (id === "b") throw new Error("不在报名阶段");
+        return {};
+      },
+    },
+  };
+
+  const { batchCampSignup } = createTasksCamp(deps, { sleep: async () => {} });
+  await batchCampSignup();
+
+  assert.deepEqual(events, [
+    "connect:a", "signup:a:legionmatch_rolesignup", "close:a", "release",
+    "connect:b", "signup:b:legionmatch_rolesignup", "close:b", "release",
+  ]);
+  assert.deepEqual(deps.tokenStatus.value, { a: "completed", b: "failed" });
+  assert.equal(deps.isRunning.value, false);
+});
+
 test("攻击期间点击停止，不会继续攻击或宠物补齐", async () => {
   const f = fixture();
   let stopped = false;

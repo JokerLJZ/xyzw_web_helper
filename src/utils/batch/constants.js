@@ -59,6 +59,7 @@ export const availableTasks = [
   { label: "自动梦境", value: "batchmengjing" },
   { label: "一键俱乐部签到", value: "batchclubsign" },
   { label: "一键盐场报名", value: "batchSaltSignup" },
+  { label: "一键营地报名", value: "batchCampSignup" },
   { label: "自动营地挑战（周二至周四）", value: "batchCampChallenge" },
   { label: "一键竞技场战斗3次", value: "batcharenafight" },
   { label: "一键钓鱼补齐", value: "batchTopUpFish" },
