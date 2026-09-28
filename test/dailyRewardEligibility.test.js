@@ -6,7 +6,6 @@ import {
   DailyTaskRunner,
   getCollectionFreeRewardClaimState,
   getPermanentCardClaimState,
-  getTaskRewardClaimState,
 } from "../src/utils/dailyTaskRunner.js";
 
 const createRunner = (
@@ -142,60 +141,22 @@ test("珍宝阁状态不可识别时只查询、不盲目领取", async () => {
   assert.deepEqual(commands, ["collection_goodslist"]);
 });
 
-test("日常和周常奖励严格按API积分状态判断", () => {
-  assert.equal(getTaskRewardClaimState({ dailyPoint: 99 }, "daily"), "unavailable");
-  assert.equal(getTaskRewardClaimState({ dailyPoint: 100 }, "daily"), "claimable");
-  assert.equal(getTaskRewardClaimState({ dailyPoint: 101 }, "daily"), "claimed");
-  assert.equal(getTaskRewardClaimState({ weekPoint: 499 }, "weekly"), "unavailable");
-  assert.equal(getTaskRewardClaimState({ weekPoint: 500 }, "weekly"), "claimable");
-  assert.equal(getTaskRewardClaimState({ weekPoint: 501 }, "weekly"), "claimed");
-  assert.equal(getTaskRewardClaimState({}, "daily"), "unknown");
-});
-
 test("单项任务奖励严格限制为1到10", () => {
   assert.deepEqual([...DAILY_TASK_REWARD_IDS], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 });
 
-test("日常和周常奖励先查询API，只在明确可领取时发送指令", async () => {
+test("日常和周常总奖励不查询状态，直接发送领取指令", async () => {
   const commands = [];
-  const roleStates = [
-    { role: { dailyTask: { dailyPoint: 100, weekPoint: 400 } } },
-    { role: { dailyTask: { dailyPoint: 101, weekPoint: 500 } } },
-  ];
   const { runner } = createRunner(
     async (_tokenId, cmd) => {
       commands.push(cmd);
       return {};
     },
-    async () => roleStates.shift(),
+    async () => assert.fail("不应查询角色状态"),
   );
 
-  const dailyResult = await runner.claimDailyTaskReward("token-1");
-  const weeklyResult = await runner.claimWeeklyTaskReward("token-1");
+  await runner.claimDailyTaskReward("token-1");
+  await runner.claimWeeklyTaskReward("token-1");
 
-  assert.equal(dailyResult.skipped, undefined);
-  assert.equal(weeklyResult.skipped, undefined);
   assert.deepEqual(commands, ["task_claimdailyreward", "task_claimweekreward"]);
-});
-
-test("状态不明确或积分未达标时不发送日常周常领奖指令", async () => {
-  const commands = [];
-  const roleStates = [
-    { role: { dailyTask: {} } },
-    { role: { dailyTask: { weekPoint: 499 } } },
-  ];
-  const { runner } = createRunner(
-    async (_tokenId, cmd) => {
-      commands.push(cmd);
-      return {};
-    },
-    async () => roleStates.shift(),
-  );
-
-  const dailyResult = await runner.claimDailyTaskReward("token-1");
-  const weeklyResult = await runner.claimWeeklyTaskReward("token-1");
-
-  assert.deepEqual(dailyResult, { skipped: true, reason: "unknown" });
-  assert.deepEqual(weeklyResult, { skipped: true, reason: "unavailable" });
-  assert.deepEqual(commands, []);
 });
