@@ -1,6 +1,7 @@
-/** 营地挑战：低战力据点优先，普通挑战最多 12 次，宠物目标补齐当日 3 胜。 */
+/** 营地挑战：低战力据点优先，连续 3 次未获胜后改打宠物，补齐当日 3 胜。 */
 export const CAMP_TARGET_WINS = 3;
 export const CAMP_MAX_ATTACKS = 12;
+export const CAMP_MAX_CONSECUTIVE_FAILURES = 3;
 
 export function getCampDay(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -72,6 +73,7 @@ export async function runCampChallenge({
   const powers = new Map();
   const failedTargets = new Set();
   let normalAttempts = 0;
+  let consecutiveFailures = 0;
 
   const attack = async (cmd, params) => {
     const before = progress;
@@ -95,7 +97,12 @@ export async function runCampChallenge({
     return won;
   };
 
-  while (progress.wins < CAMP_TARGET_WINS && progress.attacks < CAMP_MAX_ATTACKS && normalAttempts < CAMP_MAX_ATTACKS) {
+  while (
+    progress.wins < CAMP_TARGET_WINS
+    && progress.attacks < CAMP_MAX_ATTACKS
+    && normalAttempts < CAMP_MAX_ATTACKS
+    && consecutiveFailures < CAMP_MAX_CONSECUTIVE_FAILURES
+  ) {
     check();
     const defenders = info.club.oppoMap?.[day.weekday]?.defenders;
     if (!defenders) throw new Error("今日对阵已变化，停止挑战");
@@ -137,7 +144,15 @@ export async function runCampChallenge({
     const won = await attack("club_attack", {
       nodeId: target.nodeId, targetId: target.roleId, challengeCnt, failCnt,
     });
-    if (!won) failedTargets.add(target.key);
+    if (won) {
+      consecutiveFailures = 0;
+    } else {
+      consecutiveFailures++;
+      failedTargets.add(target.key);
+      if (consecutiveFailures >= CAMP_MAX_CONSECUTIVE_FAILURES) {
+        log(`普通据点连续 ${CAMP_MAX_CONSECUTIVE_FAILURES} 次未获胜，转为挑战宠物`);
+      }
+    }
   }
   // 每次补充都要求成功次数增长，失败即停止，避免无界消耗。
   while (progress.wins < CAMP_TARGET_WINS) {

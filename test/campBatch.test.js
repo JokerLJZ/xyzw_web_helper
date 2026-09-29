@@ -64,13 +64,21 @@ test("优先最低战力，实时据点计数，3胜立即停止", async () => {
   assert.equal(f.calls.some((c) => c.cmd === "club_attackmonster"), false);
 });
 
-test("普通挑战12次不足3胜，转宠物目标补齐", async () => {
+test("普通挑战连续3次未获胜，转宠物目标补齐", async () => {
   const f = fixture();
   const result = await runCampChallenge(f);
-  assert.equal(f.calls.filter((c) => c.cmd === "club_attack").length, 12);
+  assert.equal(f.calls.filter((c) => c.cmd === "club_attack").length, 3);
   assert.equal(f.calls.filter((c) => c.cmd === "club_attackmonster").length, 3);
   assert.equal(result.wins, 3);
   assert.deepEqual(f.calls.filter((c) => c.cmd === "club_attack").slice(0, 2).map((c) => c.params.nodeId), [2, 1]);
+});
+
+test("普通挑战获胜后重置连续失败次数", async () => {
+  const f = fixture({ winNormal: (attempt) => attempt === 3 });
+  const result = await runCampChallenge(f);
+  assert.equal(f.calls.filter((c) => c.cmd === "club_attack").length, 6);
+  assert.equal(f.calls.filter((c) => c.cmd === "club_attackmonster").length, 2);
+  assert.equal(result.wins, 3);
 });
 
 test("既有成功次数及出手计入当日目标，重复运行不重复攻击", async () => {
