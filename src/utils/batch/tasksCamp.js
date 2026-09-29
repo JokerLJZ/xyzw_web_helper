@@ -1,4 +1,4 @@
-/** 营地挑战：低战力据点优先，连续 3 次未获胜后改打宠物，补齐当日 3 胜。 */
+/** 营地挑战：低战力据点优先，连续 3 次未获胜后改打一次宠物。 */
 export const CAMP_TARGET_WINS = 3;
 export const CAMP_MAX_ATTACKS = 12;
 export const CAMP_MAX_CONSECUTIVE_FAILURES = 3;
@@ -154,11 +154,25 @@ export async function runCampChallenge({
       }
     }
   }
-  // 每次补充都要求成功次数增长，失败即停止，避免无界消耗。
-  while (progress.wins < CAMP_TARGET_WINS) {
-    if (!await attack("club_attackmonster", {})) {
-      throw new Error("宠物目标未获胜，已停止补充挑战");
+  if (progress.wins < CAMP_TARGET_WINS) {
+    // 宠物战不计入据点 attackCnt/aSuccessCnt，必须直接读取战斗响应判定，且只挑战一次。
+    const monsterResult = await request("club_attackmonster", {
+      useItem: false,
+      teamSetParams,
+    });
+    const monsterHp = Number(monsterResult?.battleData?.result?.accept?.ext?.curHP);
+    if (!Number.isFinite(monsterHp)) {
+      throw new Error("宠物挑战结果无法确认，已停止以避免重复挑战");
     }
+    const monsterWon = monsterHp === 0;
+    const rewardCount = Array.isArray(monsterResult?.reward) ? monsterResult.reward.length : 0;
+    log(`宠物挑战${monsterWon ? "胜利" : "失败"}${rewardCount ? `，获得 ${rewardCount} 个奖励` : ""}`);
+    return {
+      status: "completed",
+      reason: `已挑战宠物（${monsterWon ? "胜利" : "失败"}）`,
+      monsterWon,
+      ...progress,
+    };
   }
   return { status: "completed", ...progress };
 }

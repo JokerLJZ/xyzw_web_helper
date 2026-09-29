@@ -22,10 +22,10 @@ function fixture({ wins = 0, attacks = 0, winNormal = () => false, winMonster = 
     if (cmd === "role_getroleinfo") return { role };
     if (cmd === "club_gettargetteam") return { roleBattleTeam: { role: { power: params.targetId === 101 ? 1000 : 100 } } };
     const progress = info.siege.attackMap[260922];
-    progress.attackCnt++;
-    const won = cmd === "club_attackmonster" ? winMonster : winNormal(progress.attackCnt);
-    if (won) progress.aSuccessCnt++;
+    const won = cmd === "club_attackmonster" ? winMonster : winNormal(progress.attackCnt + 1);
     if (cmd === "club_attack") {
+      progress.attackCnt++;
+      if (won) progress.aSuccessCnt++;
       const target = info.club.oppoMap[2].defenders[params.nodeId];
       assert.equal(params.challengeCnt, target.challengeCnt);
       assert.equal(params.failCnt, target.failCnt);
@@ -35,6 +35,12 @@ function fixture({ wins = 0, attacks = 0, winNormal = () => false, winMonster = 
     assert.equal(params.useItem, false);
     assert.equal(params.teamSetParams.petUId, "own-pet");
     if (timeout) throw new Error("timeout");
+    if (cmd === "club_attackmonster") {
+      return {
+        battleData: { result: { accept: { ext: { curHP: won ? 0 : 100 } } } },
+        reward: won ? [{ itemId: 1 }] : [],
+      };
+    }
     return { siege: { attackMap: {} }, addScore: 6 };
   };
   return { info, calls, send, now: tuesday };
@@ -64,12 +70,13 @@ test("优先最低战力，实时据点计数，3胜立即停止", async () => {
   assert.equal(f.calls.some((c) => c.cmd === "club_attackmonster"), false);
 });
 
-test("普通挑战连续3次未获胜，转宠物目标补齐", async () => {
+test("普通挑战连续3次未获胜，改为挑战一次宠物", async () => {
   const f = fixture();
   const result = await runCampChallenge(f);
   assert.equal(f.calls.filter((c) => c.cmd === "club_attack").length, 3);
-  assert.equal(f.calls.filter((c) => c.cmd === "club_attackmonster").length, 3);
-  assert.equal(result.wins, 3);
+  assert.equal(f.calls.filter((c) => c.cmd === "club_attackmonster").length, 1);
+  assert.equal(result.wins, 0);
+  assert.equal(result.monsterWon, true);
   assert.deepEqual(f.calls.filter((c) => c.cmd === "club_attack").slice(0, 2).map((c) => c.params.nodeId), [2, 1]);
 });
 
@@ -77,26 +84,43 @@ test("普通挑战获胜后重置连续失败次数", async () => {
   const f = fixture({ winNormal: (attempt) => attempt === 3 });
   const result = await runCampChallenge(f);
   assert.equal(f.calls.filter((c) => c.cmd === "club_attack").length, 6);
-  assert.equal(f.calls.filter((c) => c.cmd === "club_attackmonster").length, 2);
-  assert.equal(result.wins, 3);
+  assert.equal(f.calls.filter((c) => c.cmd === "club_attackmonster").length, 1);
+  assert.equal(result.wins, 1);
+  assert.equal(result.monsterWon, true);
 });
 
 test("既有成功次数及出手计入当日目标，重复运行不重复攻击", async () => {
-  const f = fixture({ wins: 2, attacks: 11 });
+  const f = fixture({ wins: 2, attacks: 11, winNormal: () => true });
   const result = await runCampChallenge(f);
   assert.equal(result.wins, 3);
   assert.equal(f.calls.filter((c) => c.cmd === "club_attack").length, 1);
-  assert.equal(f.calls.filter((c) => c.cmd === "club_attackmonster").length, 1);
+  assert.equal(f.calls.filter((c) => c.cmd === "club_attackmonster").length, 0);
   f.calls.length = 0;
   await runCampChallenge(f);
   assert.deepEqual(f.calls.map((c) => c.cmd), ["club_getinfo"]);
 });
 
-test("已出手12次直接宠物补齐；宠物失败停止", async () => {
+test("已出手12次直接挑战一次宠物，并按战斗响应记录失败", async () => {
   const f = fixture({ attacks: 12, wins: 1, winMonster: false });
-  await assert.rejects(runCampChallenge(f), /宠物目标未获胜/);
+  const result = await runCampChallenge(f);
+  assert.equal(result.monsterWon, false);
+  assert.match(result.reason, /宠物（失败）/);
   assert.equal(f.calls.filter((c) => c.cmd === "club_attackmonster").length, 1);
   assert.equal(f.calls.some((c) => c.cmd === "club_attack"), false);
+});
+
+test("宠物挑战响应缺少战斗结果时停止且不重复挑战", async () => {
+  const f = fixture({ attacks: 12 });
+  let monsterCalls = 0;
+  const send = async (cmd, params) => {
+    if (cmd === "club_attackmonster") {
+      monsterCalls++;
+      return {};
+    }
+    return f.send(cmd, params);
+  };
+  await assert.rejects(runCampChallenge({ ...f, send }), /宠物挑战结果无法确认/);
+  assert.equal(monsterCalls, 1);
 });
 
 test("超时但服务端已成功时对账后继续，最终只出手3次", async () => {
@@ -138,10 +162,12 @@ test("攻击使用本账号阵容，协议编码保留宠物及据点参数", ()
   }
 });
 
-test("无可挑战据点时以宠物补齐，无今日对阵时跳过", async () => {
+test("无可挑战据点时挑战一次宠物，无今日对阵时跳过", async () => {
   const f = fixture({ wins: 2, attacks: 2 });
   f.info.club.oppoMap[2].defenders = {};
-  assert.equal((await runCampChallenge(f)).wins, 3);
+  const result = await runCampChallenge(f);
+  assert.equal(result.wins, 2);
+  assert.equal(result.monsterWon, true);
   const g = fixture();
   g.info.club.oppoMap = {};
   assert.equal((await runCampChallenge(g)).status, "skipped");
