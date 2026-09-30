@@ -6,6 +6,14 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 This is a Vue 3 Token Manager application for XYZW game automation. The application manages game tokens via Base64 decoding, establishes WebSocket connections, and provides a visual interface for token management and game automation.
 
+## API Reference Requirement
+
+When implementing or fixing a feature that communicates with the game server, first inspect the matching captured API records in:
+
+https://github.com/xiangfu1027/xyzw_web_helper/tree/magic/api%E9%87%87%E9%9B%86
+
+Use those captures as the source of truth for command names, request parameters, response shapes, and incremental role updates. Add or update tests to reflect the observed API behavior.
+
 ## Development Commands
 
 ### Core Commands

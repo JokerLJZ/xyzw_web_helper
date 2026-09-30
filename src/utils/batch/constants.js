@@ -98,6 +98,10 @@ export const availableTasks = [
     value: "batchClaimConsumptionRewards",
   },
   {
+    label: "使用消耗活动普通道具",
+    value: "batchUseConsumptionActivityItems",
+  },
+  {
     label: "玄武活动兑换宠物饼干",
     value: "batchExchangeXuanwuPetCookies",
   },
