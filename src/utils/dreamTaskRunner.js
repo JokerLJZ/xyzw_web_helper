@@ -32,17 +32,22 @@ export function getDreamHeroes(dungeon) {
 /** 通关后服务端会清空层数，但仍保留本期梦境商店。 */
 export function isDreamCompleted(dungeon, period) {
   if (!dungeon || Number(dungeon.beginTime) !== Number(period)) return false;
-  if (!dungeon.merchant) return false;
 
   const rawFloor = dungeon.id;
   const floor = Number(rawFloor);
+  // 部分已通关账号仍保留 id=200，但角色信息里的 merchant 可能会延迟到
+  // 下一次查询才出现。达到最终层本身已经足够证明通关。
+  if (Number.isInteger(floor) && floor >= DREAM_FINAL_FLOOR) return true;
+
+  // 服务端清空层数时，以仍保留的本期商店作为通关标记，避免把尚未
+  // 初始化的新期梦境误判为已通关。
+  if (!dungeon.merchant) return false;
   return (
     rawFloor === undefined ||
     rawFloor === null ||
     rawFloor === "" ||
     !Number.isInteger(floor) ||
-    floor < 0 ||
-    floor >= DREAM_FINAL_FLOOR
+    floor < 0
   );
 }
 
@@ -99,6 +104,7 @@ export async function runDreamAutoPush({
       initialFloor: DREAM_FINAL_FLOOR,
       floor: DREAM_FINAL_FLOOR,
       battles: 0,
+      merchant: dungeon.merchant || null,
     };
   }
   if (Number(dungeon.beginTime) !== period || !Object.values(dungeon.battleTeam || {}).some((h) => h?.heroId)) {
@@ -124,6 +130,7 @@ export async function runDreamAutoPush({
     initialFloor,
     floor,
     battles,
+    merchant: dungeon.merchant || null,
   });
   log(`开始自动梦境，当前第 ${initialFloor} 层`);
   while (battles < maxBattles) {
@@ -208,7 +215,7 @@ export async function runAutomaticDream({ purchase, ...options }) {
   const result = await runDreamAutoPush(options);
   if (result.status !== "skipped" && !options.stopped?.()) {
     options.log?.(`推层阶段结束：${result.reason}；开始自动采购`);
-    await purchase();
+    await purchase(result);
   }
   return result;
 }

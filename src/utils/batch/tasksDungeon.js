@@ -289,7 +289,7 @@ export function createTasksDungeon(deps) {
     message.success("消耗活动任务奖励领取结束");
   };
 
-  const runDreamPurchaseForToken = async (tokenId, token, purchaseList) => {
+  const runDreamPurchaseForToken = async (tokenId, token, purchaseList, merchantSnapshot = null) => {
     if (purchaseList.length === 0) {
       addLog({
         time: new Date().toLocaleTimeString(),
@@ -305,23 +305,17 @@ export function createTasksDungeon(deps) {
       type: "info",
     });
 
-    const roleInfo = await tokenStore.sendMessageWithPromise(
-      tokenId,
-      "role_getroleinfo",
-      {},
-      15000,
-    );
-
-    if (
-      !roleInfo ||
-      !roleInfo.role ||
-      !roleInfo.role.dungeon ||
-      !roleInfo.role.dungeon.merchant
-    ) {
-      throw new Error("无法获取梦境商店数据");
+    let merchantData = merchantSnapshot;
+    if (!merchantData) {
+      const roleInfo = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "role_getroleinfo",
+        {},
+        15000,
+      );
+      merchantData = roleInfo?.role?.dungeon?.merchant || null;
     }
-
-    const merchantData = roleInfo.role.dungeon.merchant;
+    if (!merchantData) throw new Error("无法获取梦境商店数据");
 
     let successCount = 0;
     let failCount = 0;
@@ -439,7 +433,12 @@ export function createTasksDungeon(deps) {
         connected = true;
         if (shouldStop.value) return;
         const result = await runAutomaticDream({
-          purchase: () => runDreamPurchaseForToken(tokenId, token, purchaseList),
+          purchase: ({ merchant }) => runDreamPurchaseForToken(
+            tokenId,
+            token,
+            purchaseList,
+            merchant,
+          ),
           send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
           stopped: () => shouldStop.value,
           pause: () => sleep(DREAM_PUSH_INTERVAL_MS),

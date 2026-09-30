@@ -1067,19 +1067,26 @@ export class DailyTaskRunner {
     }
   }
 
-  async runDreamPurchaseForToken(tokenId, purchaseList) {
+  async runDreamPurchaseForToken(tokenId, purchaseList, merchantSnapshot = null) {
     if (purchaseList.length === 0) {
       this.log("未配置梦境购买清单，跳过购买", "warning");
       return;
     }
 
-    const role = await this.getLatestRole(tokenId, "读取梦境商店数据");
-
-    if (!role?.dungeon?.merchant) {
-      throw new Error("无法获取梦境商店数据");
+    let merchantData = merchantSnapshot;
+    if (!merchantData) {
+      // 200 层通关时 merchant 偶尔不会随首次角色信息一起返回。强制补查，
+      // 不能使用 getLatestRole，因为它会复用本轮日常任务的旧快照。
+      const roleInfo = await this.executeGameCommand(
+        tokenId,
+        "role_getroleinfo",
+        {},
+        "刷新梦境商店数据",
+        15000,
+      );
+      merchantData = extractRolePatch(roleInfo)?.dungeon?.merchant || null;
     }
-
-    const merchantData = role.dungeon.merchant;
+    if (!merchantData) throw new Error("无法获取梦境商店数据");
 
     let successCount = 0;
     let failCount = 0;
@@ -1145,7 +1152,11 @@ export class DailyTaskRunner {
 
   async runDreamTask(tokenId) {
     const result = await runAutomaticDream({
-      purchase: () => this.runDreamPurchaseForToken(tokenId, this.loadDreamPurchaseList()),
+      purchase: ({ merchant }) => this.runDreamPurchaseForToken(
+        tokenId,
+        this.loadDreamPurchaseList(),
+        merchant,
+      ),
       enabled: isDreamEnabled(tokenId),
       initialRole: this.roleSnapshots.get(tokenId) || null,
       send: async (cmd, params) => {

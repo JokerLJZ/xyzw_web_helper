@@ -191,6 +191,53 @@ test("已达到200层且服务端保留层数字段时跳过战斗并继续采�
   );
 });
 
+test("已达到200层但首次角色信息暂缺商店时仍按已通关处理", async () => {
+  const f = fixture();
+  f.role.dungeon.id = DREAM_FINAL_FLOOR;
+  delete f.role.dungeon.merchant;
+  let purchaseContext;
+
+  assert.equal(
+    isDreamCompleted(f.role.dungeon, getDreamPeriod(now())),
+    true,
+  );
+  const result = await runAutomaticDream({
+    ...f,
+    initialRole: structuredClone(f.role),
+    purchase: async (context) => {
+      purchaseContext = context;
+    },
+  });
+
+  assert.equal(result.battles, 0);
+  assert.equal(purchaseContext.merchant, null);
+  assert.equal(
+    f.calls.some((call) => call.cmd === "fight_startdungeon"),
+    false,
+  );
+});
+
+test("已通关时采购直接复用首次角色信息的商店快照", async () => {
+  const f = fixture();
+  f.role.dungeon.id = DREAM_FINAL_FLOOR;
+  f.role.dungeon.merchant = { 1: [5] };
+  let merchant;
+
+  await runAutomaticDream({
+    ...f,
+    initialRole: structuredClone(f.role),
+    purchase: async (context) => {
+      merchant = context.merchant;
+    },
+  });
+
+  assert.deepEqual(merchant, { 1: [5] });
+  assert.equal(
+    f.calls.filter((call) => call.cmd === "role_getroleinfo").length,
+    0,
+  );
+});
+
 test("最后一战通关导致层数字段消失时结束推层并继续采购", async () => {
   const f = fixture();
   f.role.dungeon.id = 199;
