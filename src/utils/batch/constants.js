@@ -98,7 +98,7 @@ export const availableTasks = [
     value: "batchClaimConsumptionRewards",
   },
   {
-    label: "使用消耗活动普通道具",
+    label: "使用消耗活动奖励道具",
     value: "batchUseConsumptionActivityItems",
   },
   {

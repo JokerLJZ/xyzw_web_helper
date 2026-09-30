@@ -133,7 +133,7 @@ test("批量领取严格先查询，再按动态活动ID领取并刷新", async 
   );
 });
 
-test("批量使用普通活动道具每个账号只执行一次且最多3000个", async () => {
+test("批量使用高级奖励道具每个账号只执行一次且最多3000个", async () => {
   const tokenId = "token-use";
   const commands = [];
   const tokenStatus = { value: {} };
@@ -153,7 +153,7 @@ test("批量使用普通活动道具每个账号只执行一次且最多3000个"
         commands.push({ cmd, params });
         if (cmd === "activity_get") return capturedActivity;
         if (cmd === "role_getroleinfo") {
-          return { role: { items: { 5278: { quantity: 7501 } } } };
+          return { role: { items: { 5279: { quantity: 7501 } } } };
         }
         if (cmd === "item_openbox") return { reward: [] };
         return {};
@@ -172,7 +172,7 @@ test("批量使用普通活动道具每个账号只执行一次且最多3000个"
     commands.filter(({ cmd }) => cmd === "item_openbox"),
     [3000].map((number) => ({
       cmd: "item_openbox",
-      params: { itemId: 5278, number, index: 0 },
+      params: { itemId: 5279, number, index: 0 },
     })),
   );
   assert.equal(tokenStatus.value[tokenId], "completed");
