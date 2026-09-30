@@ -378,6 +378,7 @@ export function registerDefaultCommands(reg) {
       missionId: 0,
     })
     .register("activity_commonbuygoods")
+    .register("autumn_useitem", { itemNum: 1 })
     .register("legion_getpayloadtask")
     .register("legion_getpayloadkillrecord")
     .register("legion_getpayloadbf")
@@ -1115,6 +1116,7 @@ export class XyzwWebSocketClient {
       fight_startpvpresp: "fight_startpvp",
       fight_startlevelresp: "fight_startlevel",
       activity_getresp: "activity_get",
+      autumn_useitemresp: "autumn_useitem",
       activity_claimweekactrewardresp: "activity_claimweekactreward",
       collection_goodslistresp: "collection_goodslist",
       collection_claimfreerewardresp: "collection_claimfreereward",

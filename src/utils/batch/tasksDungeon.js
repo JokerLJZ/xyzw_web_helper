@@ -183,7 +183,7 @@ export function createTasksDungeon(deps) {
 
   const getDreamPurchaseList = () => batchSettings.dreamPurchaseList || [];
 
-  /** 使用本期消耗活动中可开出多种奖励的高级活动道具。 */
+  /** 使用本期消耗活动中掉落数量最多的普通活动道具。 */
   const batchUseConsumptionActivityItems = async () => {
     if (selectedTokens.value.length === 0) return;
 
@@ -222,8 +222,8 @@ export function createTasksDungeon(deps) {
           return;
         }
 
-        const baseDropItem = findMostReturnedConsumptionItem(activityResponse);
-        if (!baseDropItem) {
+        const target = findMostReturnedConsumptionItem(activityResponse);
+        if (!target) {
           tokenStatus.value[tokenId] = "skipped";
           addLog({
             time: new Date().toLocaleTimeString(),
@@ -233,10 +233,6 @@ export function createTasksDungeon(deps) {
           return;
         }
 
-        // 抓包中基础掉落道具 5278 对应可开启的高级道具 5279；当前期次
-        // 同样按连续 ID 配对（5286 -> 5287）。基础道具本身不能 openPack。
-        const targetItemId = baseDropItem.itemId + 1;
-
         const roleResponse = await tokenStore.sendMessageWithPromise(
           tokenId,
           "role_getroleinfo",
@@ -244,14 +240,14 @@ export function createTasksDungeon(deps) {
           15000,
         );
         const role = getResponseBody(roleResponse)?.role || roleResponse?.role;
-        const quantity = Number(role?.items?.[targetItemId]?.quantity || 0);
+        const quantity = Number(role?.items?.[target.itemId]?.quantity || 0);
         const [useNumber = 0] = buildConsumptionItemUseBatches(quantity);
 
         if (useNumber === 0) {
           tokenStatus.value[tokenId] = "completed";
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 道具${targetItemId}库存为0，无需使用`,
+            message: `${tokenName} 道具${target.itemId}库存为0，无需使用`,
             type: "info",
           });
           return;
@@ -259,28 +255,28 @@ export function createTasksDungeon(deps) {
 
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 开始使用消耗活动奖励道具${targetItemId}，库存${quantity}，本次使用${useNumber}`,
+          message: `${tokenName} 开始使用消耗活动普通道具${target.itemId}，库存${quantity}，本次使用${useNumber}`,
           type: "info",
         });
 
         await tokenStore.sendMessageWithPromise(
           tokenId,
-          "item_openbox",
-          { itemId: targetItemId, number: useNumber, index: 0 },
+          "autumn_useitem",
+          { itemNum: useNumber },
           15000,
         );
 
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 消耗活动奖励道具使用完成：道具${targetItemId}本次使用${useNumber}个${quantity > useNumber ? `，剩余${quantity - useNumber}个` : ""}`,
+          message: `${tokenName} 消耗活动普通道具使用完成：道具${target.itemId}本次使用${useNumber}个${quantity > useNumber ? `，剩余${quantity - useNumber}个` : ""}`,
           type: "success",
         });
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 消耗活动奖励道具使用失败: ${error.message || "未知错误"}`,
+          message: `${tokenName} 消耗活动普通道具使用失败: ${error.message || "未知错误"}`,
           type: "error",
         });
       } finally {
@@ -294,7 +290,7 @@ export function createTasksDungeon(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("消耗活动奖励道具批量使用结束");
+    message.success("消耗活动普通道具批量使用结束");
   };
 
   /** 查询本期消耗活动后，只领取已经达标且尚未领取的任务奖励。 */

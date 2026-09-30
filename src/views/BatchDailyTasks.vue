@@ -481,9 +481,9 @@
                   size="small"
                   @click="batchUseConsumptionActivityItems"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="自动识别本期可开启的高级奖励道具；每个账号每次任务只执行一次，最多使用3000个"
+                  title="自动识别本期返回数量最多的普通活动道具；每个账号每次任务只执行一次，最多使用3000个"
                 >
-                  使用消耗活动奖励道具
+                  使用消耗活动普通道具
                 </n-button>
               </n-space>
               <n-space>
