@@ -690,6 +690,31 @@
                 </n-button>
               </n-space>
             </n-tab-pane>
+            <n-tab-pane name="weekly" tab="周常">
+              <n-space>
+                <n-button
+                  size="small"
+                  @click="openSmartBoxWeeklyModal"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  智能宝箱周任务
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="openWeeklyTaskModal('recruit')"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  智能招募周任务
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="openWeeklyTaskModal('blackMarket')"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  智能黑市周任务
+                </n-button>
+              </n-space>
+            </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
               <n-space>
                 <n-button
@@ -807,27 +832,6 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   主公升级至6000级
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="openSmartBoxWeeklyModal"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  智能宝箱周任务
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchSmartRecruitWeekly"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  智能招募周任务
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchSmartBlackMarketWeekly"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  江湖黑市周任务
                 </n-button>
                 <n-button
                   size="small"
@@ -1847,6 +1851,7 @@
             />
           </div>
         </div>
+        <WeeklyRewardSettings v-model="smartBoxWeeklySettings.rewardChoice" />
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
           <n-button
             @click="showSmartBoxWeeklyModal = false"
@@ -1859,6 +1864,18 @@
           </n-button>
         </div>
       </div>
+    </n-modal>
+
+    <n-modal v-model:show="showWeeklyTaskModal" preset="card" :title="weeklyTaskType === 'recruit' ? '智能招募周任务' : '智能黑市周任务'" style="width: 90%; max-width: 560px">
+      <n-space vertical>
+        <template v-if="weeklyTaskType === 'recruit'">
+          <span>任务轮次</span>
+          <n-input-number v-model:value="weeklyTaskSettings.roundCount" :min="1" :max="4" :precision="0" />
+        </template>
+        <JianghuBlackMarketSettings v-else v-model="weeklyTaskSettings.purchases" />
+        <WeeklyRewardSettings v-model="weeklyTaskSettings.rewardChoice" />
+        <n-button type="primary" @click="executeWeeklyTask">开始执行</n-button>
+      </n-space>
     </n-modal>
 
     <!-- Hero Level Upgrade Modal -->
@@ -2344,6 +2361,7 @@
                   style="width: 90px"
                 />
               </n-space>
+              <WeeklyRewardSettings v-model="taskForm.taskConfig.batchSmartBoxWeekly.rewardChoice" />
             </div>
             <div
               v-if="hasSmartRecruitWeeklySelected"
@@ -2353,7 +2371,7 @@
                 智能招募周任务
               </div>
               <div style="font-size: 12px; color: #86909c">
-                固定规则：活动累计最多四轮；自动读取当前轮进度，只补足到400次，并默认领取万能红自选奖励。
+                固定规则：活动累计最多四轮；自动读取当前轮进度，只补足到400次，并按配置领取自选大奖。
               </div>
               <n-space align="center" style="margin-top: 8px">
                 <span style="font-size: 12px; color: #86909c">任务轮次</span>
@@ -2368,7 +2386,13 @@
                   style="width: 90px"
                 />
               </n-space>
+              <WeeklyRewardSettings v-model="taskForm.taskConfig.batchSmartRecruitWeekly.rewardChoice" />
             </div>
+          </div>
+          <div class="setting-item" v-if="hasSmartBlackMarketWeeklySelected">
+            <label class="setting-label">江湖黑市周采购清单</label>
+            <JianghuBlackMarketSettings v-model="taskForm.taskConfig.batchSmartBlackMarketWeekly.purchases" />
+            <WeeklyRewardSettings v-model="taskForm.taskConfig.batchSmartBlackMarketWeekly.rewardChoice" />
           </div>
           <div class="setting-item" v-if="hasLegacyTaskSelected">
             <div
@@ -2710,6 +2734,13 @@
               readonly
               :autosize="{ minRows: 5, maxRows: 10 }"
             />
+            <n-divider title-placement="left">周常自选大奖</n-divider>
+            <div v-for="week in [{ key: 'box', name: '智能宝箱周' }, { key: 'recruit', name: '智能招募周' }, { key: 'blackMarket', name: '智能黑市周' }]" :key="week.key" class="setting-item">
+              <label class="setting-label">{{ week.name }}</label>
+              <WeeklyRewardSettings v-model="batchSettings.weeklyRewardChoices[week.key]" />
+            </div>
+            <n-divider title-placement="left">江湖黑市周采购设置</n-divider>
+            <JianghuBlackMarketSettings v-model="batchSettings.jianghuBlackMarketPurchases" />
             <n-divider title-placement="left" style="margin: 12px 0 8px 0"
               >黑市按折扣直购设置</n-divider
             >
@@ -3515,6 +3546,10 @@
 </template>
 
 <script setup>
+import WeeklyRewardSettings from "@/components/Common/WeeklyRewardSettings.vue";
+import { normalizeWeeklyRewardChoice } from "@/utils/weeklyReward.js";
+import JianghuBlackMarketSettings from "@/components/Common/JianghuBlackMarketSettings.vue";
+import { DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES, normalizeJianghuBlackMarketPurchases } from "@/utils/jianghuBlackMarketWeekly.js";
 // Import required dependencies
 import {
   ref,
@@ -4188,6 +4223,7 @@ const showSmartBoxWeeklyModal = ref(false);
 const smartBoxWeeklySettings = reactive({
   smartBoxTypes: [2002, 2003, 2004],
   smartBoxGroupCount: 1,
+  rewardChoice: 1,
 });
 
 const showHeroLevelUpgradeModal = ref(false);
@@ -4315,6 +4351,8 @@ const batchSettings = reactive({
   customRedemptionCodes: "",
   blackMarketDiscounts: { ...DEFAULT_BLACK_MARKET_DISCOUNTS },
   blackMarketRefreshCount: DEFAULT_BLACK_MARKET_REFRESH_COUNT,
+  jianghuBlackMarketPurchases: { ...DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES },
+  weeklyRewardChoices: { box: 1, recruit: 1, blackMarket: 1 },
   boxCount: 100,
   fishCount: 100,
   recruitCount: 100,
@@ -4437,6 +4475,8 @@ const loadBatchSettings = () => {
       normalizedRedemptionCodes.redemptionCodeMode;
     batchSettings.customRedemptionCodes =
       normalizedRedemptionCodes.customRedemptionCodes;
+    batchSettings.jianghuBlackMarketPurchases = normalizeJianghuBlackMarketPurchases(batchSettings.jianghuBlackMarketPurchases);
+    batchSettings.weeklyRewardChoices = Object.fromEntries(["box", "recruit", "blackMarket"].map(key => [key, normalizeWeeklyRewardChoice(batchSettings.weeklyRewardChoices?.[key])]));
     normalizeWarehouseItemSettings();
     normalizeEquipmentUpgradeSettings();
     normalizeFishReplacementSettings();
@@ -4461,6 +4501,8 @@ const saveBatchSettings = () => {
       normalizedRedemptionCodes.redemptionCodeMode;
     batchSettings.customRedemptionCodes =
       normalizedRedemptionCodes.customRedemptionCodes;
+    batchSettings.jianghuBlackMarketPurchases = normalizeJianghuBlackMarketPurchases(batchSettings.jianghuBlackMarketPurchases);
+    batchSettings.weeklyRewardChoices = Object.fromEntries(["box", "recruit", "blackMarket"].map(key => [key, normalizeWeeklyRewardChoice(batchSettings.weeklyRewardChoices?.[key])]));
     normalizeWarehouseItemSettings();
     normalizeEquipmentUpgradeSettings();
     normalizeFishReplacementSettings();
@@ -4516,6 +4558,7 @@ const editingTask = ref(null); // Currently editing task
 
 const createScheduledTaskConfig = (config = {}) => ({
   batchSmartBoxWeekly: {
+    rewardChoice: normalizeWeeklyRewardChoice(config.batchSmartBoxWeekly?.rewardChoice ?? batchSettings.weeklyRewardChoices.box),
     smartBoxTypes: Array.isArray(config.batchSmartBoxWeekly?.smartBoxTypes)
       ? [...config.batchSmartBoxWeekly.smartBoxTypes]
       : [2002, 2003, 2004],
@@ -4530,7 +4573,12 @@ const createScheduledTaskConfig = (config = {}) => ({
         ),
       ),
   },
+  batchSmartBlackMarketWeekly: {
+    rewardChoice: normalizeWeeklyRewardChoice(config.batchSmartBlackMarketWeekly?.rewardChoice ?? batchSettings.weeklyRewardChoices.blackMarket),
+    purchases: normalizeJianghuBlackMarketPurchases(config.batchSmartBlackMarketWeekly?.purchases ?? batchSettings.jianghuBlackMarketPurchases),
+  },
   batchSmartRecruitWeekly: {
+    rewardChoice: normalizeWeeklyRewardChoice(config.batchSmartRecruitWeekly?.rewardChoice ?? batchSettings.weeklyRewardChoices.recruit),
     startCount: 360,
     totalCount: 400,
     roundCount: Math.min(
@@ -4575,6 +4623,7 @@ const hasSmartBoxWeeklySelected = computed(() =>
   taskForm.selectedTasks.includes("batchSmartBoxWeekly"),
 );
 
+const hasSmartBlackMarketWeeklySelected = computed(() => taskForm.selectedTasks.includes("batchSmartBlackMarketWeekly"));
 const hasSmartRecruitWeeklySelected = computed(() =>
   taskForm.selectedTasks.includes("batchSmartRecruitWeekly"),
 );
@@ -6230,6 +6279,7 @@ const executeScheduledTask = async (task) => {
         [
           "batchSmartBoxWeekly",
           "batchSmartRecruitWeekly",
+          "batchSmartBlackMarketWeekly",
         ].includes(taskName)
       ) {
         await taskFunction(task.taskConfig?.[taskName] || {});
@@ -6395,6 +6445,7 @@ const openHelperModal = (type) => {
 };
 
 const openSmartBoxWeeklyModal = () => {
+  smartBoxWeeklySettings.rewardChoice = batchSettings.weeklyRewardChoices.box;
   showSmartBoxWeeklyModal.value = true;
 };
 
@@ -6654,7 +6705,24 @@ const executeSmartBoxWeekly = () => {
   batchSmartBoxWeekly({
     smartBoxTypes: [...smartBoxWeeklySettings.smartBoxTypes],
     smartBoxGroupCount: smartBoxWeeklySettings.smartBoxGroupCount,
+    rewardChoice: smartBoxWeeklySettings.rewardChoice,
   });
+};
+
+const showWeeklyTaskModal = ref(false);
+const weeklyTaskType = ref("recruit");
+const weeklyTaskSettings = reactive({ roundCount: 1, rewardChoice: 1, purchases: {} });
+const openWeeklyTaskModal = (type) => {
+  weeklyTaskType.value = type;
+  weeklyTaskSettings.rewardChoice = batchSettings.weeklyRewardChoices[type];
+  weeklyTaskSettings.purchases = { ...batchSettings.jianghuBlackMarketPurchases };
+  showWeeklyTaskModal.value = true;
+};
+const executeWeeklyTask = () => {
+  showWeeklyTaskModal.value = false;
+  const config = { ...weeklyTaskSettings, purchases: { ...weeklyTaskSettings.purchases } };
+  if (weeklyTaskType.value === "recruit") batchSmartRecruitWeekly(config);
+  else batchSmartBlackMarketWeekly(config);
 };
 
 // Dream Buy Modal Logic

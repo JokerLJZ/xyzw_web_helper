@@ -8,6 +8,7 @@ const createRecruitScenario = ({
   activityWeek,
   recruitCount = 100,
   roundCount = 1,
+  rewardChoice,
   completedRounds = 0,
   activityProgress = 0,
 }) => {
@@ -104,7 +105,7 @@ const createRecruitScenario = ({
 
   return {
     run: () =>
-      createTasksItem(deps).batchSmartRecruitWeekly({ roundCount }),
+      createTasksItem(deps).batchSmartRecruitWeekly({ roundCount, rewardChoice }),
     commands,
     logs,
     tokenStatus: deps.tokenStatus,
@@ -148,7 +149,7 @@ test("招募周按360次、领取邮件、再完成40次", async () => {
     scenario.commands.find(
       (item) => item.cmd === "activity_claimweekactreward",
     )?.params,
-    { selectRewardsMap: { 1: 1 }, typ: 1 },
+    { selectRewardsMap: new Map([[1, 1]]), typ: 1 },
   );
   assert.equal(scenario.getRoleInfo().role.items[1001].quantity, 40);
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
@@ -264,7 +265,7 @@ test("招募周累计最多执行四轮并逐轮领取万能红", async () => {
   assert.equal(
     claimCommands.every(
       ({ params }) =>
-        params.typ === 1 && params.selectRewardsMap?.[1] === 1,
+        params.typ === 1 && params.selectRewardsMap?.get(1) === 1,
     ),
     true,
   );
@@ -389,4 +390,11 @@ test("免费招募导致进度为1时，剩余招募拆成单次请求", async (
     true,
   );
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
+
+
+test("招募周领取所选大奖而非固定万能红", async () => {
+  const scenario = createRecruitScenario({ recruitItemCount: 0, activityWeek: "招募周", activityProgress: 400, rewardChoice: 0 });
+  await scenario.run();
+  assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 1, selectRewardsMap: new Map([[1, 0]]) });
 });

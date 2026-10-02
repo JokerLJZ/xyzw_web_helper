@@ -1,3 +1,5 @@
+import { createWeeklyRewardMap } from "@/utils/weeklyReward.js";
+import { getJianghuBlackMarketPurchasePlan, JIANGHU_BLACK_MARKET_GOODS } from "@/utils/jianghuBlackMarketWeekly.js";
 import { FishMap, HERO_DICT, LEGION_TECH_NAME } from "@/utils/HeroList";
 import { PEACH_TASKS } from "@/utils/PeachTaskIds";
 import {
@@ -5159,14 +5161,14 @@ export function createTasksItem(deps) {
             tokenId,
             "activity_claimweekactreward",
             {
-              selectRewardsMap: { 1: 1 },
+              selectRewardsMap: createWeeklyRewardMap(1, taskConfig.rewardChoice ?? batchSettings.weeklyRewardChoices?.recruit),
               typ: 1,
             },
             HELPER_COMMAND_TIMEOUT_MS,
           );
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 招募周第${roundIndex}/${roundCount}轮万能红自选奖励领取成功`,
+            message: `${token.name} 招募周第${roundIndex}/${roundCount}轮自选大奖领取成功`,
             type: "success",
           });
           await tokenStore.sendMessageWithPromise(
@@ -5220,12 +5222,14 @@ export function createTasksItem(deps) {
 
   /**
    * 小号黑市周任务：购买江湖黑市指定礼包，并在金砖达标完成后领取万能红。
-   * 江湖黑市使用 activityId=9；goodsIndex=3、8按需求跳过，9购买四次。
+   * 江湖黑市使用 activityId=9；按配置逐次采购。
    */
-  const batchSmartBlackMarketWeekly = async () => {
+  const batchSmartBlackMarketWeekly = async (taskConfig = {}) => {
     if (selectedTokens.value.length === 0) return;
 
-    const goodsIndices = [0, 1, 2, 4, 5, 6, 7, 9, 9, 9, 9];
+    const goodsIndices = getJianghuBlackMarketPurchasePlan(
+      taskConfig.purchases ?? batchSettings.jianghuBlackMarketPurchases,
+    );
     const getGoldWeekProgress = (activityResult) => {
       const activity =
         activityResult?.activity ||
@@ -5277,13 +5281,13 @@ export function createTasksItem(deps) {
             );
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 江湖黑市商品${goodsIndex}购买成功`,
+              message: `${token.name} 江湖黑市${JIANGHU_BLACK_MARKET_GOODS[goodsIndex].label}购买成功`,
               type: "success",
             });
           } catch (error) {
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 江湖黑市商品${goodsIndex}购买失败，继续后续采购：${getErrorMessage(error)}`,
+              message: `${token.name} 江湖黑市${JIANGHU_BLACK_MARKET_GOODS[goodsIndex].label}购买失败，继续后续采购：${getErrorMessage(error)}`,
               type: "warning",
             });
           }
@@ -5312,12 +5316,12 @@ export function createTasksItem(deps) {
           await tokenStore.sendMessageWithPromise(
             tokenId,
             "activity_claimweekactreward",
-            { selectRewardsMap: { 0: 1 }, typ: 12 },
+            { selectRewardsMap: createWeeklyRewardMap(12, taskConfig.rewardChoice ?? batchSettings.weeklyRewardChoices?.blackMarket), typ: 12 },
             HELPER_COMMAND_TIMEOUT_MS,
           );
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 金砖达标完成，万能红自选奖励领取成功`,
+            message: `${token.name} 金砖达标完成，自选大奖领取成功`,
             type: "success",
           });
         } else {
@@ -6229,7 +6233,7 @@ export function createTasksItem(deps) {
             "activity_claimweekactreward",
             {
               // 原游戏接口使用 Map<number, number>；普通对象会把0编码为字符串键。
-              selectRewardsMap: new Map([[0, 1]]),
+              selectRewardsMap: createWeeklyRewardMap(2, taskConfig.rewardChoice ?? batchSettings.weeklyRewardChoices?.box),
               typ: 2,
             },
             HELPER_COMMAND_TIMEOUT_MS,
@@ -6237,7 +6241,7 @@ export function createTasksItem(deps) {
       );
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `${token.name} ${description}万能红自选奖励领取成功`,
+        message: `${token.name} ${description}自选大奖领取成功`,
         type: "success",
       });
       await waitForSmartBoxAction();

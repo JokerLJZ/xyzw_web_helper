@@ -7,6 +7,7 @@ const createSmartBoxScenario = ({
   inventory,
   claimRewards = [],
   groupCount = 1,
+  rewardChoice,
   selectedTypes = [2002, 2003, 2004],
   currentProgress = 0,
   completedRounds = 0,
@@ -186,6 +187,7 @@ const createSmartBoxScenario = ({
   return {
     run: () =>
       createTasksItem(deps).batchSmartBoxWeekly({
+        rewardChoice,
         smartBoxTypes: selectedTypes,
         smartBoxGroupCount: groupCount,
         smartBoxActionDelayMs: 0,
@@ -655,4 +657,11 @@ test("已完成四轮但只领取一轮时补领剩余三轮大奖", async () =>
     true,
   );
   assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
+
+
+test("宝箱周领取所选大奖并保持数字映射键", async () => {
+  const scenario = createSmartBoxScenario({ inventory: {}, currentProgress: 8000, rewardChoice: 0 });
+  await scenario.run();
+  assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 2, selectRewardsMap: new Map([[0, 0]]) });
 });

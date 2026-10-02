@@ -1,3 +1,4 @@
+import { DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES } from "@/utils/jianghuBlackMarketWeekly.js";
 /**
  * 批量日常任务常量配置
  */
@@ -49,7 +50,7 @@ export const availableTasks = [
   { label: "领取周活动福利", value: "batchClaimWeeklyActivityBenefit" },
   { label: "智能宝箱周任务", value: "batchSmartBoxWeekly" },
   { label: "智能招募周任务", value: "batchSmartRecruitWeekly" },
-  { label: "江湖黑市周任务", value: "batchSmartBlackMarketWeekly" },
+  { label: "智能黑市周任务", value: "batchSmartBlackMarketWeekly" },
   { label: "使用仓库物品", value: "batchUseWarehouseItems" },
   { label: "精铁一键升级装备", value: "batchUpgradeEquipment" },
   { label: "一键替换鱼灵", value: "batchReplaceBestFishArtifact" },
@@ -186,6 +187,8 @@ export const defaultBatchSettings = {
   password: "",
   blackMarketDiscounts: { ...DEFAULT_BLACK_MARKET_DISCOUNTS },
   blackMarketRefreshCount: DEFAULT_BLACK_MARKET_REFRESH_COUNT,
+  jianghuBlackMarketPurchases: { ...DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES },
+  weeklyRewardChoices: { box: 1, recruit: 1, blackMarket: 1 },
   tokenListColumns: 2,
   commandDelay: 500,
   taskDelay: 500,
