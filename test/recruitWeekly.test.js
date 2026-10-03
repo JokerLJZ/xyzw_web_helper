@@ -394,7 +394,7 @@ test("免费招募导致进度为1时，剩余招募拆成单次请求", async (
 
 
 test("招募周领取所选大奖而非固定万能红", async () => {
-  const scenario = createRecruitScenario({ recruitItemCount: 0, activityWeek: "招募周", activityProgress: 400, rewardChoice: 0 });
+  const scenario = createRecruitScenario({ recruitItemCount: 0, activityWeek: "招募周", activityProgress: 400, rewardChoice: 2 });
   await scenario.run();
-  assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 1, selectRewardsMap: new Map([[1, 0]]) });
+  assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 1, selectRewardsMap: new Map([[1, 2]]) });
 });

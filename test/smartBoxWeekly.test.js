@@ -661,7 +661,7 @@ test("已完成四轮但只领取一轮时补领剩余三轮大奖", async () =>
 
 
 test("宝箱周领取所选大奖并保持数字映射键", async () => {
-  const scenario = createSmartBoxScenario({ inventory: {}, currentProgress: 8000, rewardChoice: 0 });
+  const scenario = createSmartBoxScenario({ inventory: {}, currentProgress: 8000, rewardChoice: 2 });
   await scenario.run();
-  assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 2, selectRewardsMap: new Map([[0, 0]]) });
+  assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 2, selectRewardsMap: new Map([[0, 2]]) });
 });

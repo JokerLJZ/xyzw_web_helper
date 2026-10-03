@@ -4,7 +4,7 @@
     <n-space vertical>
       <n-space v-for="item in JIANGHU_BLACK_MARKET_GOODS" :key="item.goodsIndex" align="center">
         <n-checkbox :checked="modelValue[item.goodsIndex] > 0" @update:checked="setCount(item.goodsIndex, $event ? 1 : 0)">
-          {{ item.label }}（序号 {{ item.goodsIndex }}）
+          {{ item.label }}（序号 {{ item.displayIndex }}）
         </n-checkbox>
         <n-input-number :value="modelValue[item.goodsIndex] || 0" :min="0" :max="4" :precision="0" :disabled="!modelValue[item.goodsIndex]" size="small" style="width: 100px" @update:value="setCount(item.goodsIndex, $event)" />
       </n-space>

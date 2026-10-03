@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { JIANGHU_BLACK_MARKET_GOODS, DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES } from "../src/utils/jianghuBlackMarketWeekly.js";
+
 import { createTasksItem } from "../src/utils/batch/tasksItem.js";
 
 const createScenario = ({ progress = 0, activityWeek = "黑市周", purchases, taskConfig, failIndex } = {}) => {
@@ -59,7 +61,7 @@ const createScenario = ({ progress = 0, activityWeek = "黑市周", purchases, t
 const getPurchases = (commands) =>
   commands.filter((command) => command.cmd === "activity_buystoregoods");
 
-test("江湖黑市按默认清单采购，跳过3和8且购买9四次", async () => {
+test("江湖黑市默认选择显示序号0、1、2、5、6、7、8且各采购一次", async () => {
   const scenario = createScenario({ progress: 100000 });
 
   await scenario.run();
@@ -67,7 +69,7 @@ test("江湖黑市按默认清单采购，跳过3和8且购买9四次", async ()
   const purchases = getPurchases(scenario.commands);
   assert.deepEqual(
     purchases.map((command) => command.params.goodsIndex),
-    [0, 1, 2, 4, 5, 6, 7, 9, 9, 9, 9],
+    [0, 1, 2, 4, 5, 6, 7],
   );
   assert.deepEqual(
     scenario.commands.find(
@@ -137,7 +139,15 @@ test("忽略非法商品序号，次数归一化且限制最多四次", async ()
 
 
 test("黑市周按独立大奖配置领取", async () => {
-  const scenario = createScenario({ progress: 100000, taskConfig: { purchases: {}, rewardChoice: 0 } });
+  const scenario = createScenario({ progress: 100000, taskConfig: { purchases: {}, rewardChoice: 2 } });
   await scenario.run();
-  assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 12, selectRewardsMap: new Map([[0, 0]]) });
+  assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 12, selectRewardsMap: new Map([[0, 2]]) });
+});
+
+
+test("显示序号与API商品索引分别维护，默认清单对应用户指定序号", () => {
+  assert.deepEqual(JIANGHU_BLACK_MARKET_GOODS.map(({ displayIndex }) => displayIndex), [0, 1, 2, 3, 5, 6, 7, 8, 9, 10]);
+  assert.deepEqual(JIANGHU_BLACK_MARKET_GOODS.filter(({ goodsIndex }) => DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES[goodsIndex] > 0).map(({ displayIndex }) => displayIndex), [0, 1, 2, 5, 6, 7, 8]);
+  assert.equal(JIANGHU_BLACK_MARKET_GOODS.find(({ displayIndex }) => displayIndex === 5).goodsIndex, 4);
+  assert.equal(JIANGHU_BLACK_MARKET_GOODS.find(({ displayIndex }) => displayIndex === 9).goodsIndex, 8);
 });
