@@ -549,14 +549,6 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="batchClaimWeeklyActivityBenefit"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                  title="查询当前周活动后，领取对应活动商店第0项免费福利；已领取时自动跳过"
-                >
-                  领取周活动福利
-                </n-button>
-                <n-button
-                  size="small"
                   @click="openHelperModal('fish')"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -692,6 +684,14 @@
             </n-tab-pane>
             <n-tab-pane name="weekly" tab="周常">
               <n-space>
+                <n-button
+                  size="small"
+                  @click="batchClaimWeeklyActivityBenefit"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="查询当前周活动后，领取对应活动商店第0项免费福利；已领取时自动跳过"
+                >
+                  领取周活动福利
+                </n-button>
                 <n-button
                   size="small"
                   @click="openSmartBoxWeeklyModal"
