@@ -52,6 +52,7 @@ import {
   buildFactionBattleTeam,
   buildGenieBattleParams,
   buildGroupGenieBattleParams,
+  challengeGroupGenie,
   didGenieProgress,
   didGroupGenieProgress,
   getRemainingGenieChallenges,
@@ -4167,12 +4168,20 @@ export function createTasksItem(deps) {
         let wins = 0;
         for (let attempt = 0; attempt < remainingChallenges; attempt++) {
           if (shouldStop.value) break;
-          const response = await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "fight_startgenie",
+          const response = await challengeGroupGenie({
+            send: (battleParams) => tokenStore.sendMessageWithPromise(
+              tokenId, "fight_startgenie", battleParams, 15000,
+            ),
+            queryRole: async () => (await tokenStore.sendGetRoleInfo(tokenId))?.role,
             params,
-            15000,
-          );
+            previousProgress,
+            remainingBefore: remainingChallenges - attempt,
+            onRetry: () => addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 空阵容复用返回2600020，已确认未消耗次数，改用完整群雄阵容重试一次`,
+              type: "warning",
+            }),
+          });
           if (!didGroupGenieProgress(response, previousProgress)) {
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -4188,7 +4197,7 @@ export function createTasksItem(deps) {
               type: "success",
             });
           }
-          params.battleTeam = {};
+          // 保留完整阵容补救请求，后续挑战不再切回空阵容。
           if (attempt + 1 < remainingChallenges) {
             await new Promise((resolve) =>
               setTimeout(resolve, delayConfig.action),

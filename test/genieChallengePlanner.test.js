@@ -100,3 +100,52 @@ test("灯神按今日已挑战次数补差，并仅以群雄进度增长判胜",
   assert.equal(didGroupGenieProgress({ role: { genie: { 4: 5 } } }, 5), false);
   assert.equal(didGroupGenieProgress({ role: {} }, 5), false);
 });
+
+test("空阵容2600020对账确认未消耗后仅重试一次完整阵容", async () => {
+  const { challengeGroupGenie } = await import("../src/utils/genieChallengePlanner.js");
+  const role = { genie: { 4: 3 } };
+  const params = { battleTeam: {}, genieId: 4, lordWeaponId: 0 };
+  const calls = [];
+  const response = await challengeGroupGenie({
+    params, previousProgress: 3, remainingBefore: 10,
+    queryRole: async () => { calls.push("query"); return role; },
+    send: async (p) => {
+      calls.push(structuredClone(p));
+      if (calls.length === 1) throw new Error("服务器错误: 2600020 - 未知错误");
+      return { role: { genie: { 4: 4 } } };
+    },
+  });
+  assert.equal(calls.length, 3);
+  assert.equal(calls[1], "query");
+  assert.deepEqual(calls[2].battleTeam, { 0: 116, 1: 107, 2: 312, 3: 210, 4: 112 });
+  assert.deepEqual(params.battleTeam, calls[2].battleTeam);
+  assert.equal(response.role.genie[4], 4);
+});
+
+test("2600020后次数已消耗、进度变化或状态缺失时不重试", async () => {
+  const { challengeGroupGenie } = await import("../src/utils/genieChallengePlanner.js");
+  for (const role of [
+    { genie: { 4: 3 }, statistics: { "genie:battle": 1 }, statisticsTime: { "genie:battle": Date.now() / 1000 } },
+    { genie: { 4: 4 } }, {},
+  ]) {
+    let sends = 0;
+    await assert.rejects(challengeGroupGenie({
+      params: { battleTeam: {}, genieId: 4, lordWeaponId: 0 },
+      previousProgress: 3, remainingBefore: 10,
+      queryRole: async () => role,
+      send: async () => { sends++; throw new Error("服务器错误: 2600020 - 未知错误"); },
+    }), /2600020/);
+    assert.equal(sends, 1);
+  }
+});
+
+test("完整阵容或其他错误不触发空阵容补救", async () => {
+  const { challengeGroupGenie } = await import("../src/utils/genieChallengePlanner.js");
+  for (const [battleTeam, code] of [[{ 0: 116 }, 2600020], [{}, 200400]]) {
+    await assert.rejects(challengeGroupGenie({
+      params: { battleTeam },
+      queryRole: () => assert.fail("不应查询重试"),
+      send: async () => { throw new Error(`服务器错误: ${code} - 未知错误`); },
+    }), new RegExp(String(code)));
+  }
+});
