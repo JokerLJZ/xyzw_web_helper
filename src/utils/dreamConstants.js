@@ -48,8 +48,7 @@ export const goldItemsConfig = {
 };
 
 // 检查梦境开放时间（周三/周四/周日/周一）
-export function isDungeonOpen() {
-  const now = new Date();
-  const day = now.getDay(); // 0=周日, 1=周一, 2=周二, 3=周三, 4=周四, 5=周五, 6=周六
+export function isDungeonOpen(now = new Date()) {
+  const day = new Date(now.getTime() + 8 * 60 * 60 * 1000).getUTCDay();
   return day === 0 || day === 1 || day === 3 || day === 4; // 周日、周一、周三、周四
 }

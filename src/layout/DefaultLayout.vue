@@ -51,6 +51,26 @@
             <span>批量日常</span>
           </router-link>
           <router-link
+            to="/admin/PushingLevels"
+            class="nav-item"
+            active-class="active"
+          >
+            <n-icon>
+              <ArrowUpCircle />
+            </n-icon>
+            <span>主线推关</span>
+          </router-link>
+          <router-link
+            to="/admin/data-backup"
+            class="nav-item"
+            active-class="active"
+          >
+            <n-icon>
+              <CloudUploadSharp />
+            </n-icon>
+            <span>数据备份</span>
+          </router-link>
+          <router-link
             to="/admin/message-test"
             class="nav-item"
             active-class="active"
@@ -147,6 +167,26 @@
           <span>批量日常</span>
         </router-link>
         <router-link
+          to="/admin/PushingLevels"
+          class="drawer-item"
+          @click="isMobileMenuOpen = false"
+        >
+          <n-icon>
+            <ArrowUpCircle />
+          </n-icon>
+          <span>主线推关</span>
+        </router-link>
+        <router-link
+          to="/admin/data-backup"
+          class="drawer-item"
+          @click="isMobileMenuOpen = false"
+        >
+          <n-icon>
+            <CloudUploadSharp />
+          </n-icon>
+          <span>数据备份</span>
+        </router-link>
+        <router-link
           to="/admin/message-test"
           class="drawer-item"
           @click="isMobileMenuOpen = false"
@@ -197,36 +237,20 @@ import {
   LockClosedSharp,LockOpen,
   Menu,
   Layers,
+  CloudUploadSharp,
+  ArrowUpCircle,
 } from "@vicons/ionicons5";
 
-import { useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
 import { ref } from 'vue'
 import { isNowInLegionWarTime } from '@/utils/clubBattleUtils'
 
 const tokenStore = useTokenStore();
-const router = useRouter();
-const message = useMessage();
 
 const isMobileMenuOpen = ref(false);
 
-const userMenuOptions = [
-  {
-    label: "清除所有Token并退出",
-    key: "logout",
-  },
-];
+const userMenuOptions = [];
 
-// 方法
-const handleUserAction = async (key) => {
-  switch (key) {
-    case "logout":
-      await tokenStore.clearAllTokens();
-      message.success("已清除所有Token");
-      router.push("/tokens");
-      break;
-  }
-};
+const handleUserAction = () => {};
 </script>
 
 <style scoped lang="scss">
