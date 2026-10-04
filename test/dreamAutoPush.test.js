@@ -286,14 +286,15 @@ test("最后一战达到200层且服务端保留层数字段时结束推层并�
   );
 });
 
-test("超过195层且主线不足4000关时仍执行梦境采购", async (t) => {
+test("已完成200关且当前层数重置时批量任务实际发出梦境购买请求", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: now() });
   const calls = [];
   const role = {
     levelId: 3999,
     dungeon: {
       beginTime: getDreamPeriod(now()),
-      id: 196,
+      id: 0,
+      maxId: 200,
       merchant: { 1: [5] },
       activeHeroId: 106,
       battleTeam: { 0: { heroId: 106, hp: 100, attack: 100 } },
@@ -582,4 +583,27 @@ test("批量梦境和独立购买遵守Token开关，不连接、不购买、不
   await tasks.batchBuyDreamItems();
   assert.equal(deps.tokenStatus.value.off, "completed");
   assert.equal(deps.isRunning.value, false);
+});
+
+
+test("已完成200关且当前层数重置为0时跳过选将和战斗，继续采购", async () => {
+  const f = fixture();
+  f.role.dungeon.id = 0;
+  f.role.dungeon.maxId = 200;
+  f.role.dungeon.battleTeam = {};
+  f.role.dungeon.merchant = { 1: [5] };
+  let purchased = 0;
+  const result = await runAutomaticDream({
+    ...f,
+    purchase: async ({ merchant }) => {
+      assert.deepEqual(merchant, { 1: [5] });
+      purchased++;
+    },
+  });
+  assert.equal(result.floor, DREAM_FINAL_FLOOR);
+  assert.equal(result.battles, 0);
+  assert.equal(purchased, 1);
+  assert.deepEqual(f.calls.map(({ cmd }) => cmd), ["role_getroleinfo"]);
+  assert.equal(isDreamCompleted({ ...f.role.dungeon, beginTime: 0 }, getDreamPeriod(now())), false);
+  assert.equal(isDreamCompleted({ ...f.role.dungeon, maxId: 0 }, getDreamPeriod(now())), false);
 });

@@ -39,6 +39,11 @@ export function isDreamCompleted(dungeon, period) {
   // 下一次查询才出现。达到最终层本身已经足够证明通关。
   if (Number.isInteger(floor) && floor >= DREAM_FINAL_FLOOR) return true;
 
+  // 抓包中 maxId 是已完成进度（例如 id=153、maxId=152）。
+  // 通关后当前挑战 id 可被重置为 0，仍应根据 maxId 转入采购。
+  const maxFloor = Number(dungeon.maxId);
+  if (Number.isInteger(maxFloor) && maxFloor >= DREAM_FINAL_FLOOR) return true;
+
   // 服务端清空层数时，以仍保留的本期商店作为通关标记，避免把尚未
   // 初始化的新期梦境误判为已通关。
   if (!dungeon.merchant) return false;
