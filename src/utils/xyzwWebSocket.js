@@ -290,6 +290,9 @@ export function registerDefaultCommands(reg) {
     .register("artifact_upgradestar", { heroId: -1, itemId: 0 })
     .register("book_upgradeartifact", { artifactId: 0 })
 
+    // 宠物经验道具一键升级
+    .register("pet_useexpitem")
+
     // 灯神相关
     .register("fight_startgenie")
     .register("genie_sweep", { genieId: 1 })

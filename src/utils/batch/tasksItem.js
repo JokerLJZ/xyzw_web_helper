@@ -1,3 +1,4 @@
+import { createPetTasks } from "./tasksPet.js";
 import { createWeeklyRewardMap } from "@/utils/weeklyReward.js";
 import { getJianghuBlackMarketPurchasePlan, JIANGHU_BLACK_MARKET_GOODS } from "@/utils/jianghuBlackMarketWeekly.js";
 import { FishMap, HERO_DICT, LEGION_TECH_NAME } from "@/utils/HeroList";
@@ -6918,6 +6919,7 @@ export function createTasksItem(deps) {
   return {
     batchClaimMailAttachments,
     batchClaimWeeklyActivityBenefit,
+    ...createPetTasks(deps),
     batchUpgradeShoeToy,
     batchClaimAchievementRewards,
     batchMaxWarriorLegionTech,

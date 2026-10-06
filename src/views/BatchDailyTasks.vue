@@ -759,6 +759,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchUpgradeAllPets"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="按槽位顺序，每只宠物使用现有经验道具一键升级一次；资源可能被前面的宠物用完"
+                >
+                  所有宠物依次升级
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchUpgradeShoeToy"
                   :disabled="isRunning || selectedTokens.length === 0"
                   title="主公达到4001级后，领取免费扳手并升级皮鞋玩具和已开放被动技能"
@@ -4805,6 +4813,7 @@ const taskGroupDefinitions = [
       "batchJoinLegion",
       "batchUpgradeCrystal",
       "batchReplaceBestFishArtifact",
+      "batchUpgradeAllPets",
       "batchMaxWarriorLegionTech",
       "batchClaimAchievementRewards",
       "batchClaimMailAttachments",
@@ -7790,6 +7799,7 @@ const {
   batchUpgradeCrystal,
   batchUpgradeEquipment,
   batchReplaceBestFishArtifact,
+  batchUpgradeAllPets,
   batchUpgradeShoeToy,
   batchMaxWarriorLegionTech,
   batchClaimAchievementRewards,

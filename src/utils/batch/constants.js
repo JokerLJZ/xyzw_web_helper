@@ -67,6 +67,7 @@ export const availableTasks = [
   { label: "一键金鱼杆补齐", value: "batchTopUpGoldFish" },
   { label: "批量加入俱乐部", value: "batchJoinLegion" },
   { label: "水晶升级至资源不足", value: "batchUpgradeCrystal" },
+  { label: "所有宠物依次升级", value: "batchUpgradeAllPets" },
   { label: "战士科技依次升满", value: "batchMaxWarriorLegionTech" },
   { label: "领取成就奖励", value: "batchClaimAchievementRewards" },
   { label: "收取邮件", value: "batchClaimMailAttachments" },
