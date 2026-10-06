@@ -219,6 +219,10 @@
             </div>
 
             <div class="switch-row">
+              <span class="switch-label" title="先执行魏蜀吴，再执行群雄；会消耗升级资源和共享挑战次数">自动灯神挑战</span>
+              <n-switch v-model:value="settings.genieChallengeEnable" />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">一键灯神扫荡</span>
               <n-switch v-model:value="settings.genieSweepEnable" />
             </div>
@@ -372,6 +376,7 @@ const settings = reactive({
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
+  genieChallengeEnable: false,
   monthlyFishTopUpEnable: true,
   monthlyArenaTopUpEnable: true,
   commandDelay: 500,
@@ -396,6 +401,7 @@ const defaultDailySettings = {
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
+  genieChallengeEnable: false,
   monthlyFishTopUpEnable: true,
   monthlyArenaTopUpEnable: true,
   commandDelay: 500,

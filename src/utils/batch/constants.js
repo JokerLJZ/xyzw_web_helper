@@ -168,6 +168,7 @@ export const defaultSettings = {
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
+  genieChallengeEnable: false,
   monthlyFishTopUpEnable: true,
   monthlyArenaTopUpEnable: true,
 };
@@ -233,6 +234,7 @@ export const defaultTemplate = {
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
+  genieChallengeEnable: false,
   monthlyFishTopUpEnable: true,
   monthlyArenaTopUpEnable: true,
 };

@@ -1,3 +1,4 @@
+import { runDailyGenieChallenges } from "./dailyGenieChallenges.js";
 import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
 import {
   DREAM_PUSH_INTERVAL_MS,
@@ -1150,6 +1151,19 @@ export class DailyTaskRunner {
     this.log(`梦境购买完成: 成功${successCount}, 失败${failCount}`, "success");
   }
 
+  async runAutomaticGenieChallenges(tokenId) {
+    try {
+      await runDailyGenieChallenges({
+        tokenId, tokenStore: this.tokenStore,
+        stopped: () => this.callbacks?.shouldStop?.() === true,
+        log: (text, type) => this.log(text, type), delaySettings: this.delaySettings,
+      });
+    } finally {
+      // 灯神升级/战斗会修改角色数据，丢弃日常任务入口的旧快照。
+      this.roleSnapshots.delete(tokenId);
+    }
+  }
+
   async runDreamTask(tokenId) {
     const result = await runAutomaticDream({
       purchase: ({ merchant }) => this.runDreamPurchaseForToken(
@@ -1201,6 +1215,7 @@ export class DailyTaskRunner {
         studyEnable: true,
         dreamEnable: true,
         genieSweepEnable: false,
+        genieChallengeEnable: false,
         monthlyFishTopUpEnable: true,
         monthlyArenaTopUpEnable: true,
       };
@@ -1749,6 +1764,13 @@ export class DailyTaskRunner {
         `当前主线关卡${getMainLevel(roleData)}，未达到梦境开启条件${DREAM_MIN_MAIN_LEVEL}关，跳过咸王梦境`,
         "info",
       );
+    }
+
+    if (settings.genieChallengeEnable === true && isGenieMainLevelUnlocked(roleData)) {
+      taskList.push({
+        name: "自动灯神挑战（魏蜀吴 → 群雄）",
+        execute: () => this.runAutomaticGenieChallenges(tokenId),
+      });
     }
 
     // 深海灯神

@@ -1046,6 +1046,10 @@
               ><n-switch v-model:value="currentSettings.dreamEnable" />
             </div>
             <div class="switch-row">
+              <span class="switch-label" title="先执行魏蜀吴，再执行群雄；会消耗升级资源和共享挑战次数">自动灯神挑战</span>
+              <n-switch v-model:value="currentSettings.genieChallengeEnable" />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">一键灯神扫荡</span
               ><n-switch v-model:value="currentSettings.genieSweepEnable" />
             </div>
@@ -1173,6 +1177,10 @@
             <div class="switch-row">
               <span class="switch-label" title="仅使用吕布推层，每次挑战间隔3秒，推层结束后按清单采购；关闭时跳过梦境任务">自动梦境</span
               ><n-switch v-model:value="currentTemplate.dreamEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label" title="先执行魏蜀吴，再执行群雄；会消耗升级资源和共享挑战次数">自动灯神挑战</span>
+              <n-switch v-model:value="currentTemplate.genieChallengeEnable" />
             </div>
             <div class="switch-row">
               <span class="switch-label">一键灯神扫荡</span
@@ -4163,6 +4171,7 @@ const currentSettings = reactive({
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
+  genieChallengeEnable: false,
   monthlyFishTopUpEnable: true,
   monthlyArenaTopUpEnable: true,
 });
@@ -4196,6 +4205,7 @@ const currentTemplate = reactive({
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
+  genieChallengeEnable: false,
   monthlyFishTopUpEnable: true,
   monthlyArenaTopUpEnable: true,
 });
@@ -6826,6 +6836,7 @@ const loadSettings = (tokenId) => {
       studyEnable: true,
       dreamEnable: true,
       genieSweepEnable: false,
+  genieChallengeEnable: false,
       monthlyFishTopUpEnable: true,
       monthlyArenaTopUpEnable: true,
     };
@@ -6879,6 +6890,7 @@ const openTaskTemplateModal = () => {
     studyEnable: true,
     dreamEnable: true,
     genieSweepEnable: false,
+  genieChallengeEnable: false,
     monthlyFishTopUpEnable: true,
     monthlyArenaTopUpEnable: true,
   });
@@ -7037,6 +7049,7 @@ const resetTemplateForm = () => {
     studyEnable: true,
     dreamEnable: true,
     genieSweepEnable: false,
+  genieChallengeEnable: false,
     monthlyFishTopUpEnable: true,
     monthlyArenaTopUpEnable: true,
   });
