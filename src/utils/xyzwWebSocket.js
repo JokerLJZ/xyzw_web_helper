@@ -294,6 +294,7 @@ export function registerDefaultCommands(reg) {
     .register("pet_useexpitem")
 
     // 灯神相关
+    .register("hero_calcpowerbyteam")
     .register("fight_startgenie")
     .register("genie_sweep", { genieId: 1 })
     .register("genie_buysweep")
@@ -929,11 +930,19 @@ export class XyzwWebSocketClient {
         return reject(new Error("WebSocket 连接已关闭"));
       }
 
+      if (!this.registry.commands.has(cmd)) {
+        return reject(new Error(`未注册的游戏命令: ${cmd}`));
+      }
+
       // 为此请求生成唯一的seq值
       const requestSeq = ++this.seq;
 
       // 设置 Promise 状态，使用seq作为键
-      this.promises[requestSeq] = { resolve, reject, originalCmd: cmd };
+      this.promises[requestSeq] = {
+        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        reject: (error) => { clearTimeout(timer); reject(error); },
+        originalCmd: cmd,
+      };
 
       // 超时处理
       const timer = setTimeout(() => {
@@ -1076,6 +1085,11 @@ export class XyzwWebSocketClient {
         if (task.sleep) await sleep(task.sleep);
       } catch (error) {
         wsLogger.error(`发送消息失败: ${task.cmd}`, error);
+        const pending = this.promises[task.seq];
+        if (pending) {
+          delete this.promises[task.seq];
+          pending.reject(error);
+        }
       }
     }, 50);
   }
@@ -1117,6 +1131,8 @@ export class XyzwWebSocketClient {
     // 命令到响应的映射 - 处理响应命令与原始命令不匹配的情况
     const responseToCommandMap = {
       // 1:1 响应映射（优先级高）
+      hero_calcpowerbyteamresp: "hero_calcpowerbyteam",
+      fight_startgenieresp: "fight_startgenie",
       fight_startpvpresp: "fight_startpvp",
       fight_startlevelresp: "fight_startlevel",
       activity_getresp: "activity_get",
