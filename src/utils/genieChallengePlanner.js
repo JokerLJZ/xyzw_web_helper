@@ -156,23 +156,3 @@ export const didGenieProgress = (response, genieId, previousProgress) => {
   );
   return Number.isInteger(current) && current > Number(previousProgress);
 };
-
-/** 空阵容复用失败后先对账，只在确认未执行时带完整阵容重试一次。 */
-export async function challengeGroupGenie({ send, queryRole, params, previousProgress, remainingBefore, onRetry = () => {} }) {
-  try {
-    return await send(params);
-  } catch (error) {
-    if (!/服务器错误:\s*2600020\b/.test(error?.message || "")
-      || Object.keys(params.battleTeam || {}).length > 0) throw error;
-    const role = await queryRole();
-    const progress = Number(role?.genie?.[GENIE_FACTION_GROUP]);
-    if (!Number.isInteger(progress) || progress !== previousProgress
-      || getRemainingGenieChallenges(role) !== remainingBefore) throw error;
-    onRetry();
-    const explicit = buildGroupGenieBattleParams(role, false);
-    const response = await send(explicit);
-    // 本次成功后继续显式传阵容，避免再次使用出错的复用路径。
-    Object.assign(params, explicit);
-    return response;
-  }
-}

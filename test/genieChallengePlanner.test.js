@@ -101,51 +101,60 @@ test("灯神按今日已挑战次数补差，并仅以群雄进度增长判胜",
   assert.equal(didGroupGenieProgress({ role: {} }, 5), false);
 });
 
-test("空阵容2600020对账确认未消耗后仅重试一次完整阵容", async () => {
-  const { challengeGroupGenie } = await import("../src/utils/genieChallengePlanner.js");
-  const role = { genie: { 4: 3 } };
-  const params = { battleTeam: {}, genieId: 4, lordWeaponId: 0 };
-  const calls = [];
-  const response = await challengeGroupGenie({
-    params, previousProgress: 3, remainingBefore: 10,
-    queryRole: async () => { calls.push("query"); return role; },
-    send: async (p) => {
-      calls.push(structuredClone(p));
-      if (calls.length === 1) throw new Error("服务器错误: 2600020 - 未知错误");
-      return { role: { genie: { 4: 4 } } };
-    },
+
+test("群雄灯神已保存阵容且已通关第一层时仍可明确发送完整阵容", () => {
+  const role = {
+    genie: { 4: 1 },
+    genieBattleTeam: { 4: { 0: 116, 1: 107, 2: 312, 3: 210, 4: 112 } },
+    genieLordWeapon: { 4: 0 },
+    geniePet: { 4: "" },
+  };
+  assert.equal(isSavedGroupGenieFormationMatched(role), true);
+  assert.deepEqual(buildGroupGenieBattleParams(role, false), {
+    battleTeam: { 0: 116, 1: 107, 2: 312, 3: 210, 4: 112 },
+    genieId: 4,
+    lordWeaponId: 0,
   });
-  assert.equal(calls.length, 3);
-  assert.equal(calls[1], "query");
-  assert.deepEqual(calls[2].battleTeam, { 0: 116, 1: 107, 2: 312, 3: 210, 4: 112 });
-  assert.deepEqual(params.battleTeam, calls[2].battleTeam);
-  assert.equal(response.role.genie[4], 4);
 });
 
-test("2600020后次数已消耗、进度变化或状态缺失时不重试", async () => {
-  const { challengeGroupGenie } = await import("../src/utils/genieChallengePlanner.js");
-  for (const role of [
-    { genie: { 4: 3 }, statistics: { "genie:battle": 1 }, statisticsTime: { "genie:battle": Date.now() / 1000 } },
-    { genie: { 4: 4 } }, {},
-  ]) {
-    let sends = 0;
-    await assert.rejects(challengeGroupGenie({
-      params: { battleTeam: {}, genieId: 4, lordWeaponId: 0 },
-      previousProgress: 3, remainingBefore: 10,
-      queryRole: async () => role,
-      send: async () => { sends++; throw new Error("服务器错误: 2600020 - 未知错误"); },
-    }), /2600020/);
-    assert.equal(sends, 1);
-  }
-});
-
-test("完整阵容或其他错误不触发空阵容补救", async () => {
-  const { challengeGroupGenie } = await import("../src/utils/genieChallengePlanner.js");
-  for (const [battleTeam, code] of [[{ 0: 116 }, 2600020], [{}, 200400]]) {
-    await assert.rejects(challengeGroupGenie({
-      params: { battleTeam },
-      queryRole: () => assert.fail("不应查询重试"),
-      send: async () => { throw new Error(`服务器错误: ${code} - 未知错误`); },
-    }), new RegExp(String(code)));
+test("已通关第一层后的连续挑战每次先计算战力再发送完整阵容", async () => {
+  const { createTasksItem } = await import("../src/utils/batch/tasksItem.js");
+  const role = {
+    levelId: 8000,
+    heroes: Object.fromEntries(GROUP_GENIE_LINEUP.map(({ heroId, minLevel }) => [heroId, { heroId, level: minLevel }])),
+    genie: { 4: 1 },
+    genieBattleTeam: { 4: { 0: 116, 1: 107, 2: 312, 3: 210, 4: 112 } },
+    statistics: { "genie:battle": 8 },
+    statisticsTime: { "genie:battle": Math.floor(Date.now() / 1000) },
+  };
+  const calls = [];
+  const status = { value: {} };
+  await createTasksItem({
+    selectedTokens: { value: ["t"] }, tokens: { value: [{ id: "t", name: "test" }] },
+    tokenStatus: status, isRunning: { value: false }, shouldStop: { value: false },
+    currentRunningTokenId: { value: null },
+    ensureConnection: async () => {}, releaseConnectionSlot: () => {},
+    connectionQueue: { active: 1 }, batchSettings: { maxActive: 1 },
+    delayConfig: { action: 0 }, addLog: () => {}, message: { success: () => {} },
+    tokenStore: {
+      sendGetRoleInfo: async () => ({ role: structuredClone(role) }),
+      closeWebSocketConnection: () => {},
+      sendMessageWithPromise: async (_id, cmd, params) => {
+        calls.push({ cmd, params: structuredClone(params) });
+        if (cmd === "hero_calcpowerbyteam") return { power: 100 };
+        assert.equal(cmd, "fight_startgenie");
+        role.genie[4]++;
+        return { role: { genie: { 4: role.genie[4] } } };
+      },
+    },
+  }).batchChallengeGroupGenie();
+  assert.equal(status.value.t, "completed");
+  assert.deepEqual(calls.map(({ cmd }) => cmd), [
+    "hero_calcpowerbyteam", "fight_startgenie", "hero_calcpowerbyteam", "fight_startgenie",
+  ]);
+  for (const { cmd, params } of calls) {
+    assert.deepEqual(params.battleTeam, { 0: 116, 1: 107, 2: 312, 3: 210, 4: 112 });
+    assert.equal(params.lordWeaponId, 0);
+    assert.equal(params.genieId, cmd === "fight_startgenie" ? 4 : undefined);
   }
 });

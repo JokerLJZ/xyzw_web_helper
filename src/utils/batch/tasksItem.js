@@ -52,11 +52,9 @@ import {
   buildFactionBattleTeam,
   buildGenieBattleParams,
   buildGroupGenieBattleParams,
-  challengeGroupGenie,
   didGenieProgress,
   didGroupGenieProgress,
   getRemainingGenieChallenges,
-  isSavedGroupGenieFormationMatched,
   selectHighestLevelPet,
 } from "@/utils/genieChallengePlanner";
 import {
@@ -4149,12 +4147,12 @@ export function createTasksItem(deps) {
           continue;
         }
 
-        const savedFormationMatched = isSavedGroupGenieFormationMatched(role);
-        const params = buildGroupGenieBattleParams(role);
+
+        const params = buildGroupGenieBattleParams(role, false);
         const pet = selectHighestLevelPet(role);
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 群雄灯神独立阵容${savedFormationMatched ? "已匹配，直接复用" : "不匹配，将在首次挑战时调整"}：1号公孙瓒、2号吕布、3号邢道荣、4号貂蝉、5号贾诩；玩具${params.lordWeaponId ? "皮鞋" : "空"}；宠物${pet ? `等级${pet.level}` : "空"}`,
+          message: `${tokenName} 群雄灯神每次明确发送完整阵容：1号公孙瓒、2号吕布、3号邢道荣、4号貂蝉、5号贾诩；玩具${params.lordWeaponId ? "皮鞋" : "空"}；宠物${pet ? `等级${pet.level}` : "空"}`,
           type: "info",
         });
 
@@ -4168,20 +4166,21 @@ export function createTasksItem(deps) {
         let wins = 0;
         for (let attempt = 0; attempt < remainingChallenges; attempt++) {
           if (shouldStop.value) break;
-          const response = await challengeGroupGenie({
-            send: (battleParams) => tokenStore.sendMessageWithPromise(
-              tokenId, "fight_startgenie", battleParams, 15000,
-            ),
-            queryRole: async () => (await tokenStore.sendGetRoleInfo(tokenId))?.role,
-            params,
-            previousProgress,
-            remainingBefore: remainingChallenges - attempt,
-            onRetry: () => addLog({
+          // 抓包中每次 startGenie 前先以相同阵容和玩具计算战力。
+          // 不用空 battleTeam 猜测服务端将复用哪个阵容。
+          const { genieId, ...powerParams } = params;
+          await tokenStore.sendMessageWithPromise(
+            tokenId, "hero_calcpowerbyteam", powerParams, 15000,
+          );
+          if (shouldStop.value) break;
+          addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 空阵容复用返回2600020，已确认未消耗次数，改用完整群雄阵容重试一次`,
-              type: "warning",
-            }),
+            message: `${tokenName} 发起群雄灯神第${attempt + 1}/${remainingChallenges}次挑战，服务端进度${previousProgress}，阵营${genieId}`,
+            type: "info",
           });
+          const response = await tokenStore.sendMessageWithPromise(
+            tokenId, "fight_startgenie", params, 15000,
+          );
           if (!didGroupGenieProgress(response, previousProgress)) {
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -4197,7 +4196,7 @@ export function createTasksItem(deps) {
               type: "success",
             });
           }
-          // 保留完整阵容补救请求，后续挑战不再切回空阵容。
+
           if (attempt + 1 < remainingChallenges) {
             await new Promise((resolve) =>
               setTimeout(resolve, delayConfig.action),
