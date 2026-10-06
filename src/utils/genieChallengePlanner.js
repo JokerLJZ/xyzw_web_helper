@@ -156,3 +156,22 @@ export const didGenieProgress = (response, genieId, previousProgress) => {
   );
   return Number.isInteger(current) && current > Number(previousProgress);
 };
+
+
+/** 角色抓包中的lordWeapon以weaponId索引，level为玩具等级。 */
+export function selectHighestLevelToy(role) {
+  return Object.entries(role?.lordWeapon || {}).flatMap(([key, toy]) => {
+    const weaponId = Number(toy?.weaponId ?? key);
+    const level = Number(toy?.level);
+    if (!toy || !Number.isInteger(weaponId) || weaponId <= 0 || !Number.isFinite(level) || level < 1) return [];
+    return [{ weaponId, level }];
+  }).sort((a, b) => b.level - a.level
+    || Number(b.weaponId === Number(role?.lordWeaponId)) - Number(a.weaponId === Number(role?.lordWeaponId))
+    || a.weaponId - b.weaponId)[0] || null;
+}
+
+export function buildAutoFactionGenieParams(role, genieId) {
+  const params = buildGenieBattleParams(role, genieId, buildFactionBattleTeam(genieId), false);
+  params.lordWeaponId = selectHighestLevelToy(role)?.weaponId || 0;
+  return params;
+}

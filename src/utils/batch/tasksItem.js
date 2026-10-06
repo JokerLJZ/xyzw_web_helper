@@ -50,8 +50,7 @@ import {
   GENIE_FACTION_LINEUPS,
   GENIE_FACTION_NAMES,
   GROUP_GENIE_LINEUP,
-  buildFactionBattleTeam,
-  buildGenieBattleParams,
+  buildAutoFactionGenieParams,
   buildGroupGenieBattleParams,
   didGenieProgress,
   didGroupGenieProgress,
@@ -4228,7 +4227,7 @@ export function createTasksItem(deps) {
     message.success("自动挑战群雄灯神任务结束");
   };
 
-  /** 使用各阵营独立阵容，按魏、蜀、吴顺序各挑战一次，不升级武将。 */
+  /** 魏蜀吴武将升至750级后，以最高等级玩具和宠物轮流挑战。 */
   const batchChallengeThreeKingdomsGenie = async () => {
     if (selectedTokens.value.length === 0) return;
 
@@ -4247,7 +4246,7 @@ export function createTasksItem(deps) {
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始魏蜀吴灯神各挑战一次: ${tokenName} ===`,
+          message: `=== 开始自动挑战魏蜀吴灯神: ${tokenName} ===`,
           type: "info",
         });
         await ensureConnection(tokenId);
@@ -4267,10 +4266,14 @@ export function createTasksItem(deps) {
         const availableChallenges = getRemainingGenieChallenges(role);
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 查询到今日剩余灯神挑战次数${availableChallenges}次，本任务最多使用3次`,
+          message: `${tokenName} 查询到今日剩余灯神挑战次数${availableChallenges}次，魏蜀吴轮流使用`,
           type: "info",
         });
-        for (const genieId of [1, 2, 3]) {
+        const prepared = new Set();
+        const unavailable = new Set();
+        for (let turn = 0; turn < availableChallenges * 3 && completed < availableChallenges; turn++) {
+          const genieId = [1, 2, 3][turn % 3];
+          if (unavailable.has(genieId)) continue;
           if (shouldStop.value) break;
           if (completed >= availableChallenges) {
             addLog({
@@ -4282,6 +4285,7 @@ export function createTasksItem(deps) {
           }
           const name = GENIE_FACTION_NAMES[genieId];
           let allHeroesOwned = true;
+          if (!prepared.has(genieId)) {
           for (const heroId of GENIE_FACTION_LINEUPS[genieId]) {
             const ownership = await ensureFormationHeroOwned(
               tokenId,
@@ -4301,12 +4305,33 @@ export function createTasksItem(deps) {
               message: `${tokenName} ${name}灯神阵容不完整且无法合成，跳过该阵营`,
               type: "warning",
             });
+            unavailable.add(genieId);
             continue;
           }
-
+          for (const heroId of GENIE_FACTION_LINEUPS[genieId]) {
+            if (shouldStop.value) break;
+            const upgrade = await upgradeSingleHero(tokenId, tokenName, heroId, 750, roleInfo);
+            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+            if (!upgrade.reachedTarget) { allHeroesOwned = false; break; }
+          }
+          if (shouldStop.value) break;
+          if (!allHeroesOwned || GENIE_FACTION_LINEUPS[genieId].some(
+            (heroId) => Number(getHeroFromRoleInfo(roleInfo, heroId)?.level || 0) < 750,
+          )) {
+            unavailable.add(genieId);
+            addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} ${name}上阵武将未全部达到750级，跳过该阵营`, type: "warning" });
+            continue;
+          }
+          prepared.add(genieId);
+          }
+          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
           role = roleInfo?.role || {};
-          const team = buildFactionBattleTeam(genieId);
-          const params = buildGenieBattleParams(role, genieId, team);
+          if (getRemainingGenieChallenges(role) <= 0) break;
+          const params = buildAutoFactionGenieParams(role, genieId);
+          addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} ${name}灯神使用完整750级以上阵容，玩具${params.lordWeaponId || "空"}，宠物${params.petUId || "空"}`, type: "info" });
+          const { genieId: _faction, ...powerParams } = params;
+          await tokenStore.sendMessageWithPromise(tokenId, "hero_calcpowerbyteam", powerParams, 15000);
+          if (shouldStop.value) break;
           const previousProgress = Number(role.genie?.[genieId] ?? -1);
           const response = await tokenStore.sendMessageWithPromise(
             tokenId,
@@ -4321,7 +4346,7 @@ export function createTasksItem(deps) {
             message: `${tokenName} ${name}灯神已挑战一次${won ? "并通关" : "，本次未通关"}`,
             type: won ? "success" : "info",
           });
-          if (genieId < 3) {
+          if (completed < availableChallenges) {
             await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
           }
         }

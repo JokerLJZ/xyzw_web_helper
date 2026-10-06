@@ -793,9 +793,9 @@
                   size="small"
                   @click="batchChallengeThreeKingdomsGenie"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="按魏、蜀、吴独立阵容各挑战一次，不升级武将"
+                  title="先将上阵武将升级至750级，使用最高等级玩具和宠物，魏蜀吴轮流挑战至每日次数用完"
                 >
-                  魏蜀吴灯神各挑战一次
+                  自动挑战魏蜀吴灯神
                 </n-button>
                 <n-button
                   size="small"

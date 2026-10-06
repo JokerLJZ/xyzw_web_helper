@@ -158,3 +158,53 @@ test("已通关第一层后的连续挑战每次先计算战力再发送完整�
     assert.equal(params.genieId, cmd === "fight_startgenie" ? 4 : undefined);
   }
 });
+
+test("魏蜀吴选择最高等级玩具、最高等级宠物并明确发送阵容", async () => {
+  const { buildAutoFactionGenieParams, selectHighestLevelToy } = await import("../src/utils/genieChallengePlanner.js");
+  const role = {
+    lordWeaponId: 3,
+    lordWeapon: { 0: { weaponId: 0, level: 100 }, 2: { weaponId: 2, level: 5 }, 3: { weaponId: 3, level: 30 }, 4: { weaponId: 4, level: 30 } },
+    petData: { pets: { 0: { uId: "low", level: 1 }, 1: { uId: "high", level: 40 } } },
+  };
+  assert.deepEqual(selectHighestLevelToy(role), { weaponId: 3, level: 30 });
+  for (const faction of [1, 2, 3]) assert.deepEqual(buildAutoFactionGenieParams(role, faction), {
+    battleTeam: buildFactionBattleTeam(faction), genieId: faction, lordWeaponId: 3, petUId: "high",
+  });
+});
+
+test("魏蜀吴750级阵容轮流挑战，共享每日次数，已达标武将不再升级", async () => {
+  const { createTasksItem } = await import("../src/utils/batch/tasksItem.js");
+  const role = {
+    levelId: 8000,
+    heroes: Object.fromEntries(Object.values(GENIE_FACTION_LINEUPS).flat().map((heroId) => [heroId, { heroId, level: 750 }])),
+    genie: { 1: 1, 2: 1, 3: 1 },
+    lordWeapon: { 3: { weaponId: 3, level: 50 } },
+    petData: { pets: { 0: { uId: "high", level: 40 } } },
+    statistics: { "genie:battle": 6 },
+    statisticsTime: { "genie:battle": Math.floor(Date.now() / 1000) },
+  };
+  const fights = [];
+  const status = { value: {} };
+  await createTasksItem({
+    selectedTokens: { value: ["t"] }, tokens: { value: [{ id: "t" }] }, tokenStatus: status,
+    isRunning: { value: false }, shouldStop: { value: false }, currentRunningTokenId: { value: null },
+    ensureConnection: async () => {}, releaseConnectionSlot: () => {},
+    delayConfig: { action: 0 }, addLog: () => {}, message: { success: () => {} },
+    tokenStore: {
+      sendGetRoleInfo: async () => ({ role: structuredClone(role) }), closeWebSocketConnection: () => {},
+      sendMessageWithPromise: async (_id, cmd, params) => {
+        if (cmd === "hero_calcpowerbyteam") return { power: 100 };
+        assert.equal(cmd, "fight_startgenie", "达标武将不得发送升级请求");
+        assert.equal(params.lordWeaponId, 3);
+        assert.equal(params.petUId, "high");
+        assert.deepEqual(params.battleTeam, buildFactionBattleTeam(params.genieId));
+        fights.push(params.genieId);
+        role.statistics["genie:battle"]++;
+        role.genie[params.genieId]++;
+        return { role: { genie: { [params.genieId]: role.genie[params.genieId] } } };
+      },
+    },
+  }).batchChallengeThreeKingdomsGenie();
+  assert.deepEqual(fights, [1, 2, 3, 1]);
+  assert.equal(status.value.t, "completed");
+});
