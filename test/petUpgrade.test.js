@@ -32,7 +32,7 @@ function fixture({ quantity = 10, fail = false, stop = false } = {}) {
 }
 
 test("仅升级当前佩戴宠物并使用抓包中的一键升级协议", async () => {
-  const f = fixture(); await f.run();
+  const f = fixture({ quantity: 5 }); await f.run();
   assert.deepEqual(f.calls, [
     { cmd: "pet_useexpitem", params: { slotUId: { slot: -1, uId: "143-U9U" }, isOneClick: true } },
   ]);
@@ -81,4 +81,38 @@ test("扭蛋领奖跳过已领阶段，按增量确认其余奖励且不抽奖",
   ]);
   assert.equal(f.deps.tokenStatus.value.t, "completed");
   assert.equal(f.released(), 1);
+});
+
+
+test("当前佩戴宠物连续升级至经验道具耗尽", async () => {
+  const f = fixture({ quantity: 15 });
+  await f.run();
+  assert.equal(f.calls.length, 3);
+  assert.ok(f.calls.every((c) => c.params.slotUId.uId === "143-U9U"));
+  assert.equal(f.deps.tokenStatus.value.t, "completed");
+});
+
+test("满级或无法升级导致状态完全未变化时只请求一次", async () => {
+  const f = fixture();
+  f.deps.tokenStore.sendMessageWithPromise = async (_id, cmd, params) => {
+    f.calls.push({ cmd, params }); return {};
+  };
+  await f.run();
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.released(), 1);
+});
+
+test("经验增加但未升一级时仍继续升级，切换佩戴宠物后停止", async () => {
+  const f = fixture();
+  const role = { pet: { petUId: "143-U9U" }, items: { 15001: { quantity: 10 } }, petData: { pets: { "-1": { uId: "143-U9U", level: 39, exp: 0 } } } };
+  f.deps.tokenStore.sendGetRoleInfo = async () => ({ role: structuredClone(role) });
+  f.deps.tokenStore.sendMessageWithPromise = async (_id, cmd, params) => {
+    f.calls.push({ cmd, params });
+    role.items[15001].quantity--;
+    role.petData.pets["-1"].exp++;
+    if (f.calls.length === 2) role.pet.petUId = "changed";
+    return {};
+  };
+  await f.run();
+  assert.equal(f.calls.length, 2);
 });

@@ -66,11 +66,12 @@ export function createPetTasks(deps) {
           let role = (await tokenStore.sendGetRoleInfo(id))?.role;
           const targets = getEquippedPetUpgradeTarget(role);
           if (!targets.length) log("没有可确认的当前佩戴宠物，或槽位/唯一编号不完整，跳过", "warning");
-          for (const target of targets) {
-            if (shouldStop.value) break;
-            const current = getPetUpgradeTargets(role).find((p) => p.uId === target.uId);
-            if (!current) { log(`宠物${target.uId}已不在有效槽位，跳过`, "warning"); continue; }
+          const target = targets[0];
+          while (target && !shouldStop.value) {
+            const current = getEquippedPetUpgradeTarget(role).find((p) => p.uId === target.uId);
+            if (!current) { log(`宠物${target.uId}已不再佩戴或身份无法确认，停止升级`, "warning"); break; }
             const quantity = Number(role?.items?.[15001]?.quantity);
+            const exp = Number(role?.petData?.pets?.[current.slot]?.exp ?? 0);
             if (!Number.isFinite(quantity) || quantity <= 0) {
               log("宠物经验道具不足或数量无法确认，结束升级", "warning");
               break;
@@ -78,11 +79,23 @@ export function createPetTasks(deps) {
             await tokenStore.sendMessageWithPromise(id, "pet_useexpitem", {
               slotUId: { slot: current.slot, uId: current.uId }, isOneClick: true,
             }, 15000);
-            // 响应只有pets[slot]的等级/经验增量，重新查询以保留身份和核对资源。
+            // 抓包响应是槽位增量，查询完整状态确认升级并核对剩余道具。
             role = (await tokenStore.sendGetRoleInfo(id))?.role;
             const after = getPetUpgradeTargets(role).find((p) => p.uId === current.uId);
-            log(`宠物${current.uId}一键升级请求成功：${current.level}级 → ${after ? `${after.level}级` : "等级待确认"}`);
-            await new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(delayConfig?.command) || 0)));
+            if (!after) throw new Error("升级后无法确认宠物状态，停止继续消耗");
+            const afterQuantity = Number(role?.items?.[15001]?.quantity);
+            const afterExp = Number(role?.petData?.pets?.[after.slot]?.exp ?? 0);
+            log(`宠物${current.uId}一键升级：${current.level}级 → ${after.level}级，剩余经验道具${Number.isFinite(afterQuantity) ? afterQuantity : "未知"}`);
+            if (after.level === current.level && afterExp === exp && afterQuantity === quantity) {
+              log("宠物等级、经验和道具均未变化，已无法继续升级，结束任务");
+              break;
+            }
+            if (after.level < current.level || !Number.isFinite(afterQuantity) || afterQuantity >= quantity) {
+              log("升级后资源或进度无法确认，停止继续消耗", "warning");
+              break;
+            }
+            if (afterQuantity <= 0 || shouldStop.value) break;
+            await new Promise((resolve) => setTimeout(resolve, Math.max(500, Number(delayConfig?.command) || 0)));
           }
           tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
         } catch (error) {

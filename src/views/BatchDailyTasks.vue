@@ -769,7 +769,7 @@
                   size="small"
                   @click="batchUpgradeAllPets"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="只对当前佩戴且等级最高的宠物使用现有经验道具一键升级"
+                  title="对当前佩戴且等级最高的宠物持续一键升级，直到道具不足或无法继续升级"
                 >
                   升级当前佩戴宠物
                 </n-button>
