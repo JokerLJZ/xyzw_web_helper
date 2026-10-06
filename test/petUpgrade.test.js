@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createPetTasks, getPetUpgradeTargets } from "../src/utils/batch/tasksPet.js";
+import { createPetTasks, getPetUpgradeTargets, getEquippedPetUpgradeTarget } from "../src/utils/batch/tasksPet.js";
 
 function fixture({ quantity = 10, fail = false, stop = false } = {}) {
-  const role = { items: { 15001: { quantity } }, petData: { pets: {
+  const role = { pet: { petUId: "143-U9U" }, items: { 15001: { quantity } }, petData: { pets: {
     "-1": { uId: "143-U9U", level: 39 },
     0: { uId: "pet-b", level: 1 },
   } } };
@@ -31,11 +31,10 @@ function fixture({ quantity = 10, fail = false, stop = false } = {}) {
   return { deps, calls, run: () => createPetTasks(deps).batchUpgradeAllPets(), released: () => released };
 }
 
-test("所有宠物按槽位依次使用抓包中的一键升级协议，并保留完整身份", async () => {
+test("仅升级当前佩戴宠物并使用抓包中的一键升级协议", async () => {
   const f = fixture(); await f.run();
   assert.deepEqual(f.calls, [
     { cmd: "pet_useexpitem", params: { slotUId: { slot: -1, uId: "143-U9U" }, isOneClick: true } },
-    { cmd: "pet_useexpitem", params: { slotUId: { slot: 0, uId: "pet-b" }, isOneClick: true } },
   ]);
   assert.equal(f.deps.tokenStatus.value.t, "completed");
   assert.equal(f.released(), 1);
@@ -53,4 +52,33 @@ test("道具耗尽、停止和请求失败均不继续消耗或重试", async ()
 
 test("缺少唯一编号或合法槽位的增量数据不能作为升级目标", () => {
   assert.deepEqual(getPetUpgradeTargets({ petData: { pets: { "-1": { level: 40 }, bad: { uId: "a" } } } }), []);
+});
+
+
+test("仓库宠物等级再高也不升级，未佩戴时不选目标", () => {
+  const role = { pet: { petUId: "equipped" }, petData: { pets: {
+    0: { uId: "equipped", level: 10 }, 1: { uId: "storage", level: 100 },
+  } } };
+  assert.deepEqual(getEquippedPetUpgradeTarget(role), [{ slot: 0, uId: "equipped", level: 10 }]);
+  delete role.pet;
+  assert.deepEqual(getEquippedPetUpgradeTarget(role), []);
+});
+
+test("扭蛋领奖跳过已领阶段，按增量确认其余奖励且不抽奖", async () => {
+  const f = fixture();
+  const calls = [];
+  f.deps.tokenStore.sendMessageWithPromise = async (_id, cmd, params) => {
+    calls.push({ cmd, params });
+    if (cmd === "gacha_getinfo") return { roleGacha: { stageGachaCnt: 46, claimedStageIdMap: { 2: true } } };
+    assert.equal(cmd, "gacha_claimstagereward");
+    return { roleGacha: { claimedStageIdMap: { [params.stageId]: true } } };
+  };
+  await createPetTasks(f.deps).batchClaimGachaRewards();
+  assert.deepEqual(calls, [
+    { cmd: "gacha_getinfo", params: {} },
+    { cmd: "gacha_claimstagereward", params: { stageId: 1 } },
+    { cmd: "gacha_claimstagereward", params: { stageId: 4 } },
+  ]);
+  assert.equal(f.deps.tokenStatus.value.t, "completed");
+  assert.equal(f.released(), 1);
 });

@@ -759,11 +759,19 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchClaimGachaRewards"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="尝试领取抓包确认的扭蛋阶段1、2、4奖励，已领取的跳过；不执行抽奖"
+                >
+                  领取扭蛋奖励
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchUpgradeAllPets"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="按槽位顺序，每只宠物使用现有经验道具一键升级一次；资源可能被前面的宠物用完"
+                  title="只对当前佩戴且等级最高的宠物使用现有经验道具一键升级"
                 >
-                  所有宠物依次升级
+                  升级当前佩戴宠物
                 </n-button>
                 <n-button
                   size="small"
@@ -4814,6 +4822,7 @@ const taskGroupDefinitions = [
       "batchUpgradeCrystal",
       "batchReplaceBestFishArtifact",
       "batchUpgradeAllPets",
+      "batchClaimGachaRewards",
       "batchMaxWarriorLegionTech",
       "batchClaimAchievementRewards",
       "batchClaimMailAttachments",
@@ -7800,6 +7809,7 @@ const {
   batchUpgradeEquipment,
   batchReplaceBestFishArtifact,
   batchUpgradeAllPets,
+  batchClaimGachaRewards,
   batchUpgradeShoeToy,
   batchMaxWarriorLegionTech,
   batchClaimAchievementRewards,

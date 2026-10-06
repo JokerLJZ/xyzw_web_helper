@@ -398,6 +398,7 @@ export function registerDefaultCommands(reg) {
     // 扭蛋相关
     .register("gacha_drawreward", { num: 1, isGroup: false })
     .register("gacha_getinfo")
+    .register("gacha_claimstagereward")
 
     // 功法
     .register("legacy_getinfo")

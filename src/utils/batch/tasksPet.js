@@ -8,11 +8,23 @@ export function getPetUpgradeTargets(role) {
   }).sort((a, b) => a.slot - b.slot || a.uId.localeCompare(b.uId));
 }
 
+export function getEquippedPetUpgradeTarget(role) {
+  const equippedId = role?.pet?.petUId ?? role?.pet?.uId;
+  if (!equippedId) return [];
+  return getPetUpgradeTargets(role)
+    .filter((pet) => pet.uId === equippedId)
+    .sort((a, b) => b.level - a.level || a.slot - b.slot)
+    .slice(0, 1);
+}
+
+// 当前抓包明确出现的阶段ID；不猜测未提供的奖励阶段和领取门槛。
+export const CAPTURED_GACHA_REWARD_STAGES = [1, 2, 4];
+
 export function createPetTasks(deps) {
   const { selectedTokens, tokens, tokenStatus, isRunning, shouldStop,
     currentRunningTokenId, ensureConnection, releaseConnectionSlot,
     tokenStore, addLog, message, delayConfig } = deps;
-  const batchUpgradeAllPets = async () => {
+  const runPetTask = async (claimRewards = false) => {
     if (!selectedTokens.value.length) return;
     isRunning.value = true;
     shouldStop.value = false;
@@ -29,9 +41,31 @@ export function createPetTasks(deps) {
           currentRunningTokenId.value = id;
           await ensureConnection(id);
           connected = true;
+          if (claimRewards) {
+            const info = await tokenStore.sendMessageWithPromise(id, "gacha_getinfo", {}, 15000);
+            if (!info?.roleGacha) throw new Error("未获取到扭蛋奖励状态");
+            const claimed = { ...info.roleGacha.claimedStageIdMap };
+            let failures = 0;
+            for (const stageId of CAPTURED_GACHA_REWARD_STAGES) {
+              if (shouldStop.value) break;
+              if (claimed[stageId]) continue;
+              try {
+                const response = await tokenStore.sendMessageWithPromise(id, "gacha_claimstagereward", { stageId }, 15000);
+                Object.assign(claimed, response?.roleGacha?.claimedStageIdMap);
+                if (!claimed[stageId]) throw new Error("响应未确认领取成功");
+                log(`扭蛋阶段${stageId}奖励领取成功`, "success");
+              } catch (error) {
+                failures++;
+                log(`扭蛋阶段${stageId}未领取：${error.message}`, "warning");
+              }
+              await new Promise((resolve) => setTimeout(resolve, Math.max(500, Number(delayConfig?.command) || 0)));
+            }
+            tokenStatus.value[id] = shouldStop.value ? "stopped" : failures ? "failed" : "completed";
+            continue;
+          }
           let role = (await tokenStore.sendGetRoleInfo(id))?.role;
-          const targets = getPetUpgradeTargets(role);
-          if (!targets.length) log("没有可升级宠物，或宠物槽位/唯一编号不完整，跳过", "warning");
+          const targets = getEquippedPetUpgradeTarget(role);
+          if (!targets.length) log("没有可确认的当前佩戴宠物，或槽位/唯一编号不完整，跳过", "warning");
           for (const target of targets) {
             if (shouldStop.value) break;
             const current = getPetUpgradeTargets(role).find((p) => p.uId === target.uId);
@@ -53,7 +87,7 @@ export function createPetTasks(deps) {
           tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
         } catch (error) {
           tokenStatus.value[id] = "failed";
-          log(`宠物升级失败：${error.message}，未自动重试`, "error");
+          log(`${claimRewards ? "扭蛋领奖" : "宠物升级"}失败：${error.message}，未自动重试`, "error");
         } finally {
           if (connected) {
             try { tokenStore.closeWebSocketConnection(id); }
@@ -66,7 +100,7 @@ export function createPetTasks(deps) {
       isRunning.value = false;
       currentRunningTokenId.value = null;
     }
-    message.info("宠物升级任务结束，请查看各账号日志");
+    message.info(`${claimRewards ? "扭蛋领奖" : "宠物升级"}任务结束，请查看各账号日志`);
   };
-  return { batchUpgradeAllPets };
+  return { batchUpgradeAllPets: () => runPetTask(false), batchClaimGachaRewards: () => runPetTask(true) };
 }
