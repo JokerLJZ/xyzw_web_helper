@@ -215,12 +215,23 @@ export async function runDreamAutoPush({
   return result(`已达到单次 ${maxBattles} 场上限`);
 }
 
-/** 跳过战斗上限仍需采购；关闭功能、非开放日或主动停止则不采购。 */
+/** 爬层和采购独立执行；只在允许的开放周期内继续采购。 */
 export async function runAutomaticDream({ purchase, ...options }) {
-  const result = await runDreamAutoPush(options);
-  if (result.status !== "skipped" && !options.stopped?.()) {
+  const now = options.now || (() => new Date());
+  const period = getDreamPeriod(now());
+  const canPurchase = () => options.enabled !== false && !options.stopped?.()
+    && isDungeonOpen(now()) && getDreamPeriod(now()) === period;
+  let result;
+  try {
+    result = await runDreamAutoPush(options);
+  } catch (error) {
+    if (!canPurchase()) throw error;
+    options.log?.(`推层阶段异常：${error.message}；独立查询商店并继续采购`);
+    result = { status: "stopped", reason: `推层异常：${error.message}`, pushError: error.message };
+  }
+  if (result.status !== "skipped" && canPurchase()) {
     options.log?.(`推层阶段结束：${result.reason}；开始自动采购`);
-    await purchase(result);
+    await purchase({ ...result, canPurchase });
   }
   return result;
 }

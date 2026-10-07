@@ -481,10 +481,10 @@ test("当前激活武将不是吕布时仍仅用吕布战斗", async () => {
   assert.equal(f.calls.find((c) => c.cmd === "fight_startdungeon").params.heroId, 107);
 });
 
-test("关闭、战斗异常或用户停止时不自动采购", async () => {
+test("关闭或用户停止时不自动采购", async () => {
   const purchase = () => assert.fail("不应采购");
   await runAutomaticDream({ ...fixture(), enabled: false, purchase });
-  await assert.rejects(runAutomaticDream({ ...fixture({ fail: "timeout" }), purchase }), /无法确认/);
+
   const f = fixture();
   f.role.dungeon.activeHeroId = 106;
   f.role.dungeon.battleTeam = {
@@ -606,4 +606,71 @@ test("已完成200关且当前层数重置为0时跳过选将和战斗，继续�
   assert.deepEqual(f.calls.map(({ cmd }) => cmd), ["role_getroleinfo"]);
   assert.equal(isDreamCompleted({ ...f.role.dungeon, beginTime: 0 }, getDreamPeriod(now())), false);
   assert.equal(isDreamCompleted({ ...f.role.dungeon, maxId: 0 }, getDreamPeriod(now())), false);
+});
+
+test("爬层失败仍独立采购，主动停止或跨期时不采购", async () => {
+  const f = fixture({ fail: "timeout" });
+  let purchases = 0;
+  const result = await runAutomaticDream({ ...f, purchase: async ({ canPurchase }) => {
+    assert.equal(canPurchase(), true); purchases++;
+  } });
+  assert.equal(purchases, 1);
+  assert.match(result.pushError, /无法确认/);
+  let date = now();
+  await assert.rejects(runAutomaticDream({
+    ...fixture(), now: () => date,
+    send: async () => { date = new Date("2026-09-27T10:00:00+08:00"); throw new Error("跨期失败"); },
+    purchase: () => assert.fail("跨期不能采购"),
+  }), /跨期失败/);
+});
+
+test("日常和批量入口在选将失败后实际购买最新商店，不使用旧快照", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: now() });
+  const { DailyTaskRunner } = await import("../src/utils/dailyTaskRunner.js");
+  for (const mode of ["daily", "batch"]) {
+    for (const state of ["period", "zero", "complete"]) {
+      const calls = [];
+      const dungeon = {
+        beginTime: state === "period" ? 0 : getDreamPeriod(now()),
+        id: state === "complete" ? 200 : 0,
+        battleTeam: {}, merchant: { 1: [6] },
+      };
+      let reads = 0;
+      const store = {
+        gameTokens: [{ id: "t", name: "test" }],
+        getWebSocketStatus: () => "connected",
+        closeWebSocketConnection: () => {},
+        sendMessageWithPromise: async (_id, cmd, params) => {
+          calls.push({ cmd, params });
+          if (cmd === "role_getroleinfo") {
+            reads++;
+            return { role: { levelId: 4001, dungeon: {
+              ...structuredClone(dungeon), merchant: reads >= 2 || mode === "daily" ? { 1: [5] } : { 1: [6] },
+            } } };
+          }
+          if (cmd === "dungeon_selecthero") throw new Error("服务器错误: 2600050 - 不可选将");
+          if (cmd === "dungeon_buymerchant") return { reward: [{ itemId: 1 }] };
+          assert.fail(`不应发送${cmd}`);
+        },
+      };
+      if (mode === "daily") {
+        const runner = new DailyTaskRunner(store, { commandDelay: 0, taskDelay: 0 });
+        runner.loadDreamPurchaseList = () => ["1-5"];
+        runner.roleSnapshots.set("t", { dungeon: structuredClone(dungeon) });
+        await runner.runDreamTask("t");
+      } else {
+        await createTasksDungeon({
+          selectedTokens: { value: ["t"] }, tokens: { value: store.gameTokens },
+          tokenStatus: { value: {} }, isRunning: { value: false }, shouldStop: { value: false },
+          currentRunningTokenId: { value: null }, batchSettings: { dreamPurchaseList: ["1-5"], maxActive: 1 },
+          tokenStore: store, ensureConnection: async () => {}, releaseConnectionSlot: () => {},
+          connectionQueue: { active: 1 }, addLog: () => {},
+          message: { success: () => {}, info: () => {}, warning: () => {} },
+        }).batchmengjing();
+      }
+      assert.deepEqual(calls.filter(({ cmd }) => cmd === "dungeon_buymerchant"), [
+        { cmd: "dungeon_buymerchant", params: { id: 1, index: 5, pos: 0 } },
+      ], `${mode}/${state}应购买最新商店`);
+    }
+  }
 });

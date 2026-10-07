@@ -430,7 +430,7 @@ export function createTasksDungeon(deps) {
     message.success("消耗活动任务奖励领取结束");
   };
 
-  const runDreamPurchaseForToken = async (tokenId, token, purchaseList, merchantSnapshot = null) => {
+  const runDreamPurchaseForToken = async (tokenId, token, purchaseList, canPurchase = () => true) => {
     if (purchaseList.length === 0) {
       addLog({
         time: new Date().toLocaleTimeString(),
@@ -446,16 +446,12 @@ export function createTasksDungeon(deps) {
       type: "info",
     });
 
-    let merchantData = merchantSnapshot;
-    if (!merchantData) {
-      const roleInfo = await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "role_getroleinfo",
-        {},
-        15000,
-      );
-      merchantData = roleInfo?.role?.dungeon?.merchant || null;
-    }
+    if (shouldStop.value || !canPurchase()) return;
+    const roleInfo = await tokenStore.sendMessageWithPromise(
+      tokenId, "role_getroleinfo", {}, 15000,
+    );
+    if (shouldStop.value || !canPurchase()) return;
+    const merchantData = roleInfo?.role?.dungeon?.merchant || null;
     if (!merchantData) throw new Error("无法获取梦境商店数据");
 
     let successCount = 0;
@@ -487,7 +483,7 @@ export function createTasksDungeon(deps) {
     });
 
     for (const op of operations) {
-      if (shouldStop.value) break;
+      if (shouldStop.value || !canPurchase()) break;
 
       try {
         const response = await tokenStore.sendMessageWithPromise(
@@ -574,11 +570,11 @@ export function createTasksDungeon(deps) {
         connected = true;
         if (shouldStop.value) return;
         const result = await runAutomaticDream({
-          purchase: ({ merchant }) => runDreamPurchaseForToken(
+          purchase: ({ canPurchase }) => runDreamPurchaseForToken(
             tokenId,
             token,
             purchaseList,
-            merchant,
+            canPurchase,
           ),
           send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000),
           stopped: () => shouldStop.value,
