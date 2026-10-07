@@ -405,6 +405,8 @@
                 >
                   一键竞技场战斗3次
                 </n-button>
+                <n-button size="small" @click="openBlackMarketPurchaseModal" :disabled="isRunning">配置黑市采购清单</n-button>
+                <n-button size="small" @click="store_syncpurchaseconfig" :disabled="isRunning || selectedTokens.length === 0">同步黑市采购清单</n-button>
                 <n-button
                   size="small"
                   @click="store_purchase"
@@ -2016,6 +2018,81 @@
       </div>
     </n-modal>
 
+    <!-- Black Market Purchase Modal -->
+    <n-modal
+      v-model:show="showBlackMarketPurchaseModal"
+      preset="card"
+      title="黑市采购清单配置"
+      style="width: 90%; max-width: 760px"
+    >
+      <div class="settings-content">
+        <n-alert type="info" show-icon style="margin-bottom: 12px">
+          设置物品和折扣（1至10折）。保存后，点击“同步黑市采购清单”应用到所选账号；原采购次数保持不变。
+        </n-alert>
+
+        <div style="display: flex; gap: 12px; margin-bottom: 12px">
+          <n-button size="small" type="primary" @click="addBlackMarketPurchaseItem">
+            新增条目
+          </n-button>
+          <n-button size="small" @click="resetBlackMarketPurchaseList">
+            恢复默认
+          </n-button>
+        </div>
+
+        <div
+          v-for="(item, index) in blackMarketPurchaseList"
+          :key="`${index}-${item.itemId ?? 'new'}`"
+          style="
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 12px;
+          "
+        >
+          <n-select
+            :value="item.itemId"
+            :options="blackMarketItemOptions"
+            style="width: 160px"
+            placeholder="选择常用物品"
+            clearable
+            filterable
+            @update:value="(value) => applyBlackMarketCatalogItem(index, value)"
+          />
+          <n-input-number
+            v-model:value="item.itemId"
+            placeholder="物品编号"
+            style="width: 130px"
+            :min="1"
+            :show-button="false"
+          />
+          <n-input-number
+            v-model:value="item.discount"
+            placeholder="折扣"
+            style="width: 110px"
+            :min="1"
+            :max="10"
+          />
+          <n-input style="width: 140px" v-model:value="item.note" placeholder="备注（可选）" />
+          <n-button type="error" secondary @click="removeBlackMarketPurchaseItem(index)">
+            删除
+          </n-button>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 20px; text-align: right">
+          <n-button
+            @click="showBlackMarketPurchaseModal = false"
+            style="margin-right: 12px"
+          >
+            取消
+          </n-button>
+          <n-button type="primary" @click="saveBlackMarketPurchaseConfig">
+            保存配置
+          </n-button>
+        </div>
+      </div>
+    </n-modal>
+
     <!-- Tasks List Modal -->
     <n-modal
       v-model:show="showTasksModal"
@@ -2974,6 +3051,23 @@
                 />
               </div>
             </div>
+            <n-divider title-placement="left" style="margin: 12px 0 8px 0">怪异塔设置</n-divider>
+            <div class="settings-grid">
+              <div class="setting-item">
+                <label class="setting-label">怪异塔爬塔次数</label>
+                <n-input-number
+                  v-model:value="batchSettings.weirdTowerClimbCount"
+                  :min="1"
+                  :max="1000"
+                  :precision="0"
+                  :step="1"
+                  size="small"
+                />
+                <span style="font-size: 12px; color: #86909c">
+                  每个账号每次任务的最多挑战次数，所有账号共用；体力不足或连续失败时提前停止。
+                </span>
+              </div>
+            </div>
             <n-divider title-placement="left" style="margin: 12px 0 8px 0"
               >连接设置</n-divider
             >
@@ -3570,6 +3664,11 @@
 </template>
 
 <script setup>
+import { DEFAULT_WEIRD_TOWER_CLIMB_COUNT, normalizeWeirdTowerClimbCount } from "@/utils/evoTowerRewards.js";
+import {
+  blackMarketItemCatalog, createBlackMarketPurchaseEntry,
+  defaultBlackMarketPurchaseList, normalizeBlackMarketPurchaseList,
+} from "@/utils/batch/blackMarketConfig.js";
 import WeeklyRewardSettings from "@/components/Common/WeeklyRewardSettings.vue";
 import { normalizeWeeklyRewardChoice } from "@/utils/weeklyReward.js";
 import JianghuBlackMarketSettings from "@/components/Common/JianghuBlackMarketSettings.vue";
@@ -4360,7 +4459,11 @@ for (const merchantId in goldItemsConfig) {
   });
 }
 
+const createDefaultBlackMarketPurchaseList = () => defaultBlackMarketPurchaseList.map(item => ({ ...item }));
+const blackMarketItemOptions = blackMarketItemCatalog.map(item => ({ label: item.label, value: item.itemId }));
 const batchSettings = reactive({
+  weirdTowerClimbCount: DEFAULT_WEIRD_TOWER_CLIMB_COUNT,
+  blackMarketPurchaseList: createDefaultBlackMarketPurchaseList(),
   legionId: null,
   crystalHeroId: 107,
   crystalLockAttribute: true,
@@ -4490,6 +4593,8 @@ const loadBatchSettings = () => {
       const parsed = JSON.parse(saved);
       Object.assign(batchSettings, parsed);
     }
+    batchSettings.weirdTowerClimbCount = normalizeWeirdTowerClimbCount(batchSettings.weirdTowerClimbCount);
+    batchSettings.blackMarketPurchaseList = normalizeBlackMarketPurchaseList(batchSettings.blackMarketPurchaseList);
     const normalizedBlackMarket = normalizeBlackMarketSettings(batchSettings);
     batchSettings.blackMarketDiscounts =
       normalizedBlackMarket.blackMarketDiscounts;
@@ -4516,6 +4621,8 @@ const loadBatchSettings = () => {
 // Save batch settings to localStorage
 const saveBatchSettings = () => {
   try {
+    batchSettings.weirdTowerClimbCount = normalizeWeirdTowerClimbCount(batchSettings.weirdTowerClimbCount);
+    batchSettings.blackMarketPurchaseList = normalizeBlackMarketPurchaseList(batchSettings.blackMarketPurchaseList);
     const normalizedBlackMarket = normalizeBlackMarketSettings(batchSettings);
     batchSettings.blackMarketDiscounts =
       normalizedBlackMarket.blackMarketDiscounts;
@@ -4764,6 +4871,7 @@ const taskGroupDefinitions = [
       "batchCampSignup",
       "batchCampChallenge",
       "batcharenafight",
+      "store_syncpurchaseconfig",
       "store_purchase",
       "collection_claimfreereward",
       "batchGenieSweep",
@@ -6036,7 +6144,7 @@ const verifyTaskDependencies = async (task) => {
   for (const taskName of task.selectedTasks) {
     if (integratedDailyTaskNames.includes(taskName)) continue;
 
-    const taskFunction = eval(taskName);
+    const taskFunction = getScheduledTaskFunction(taskName);
     if (typeof taskFunction !== "function") {
       addLog({
         time: new Date().toLocaleTimeString(),
@@ -6260,7 +6368,7 @@ const executeScheduledTask = async (task) => {
         return;
       }
 
-      const taskFunction = eval(taskName);
+      const taskFunction = getScheduledTaskFunction(taskName);
       if (typeof taskFunction !== "function") {
         throw new Error(`任务函数不存在: ${taskName}`);
       }
@@ -6754,6 +6862,60 @@ const executeWeeklyTask = () => {
 };
 
 // Dream Buy Modal Logic
+// Black Market Purchase Modal Logic
+const showBlackMarketPurchaseModal = ref(false);
+const blackMarketPurchaseList = ref(createDefaultBlackMarketPurchaseList());
+
+const openBlackMarketPurchaseModal = () => {
+  blackMarketPurchaseList.value = normalizeBlackMarketPurchaseList(
+    batchSettings.blackMarketPurchaseList?.length
+      ? batchSettings.blackMarketPurchaseList
+      : createDefaultBlackMarketPurchaseList(),
+  ).map((item) => ({ ...item }));
+
+  showBlackMarketPurchaseModal.value = true;
+};
+
+const addBlackMarketPurchaseItem = () => {
+  blackMarketPurchaseList.value.push(createBlackMarketPurchaseEntry());
+};
+
+const applyBlackMarketCatalogItem = (index, itemId) => {
+  blackMarketPurchaseList.value[index] = {
+    ...blackMarketPurchaseList.value[index],
+    ...createBlackMarketPurchaseEntry(itemId),
+  };
+};
+
+const removeBlackMarketPurchaseItem = (index) => {
+  blackMarketPurchaseList.value.splice(index, 1);
+};
+
+const resetBlackMarketPurchaseList = () => {
+  blackMarketPurchaseList.value = createDefaultBlackMarketPurchaseList();
+};
+
+const saveBlackMarketPurchaseConfig = () => {
+  if (blackMarketPurchaseList.value.some(item => !Number.isSafeInteger(Number(item.itemId)) || Number(item.itemId) <= 0 || !Number.isInteger(Number(item.discount)) || Number(item.discount) < 1 || Number(item.discount) > 10)) {
+    message.error("请选择有效物品，并填写1至10的整数折扣");
+    return;
+  }
+  const normalized = normalizeBlackMarketPurchaseList(
+    blackMarketPurchaseList.value,
+  );
+
+  if (normalized.length === 0) {
+    message.error("请至少配置一项黑市采购条目");
+    return;
+  }
+
+  batchSettings.blackMarketPurchaseList = normalized;
+  saveBatchSettings();
+
+  showBlackMarketPurchaseModal.value = false;
+  message.success("黑市采购清单已保存");
+};
+
 const showDreamBuyModal = ref(false);
 const dreamBuyList = ref([]);
 
@@ -7865,6 +8027,7 @@ const {
   legion_storebuygoods,
   legionStoreBuyWhiteJade,
   legionStoreBuySkinCoins,
+  store_syncpurchaseconfig,
   store_purchase,
   store_discount_purchase,
   batchRedeemCodes,
@@ -7895,6 +8058,83 @@ const { batchApexGuess } = tasksApex;
 const tasksXuanwuBlessing = createTasksXuanwuBlessing(createTaskDeps());
 const { batchXuanwuBlessing, batchExchangeXuanwuPetCookies } =
   tasksXuanwuBlessing;
+
+// 只允许调用明确登记的任务，导入的任务名称不能执行任意代码。
+const getScheduledTaskFunction = (name) => {
+  const registry = {
+    startBatch,
+    claimHangUpRewards,
+    batchAddHangUpTime,
+    resetBottles,
+    batchlingguanzi,
+    climbTower,
+    batchWeirdTower,
+    batchOpenBox,
+    batchOpenBoxByPoints,
+    batchClaimBoxPointReward,
+    batchClaimWeeklyActivityBenefit,
+    batchSmartBoxWeekly,
+    batchSmartRecruitWeekly,
+    batchSmartBlackMarketWeekly,
+    batchUseWarehouseItems,
+    batchUpgradeEquipment,
+    batchReplaceBestFishArtifact,
+    batchRedeemCodes,
+    batchFish,
+    batchRecruit,
+    batchmengjing,
+    batchclubsign,
+    batchSaltSignup,
+    batchCampSignup,
+    batchCampChallenge,
+    batcharenafight,
+    batchTopUpFish,
+    batchTopUpGoldFish,
+    batchJoinLegion,
+    batchUpgradeCrystal,
+    batchClaimGachaRewards,
+    batchUpgradeAllPets,
+    batchMaxWarriorLegionTech,
+    batchClaimAchievementRewards,
+    batchClaimMailAttachments,
+    batchAwakenHeroSkills,
+    batchTopUpArena,
+    skinChallenge,
+    legion_storebuygoods,
+    legionStoreBuyWhiteJade,
+    store_purchase,
+    store_discount_purchase,
+    collection_claimfreereward,
+    batchLegacyClaim,
+    batchLegacyBeginHangUp,
+    batchLegacyClaimChargeReward,
+    batchLegacyGiftSendEnhanced,
+    batchClaimPeachTasks,
+    batchGenieSweep,
+    batchChallengeGroupGenie,
+    batchChallengeThreeKingdomsGenie,
+    batchPushMainLevelInfo,
+    batchAdjustEarlyMainLevelFormation,
+    batchAdjustMainLevelFormation,
+    batchUpgradeHangUpAndClaimOrderRewards,
+    batchXuanwuBlessing,
+    batchClaimConsumptionRewards,
+    batchUseConsumptionActivityItems,
+    batchExchangeXuanwuPetCookies,
+    climbWeirdTower,
+    batchUseItems,
+    batchMergeItems,
+    batchClaimFreeEnergy,
+    batchStudy,
+    legionStoreBuySkinCoins,
+    batchAutoStarBook,
+    batchBuyDreamItems,
+    batchFootballBet,
+    batchApexGuess,
+    store_syncpurchaseconfig,
+  };
+  return Object.hasOwn(registry, name) ? registry[name] : undefined;
+};
 
 // 盐杯竞猜 pick 选择
 const footballPick = ref(3);

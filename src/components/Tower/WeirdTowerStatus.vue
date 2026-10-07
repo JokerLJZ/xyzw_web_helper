@@ -133,6 +133,7 @@
 </template>
 
 <script setup>
+import { claimPendingEvoTowerRewards } from "@/utils/evoTowerRewards.js";
 // 停止批量爬塔操作
 let stopFlag = false;
 let stopItemFlag = false;
@@ -643,12 +644,20 @@ const startTowerClimb = async () => {
 
   try {
     const tokenId = tokenStore.selectedToken.id;
+    const claimChapterRewards = (tower) => claimPendingEvoTowerRewards({
+      send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 5000),
+      tower,
+      shouldStop: () => stopFlag,
+      onClaim: (chapter) => message.success(`成功领取第${chapter}章通关奖励`),
+    });
     for (let i = 0; i < maxClimb; i++) {
       if (stopFlag) break;
 
       // 检查当前能量
-      await getTowerInfo();
-      const currentEnergy = towerEnergy.value;
+      const beforeFight = await tokenStore.sendMessageWithPromise(tokenId, "evotower_getinfo", {}, 5000);
+      await claimChapterRewards(beforeFight?.evoTower);
+      if (stopFlag) break;
+      const currentEnergy = Number(beforeFight?.evoTower?.energy || 0);
       if (currentEnergy <= 0) break;
 
       // 准备战斗
@@ -660,7 +669,7 @@ const startTowerClimb = async () => {
       );
 
       // 执行战斗
-      const fightResult = await tokenStore.sendMessageWithPromise(
+      await tokenStore.sendMessageWithPromise(
         tokenId,
         "evotower_fight",
         {
@@ -673,8 +682,8 @@ const startTowerClimb = async () => {
       climbCount++;
       message.success(`第${climbCount}次爬塔命令已发送`);
 
-      // 更新爬塔信息
-      await getTowerInfo();
+      // 使用本次响应判断待领奖章节，查询失败时停止，避免依赖旧缓存。
+      const afterFight = await tokenStore.sendMessageWithPromise(tokenId, "evotower_getinfo", {}, 5000);
 
       // 检查并领取每日任务奖励
       const towerData = evoTowerInfo.value?.evoTower;
@@ -706,24 +715,7 @@ const startTowerClimb = async () => {
         }
       }
 
-      // 检查是否刚通关10层（即当前层是1-1, 2-1, 3-1等）
-      const towerId = currentTowerId.value;
-      const floor = (towerId % 10) + 1;
-      if (
-        fightResult &&
-        fightResult.winList &&
-        fightResult.winList[0] === true &&
-        floor === 1
-      ) {
-        // 领取通关奖励
-        await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "evotower_claimreward",
-          {},
-          5000,
-        );
-        message.success(`成功领取第${Math.floor(towerId / 10)}章通关奖励！`);
-      }
+      await claimChapterRewards(afterFight?.evoTower);
 
       await new Promise((res) => setTimeout(res, 400)); // 每次间隔400毫秒
     }

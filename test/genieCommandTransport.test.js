@@ -39,3 +39,20 @@ test("完整灯神阵容可通过真实命令注册器构造挑战报文", () =>
   const body = { battleTeam: { 0: 107, 1: 108, 2: 116, 3: 112, 4: 120 }, genieId: 4, lordWeaponId: 3 };
   assert.deepEqual(registry.build("fight_startgenie", 0, 39, body).body, body);
 });
+
+test("断线立即拒绝所有请求并清除队列，重连不会重放旧写请求", async () => {
+  const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+  client.connected = true;
+  const pending = Promise.allSettled([
+    client.sendWithPromise("store_getpurchase", {}, 15000),
+    client.sendWithPromise("store_setpurchase", { purchaseCnt: 2, purchaseItemList: [] }, 15000),
+  ]);
+  client.disconnect();
+  for (const result of await pending) {
+    assert.equal(result.status, "rejected");
+    assert.match(result.reason.message, /连接已断开/);
+  }
+  assert.equal(Object.keys(client.promises).length, 0);
+  assert.equal(client.sendQueue.length, 0);
+  client._clearTimers();
+});

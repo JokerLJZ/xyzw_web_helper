@@ -1,3 +1,4 @@
+import { syncBlackMarketPurchaseConfig } from "./blackMarketConfig.js";
 /**
  * 商店类任务
  * 包含: legion_storebuygoods, legionStoreBuyWhiteJade,
@@ -65,6 +66,20 @@ export function createTasksStore(deps) {
         });
         await ensureConnection(tokenId);
 
+        const target = await tokenStore.sendMessageWithPromise(tokenId, "legion_getinfobyid", { legionId }, 5000);
+        const targetInfo = target?.legionData || target?.info;
+        if (Number(targetInfo?.id) !== legionId) throw new Error("未查询到目标俱乐部，请检查俱乐部号");
+        const roleInfo = await tokenStore.sendMessageWithPromise(tokenId, "role_getroleinfo", {}, 5000);
+        if (roleInfo?.role?.legionId == null) throw new Error("未获取到当前俱乐部状态，未发送申请");
+        const currentLegionId = Number(roleInfo.role.legionId);
+        if (!Number.isSafeInteger(currentLegionId) || currentLegionId < 0) throw new Error("当前俱乐部状态无效，未发送申请");
+        if (currentLegionId > 0) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({ time: new Date().toLocaleTimeString(), type: "info", message: `${tokenName} ${currentLegionId === legionId ? "已在目标俱乐部" : `已在其他俱乐部(${currentLegionId})`}，跳过申请` });
+          return;
+        }
+        if (shouldStop.value) return;
+
         const result = await tokenStore.sendMessageWithPromise(
           tokenId,
           "legion_applyjoin",
@@ -99,6 +114,55 @@ export function createTasksStore(deps) {
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${tokenName} 加入俱乐部失败: ${error.message || "未知错误"}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+  };
+
+  const store_syncpurchaseconfig = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+
+      try {
+        await ensureConnection(tokenId);
+        const status = await syncBlackMarketPurchaseConfig({
+          send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 5000),
+          list: batchSettings.blackMarketPurchaseList,
+          shouldStop: () => shouldStop.value,
+        });
+        tokenStatus.value[tokenId] = status === "stopped" ? "waiting" : "completed";
+        addLog({ time: new Date().toLocaleTimeString(), type: "info", message: `${tokenName} ${status === "updated" ? "黑市采购清单已更新并核验" : status === "unchanged" ? "黑市采购清单一致，跳过修改" : "已停止配置黑市清单"}` });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 配置黑市清单失败: ${error.message || "未知错误"}`,
           type: "error",
         });
       } finally {
@@ -612,6 +676,7 @@ export function createTasksStore(deps) {
 
   return {
     batchJoinLegion,
+    store_syncpurchaseconfig,
     legion_storebuygoods,
     legionStoreBuyWhiteJade,
     legionStoreBuySkinCoins,

@@ -195,6 +195,8 @@ export function registerDefaultCommands(reg) {
     .register("store_buy", { goodsId: 1 })
     .register("store_purchase", { goodsId: 1 })
     .register("store_refresh", { storeId: 1 })
+    .register("store_getpurchase")
+    .register("store_setpurchase", { purchaseCnt: 1, purchaseItemList: [] })
 
     // 军团
     .register("legion_getinfo")
@@ -1180,6 +1182,8 @@ export class XyzwWebSocketClient {
       presetteam_getinforesp: "presetteam_getinfo",
       mail_claimallattachmentresp: "mail_claimallattachment",
       store_goodslistresp: "store_goodslist",
+      store_getpurchaseresp: "store_getpurchase",
+      store_setpurchaseresp: "store_setpurchase",
       store_buyresp: ["store_buy", "store_purchase"],
       store_refreshresp: "store_refresh",
       system_getdatabundleverresp: "system_getdatabundlever",
@@ -1364,6 +1368,12 @@ export class XyzwWebSocketClient {
 
   /** 清理定时器 */
   _clearTimers() {
+    const pending = this.promises;
+    this.promises = {};
+    for (const request of Object.values(pending)) {
+      request.reject(new Error("WebSocket连接已断开，请重新执行任务"));
+    }
+    this.sendQueue.length = 0;
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;

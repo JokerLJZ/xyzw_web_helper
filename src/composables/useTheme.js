@@ -19,6 +19,8 @@ const updateReactiveState = () => {
 // 主题管理逻辑
 export function useTheme() {
   let mutationObserver = null;
+  let mediaQuery = null;
+  let systemThemeListener = null;
 
   // 初始化主题
   const initTheme = () => {
@@ -82,14 +84,17 @@ export function useTheme() {
 
   // 监听系统主题变化
   const setupSystemThemeListener = () => {
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    mediaQuery.addListener(() => {
+    if (mediaQuery) return;
+    mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    systemThemeListener = () => {
       const savedTheme = localStorage.getItem("theme");
       // 只有在用户没有手动设置主题时才跟随系统
       if (!savedTheme) {
         initTheme();
       }
-    });
+    };
+    if (mediaQuery.addEventListener) mediaQuery.addEventListener("change", systemThemeListener);
+    else mediaQuery.addListener(systemThemeListener);
   };
 
   // 设置DOM变化监听器（确保响应式状态同步）
@@ -114,6 +119,12 @@ export function useTheme() {
 
   // 清理监听器
   const cleanup = () => {
+    if (mediaQuery) {
+      if (mediaQuery.removeEventListener) mediaQuery.removeEventListener("change", systemThemeListener);
+      else mediaQuery.removeListener(systemThemeListener);
+      mediaQuery = null;
+      systemThemeListener = null;
+    }
     if (mutationObserver) {
       mutationObserver.disconnect();
       mutationObserver = null;
