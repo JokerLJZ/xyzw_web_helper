@@ -1,3 +1,4 @@
+import { extractRolePatch, mergeRoleSnapshot } from "../roleSnapshot.js";
 import { createPetTasks } from "./tasksPet.js";
 import { createWeeklyRewardMap } from "@/utils/weeklyReward.js";
 import { getJianghuBlackMarketPurchasePlan, JIANGHU_BLACK_MARKET_GOODS } from "@/utils/jianghuBlackMarketWeekly.js";
@@ -2368,7 +2369,7 @@ export function createTasksItem(deps) {
     initialRoleInfo = null,
   ) => {
     const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
-    const roleInfo =
+    let roleInfo =
       initialRoleInfo || (await tokenStore.sendGetRoleInfo(tokenId));
     let hero = getHeroFromRoleInfo(roleInfo, heroId);
 
@@ -2394,6 +2395,7 @@ export function createTasksItem(deps) {
         currentLevel,
         currentOrder,
         stopReason: "",
+        roleInfo,
       };
     }
 
@@ -2557,6 +2559,7 @@ export function createTasksItem(deps) {
 
     if (performedActions > 0 && !shouldStop.value) {
       const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+      roleInfo = latestRoleInfo;
       const latestHero = getHeroFromRoleInfo(latestRoleInfo, heroId);
       if (latestHero) {
         currentLevel = Number(latestHero.level) || currentLevel;
@@ -2578,6 +2581,7 @@ export function createTasksItem(deps) {
       currentLevel,
       currentOrder,
       stopReason,
+      roleInfo,
     };
   };
 
@@ -4057,6 +4061,11 @@ export function createTasksItem(deps) {
     message.success("批量领取蟠桃园任务奖励结束");
   };
 
+  // 灯神每轮包含战力和战斗两条命令，不能只在两轮之间限速。
+  const genieSleep = deps.genieSleep || ((ms) => new Promise(resolve => setTimeout(resolve, ms)));
+  const waitForGenieCommand = () => genieSleep(Math.max(1000, Number(delayConfig.command) || 0));
+  const waitForGenieAction = () => genieSleep(Math.max(1500, Number(delayConfig.action) || 0));
+
   /** 使用固定群雄阵容连续挑战灯神，失败或今日次数耗尽时停止。 */
   const batchChallengeGroupGenie = async () => {
     if (selectedTokens.value.length === 0) return;
@@ -4080,7 +4089,7 @@ export function createTasksItem(deps) {
           type: "info",
         });
         await ensureConnection(tokenId);
-        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let roleInfo = await (deps.getGenieRoleInfo?.(tokenId) ?? tokenStore.sendGetRoleInfo(tokenId, {}, 2));
         let role = roleInfo?.role || {};
 
         if (!isGenieMainLevelUnlocked(role)) {
@@ -4093,6 +4102,12 @@ export function createTasksItem(deps) {
           continue;
         }
 
+        if (getRemainingGenieChallenges(role) <= 0) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} 今日灯神挑战次数已用完，跳过群雄准备与挑战`, type: "info" });
+          continue;
+        }
+
         let allHeroesOwned = true;
         for (const target of GROUP_GENIE_LINEUP) {
           const ownership = await ensureFormationHeroOwned(
@@ -4102,6 +4117,7 @@ export function createTasksItem(deps) {
             roleInfo,
           );
           roleInfo = ownership.roleInfo;
+          deps.onGenieRoleInfo?.(tokenId, roleInfo);
           if (!ownership.owned) {
             allHeroesOwned = false;
             break;
@@ -4126,12 +4142,12 @@ export function createTasksItem(deps) {
             target.minLevel,
             roleInfo,
           );
+          roleInfo = result.roleInfo;
+          deps.onGenieRoleInfo?.(tokenId, roleInfo);
           if (!result.reachedTarget) break;
-          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         }
         if (shouldStop.value) break;
 
-        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
         role = roleInfo?.role || {};
         const underLevelHero = GROUP_GENIE_LINEUP.find((target) =>
           Number(getHeroFromRoleInfo(roleInfo, target.heroId)?.level || 0)
@@ -4165,13 +4181,14 @@ export function createTasksItem(deps) {
         });
         let wins = 0;
         for (let attempt = 0; attempt < remainingChallenges; attempt++) {
-          if (shouldStop.value) break;
+          if (shouldStop.value || getRemainingGenieChallenges(role) <= 0) break;
           // 抓包中每次 startGenie 前先以相同阵容和玩具计算战力。
           // 不用空 battleTeam 猜测服务端将复用哪个阵容。
           const { genieId, ...powerParams } = params;
           await tokenStore.sendMessageWithPromise(
             tokenId, "hero_calcpowerbyteam", powerParams, 15000,
           );
+          await waitForGenieCommand();
           if (shouldStop.value) break;
           addLog({
               time: new Date().toLocaleTimeString(),
@@ -4181,6 +4198,8 @@ export function createTasksItem(deps) {
           const response = await tokenStore.sendMessageWithPromise(
             tokenId, "fight_startgenie", params, 15000,
           );
+          mergeRoleSnapshot(role, extractRolePatch(response));
+          deps.onGenieRoleInfo?.(tokenId, roleInfo);
           if (!didGroupGenieProgress(response, previousProgress)) {
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -4188,7 +4207,7 @@ export function createTasksItem(deps) {
               type: "info",
             });
           } else {
-            previousProgress += 1;
+            previousProgress = Number(extractRolePatch(response).genie[GENIE_FACTION_GROUP]);
             wins += 1;
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -4198,9 +4217,7 @@ export function createTasksItem(deps) {
           }
 
           if (attempt + 1 < remainingChallenges) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, delayConfig.action),
-            );
+            await waitForGenieAction();
           }
         }
         tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
@@ -4250,7 +4267,7 @@ export function createTasksItem(deps) {
           type: "info",
         });
         await ensureConnection(tokenId);
-        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let roleInfo = await (deps.getGenieRoleInfo?.(tokenId) ?? tokenStore.sendGetRoleInfo(tokenId, {}, 2));
         let role = roleInfo?.role || {};
         if (!isGenieMainLevelUnlocked(role)) {
           addLog({
@@ -4294,6 +4311,7 @@ export function createTasksItem(deps) {
               roleInfo,
             );
             roleInfo = ownership.roleInfo;
+            deps.onGenieRoleInfo?.(tokenId, roleInfo);
             if (!ownership.owned) {
               allHeroesOwned = false;
               break;
@@ -4311,7 +4329,8 @@ export function createTasksItem(deps) {
           for (const heroId of GENIE_FACTION_LINEUPS[genieId]) {
             if (shouldStop.value) break;
             const upgrade = await upgradeSingleHero(tokenId, tokenName, heroId, 750, roleInfo);
-            roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+            roleInfo = upgrade.roleInfo;
+            deps.onGenieRoleInfo?.(tokenId, roleInfo);
             if (!upgrade.reachedTarget) { allHeroesOwned = false; break; }
           }
           if (shouldStop.value) break;
@@ -4324,13 +4343,13 @@ export function createTasksItem(deps) {
           }
           prepared.add(genieId);
           }
-          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
           role = roleInfo?.role || {};
           if (getRemainingGenieChallenges(role) <= 0) break;
           const params = buildAutoFactionGenieParams(role, genieId);
           addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} ${name}灯神使用完整750级以上阵容，玩具${params.lordWeaponId || "空"}，宠物${params.petUId || "空"}`, type: "info" });
           const { genieId: _faction, ...powerParams } = params;
           await tokenStore.sendMessageWithPromise(tokenId, "hero_calcpowerbyteam", powerParams, 15000);
+          await waitForGenieCommand();
           if (shouldStop.value) break;
           const previousProgress = Number(role.genie?.[genieId] ?? -1);
           const response = await tokenStore.sendMessageWithPromise(
@@ -4340,6 +4359,8 @@ export function createTasksItem(deps) {
             15000,
           );
           const won = didGenieProgress(response, genieId, previousProgress);
+          mergeRoleSnapshot(role, extractRolePatch(response));
+          deps.onGenieRoleInfo?.(tokenId, roleInfo);
           completed += 1;
           addLog({
             time: new Date().toLocaleTimeString(),
@@ -4347,7 +4368,7 @@ export function createTasksItem(deps) {
             type: won ? "success" : "info",
           });
           if (completed < availableChallenges) {
-            await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+            await waitForGenieAction();
           }
         }
 

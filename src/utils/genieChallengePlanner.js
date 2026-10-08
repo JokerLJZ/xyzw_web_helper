@@ -1,3 +1,5 @@
+import { extractRolePatch } from "./roleSnapshot.js";
+
 export const GENIE_FACTION_GROUP = 4;
 export const GENIE_DAILY_CHALLENGE_LIMIT = 10;
 export const GENIE_SHOE_TOY_ID = 2;
@@ -151,8 +153,7 @@ export const didGroupGenieProgress = (response, previousProgress) => {
 
 export const didGenieProgress = (response, genieId, previousProgress) => {
   const current = Number(
-    response?.role?.genie?.[genieId]
-      ?? response?.data?.role?.genie?.[genieId],
+    extractRolePatch(response)?.genie?.[genieId],
   );
   return Number.isInteger(current) && current > Number(previousProgress);
 };

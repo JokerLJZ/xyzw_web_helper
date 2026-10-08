@@ -3,6 +3,7 @@ export const extractRolePatch = (payload) =>
   payload?.data?.role ||
   payload?.body?.role ||
   payload?.rawData?.role ||
+  payload?._raw?.body?.role ||
   null;
 
 const isPlainObject = (value) =>
