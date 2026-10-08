@@ -123,7 +123,6 @@
         <div class="club-main">
           <div class="section-head">
             <span class="section-title">俱乐部资料</span>
-            <span class="section-sub">概览 · 成员 · 申请 · 怪异塔</span>
           </div>
           <n-tabs v-model:value="activeTab" type="line" animated>
           <n-tab-pane name="overview" tab="概览" display-directive="show:lazy">
@@ -811,7 +810,7 @@ const fetchAllMembersLineup = async () => {
               const res = getHeroInfo(roleRes.roleInfo.heroes);
               heroList = res.heroList;
             }
-            
+
             const lineupType = getLineupType(heroList);
 
             if (
@@ -1635,9 +1634,9 @@ const formatNumber = (num) => {
   grid-column: 1 / -1;
 
   .club-layout {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    align-items: start;
     gap: 16px;
     width: 100%;
   }
@@ -1652,10 +1651,9 @@ const formatNumber = (num) => {
 
   .section-title { font-size: 15px; font-weight: 600; }
   .section-sub { color: var(--text-tertiary); font-size: 12px; }
-  .club-main { flex: 1 1 0; min-width: 0; }
+  .club-main { min-width: 0; }
   .club-side {
-    flex: 0 0 380px;
-    width: 380px;
+    min-width: 0;
     position: sticky;
     top: 0;
     display: flex;
@@ -1665,7 +1663,7 @@ const formatNumber = (num) => {
   .club-side-body { min-height: 0; overflow-y: auto; padding-right: 2px; }
 
   @media (max-width: 1280px) {
-    .club-main, .club-side { flex: 0 0 100%; width: 100%; }
+    .club-layout { grid-template-columns: minmax(0, 1fr); }
     .club-side { position: static; max-height: none; }
     .club-side-body { overflow-y: visible; }
   }
@@ -1674,7 +1672,7 @@ const formatNumber = (num) => {
     display: flex;
     justify-content: flex-end;
     margin-bottom: var(--spacing-sm);
-    flex: 0 0 100%;
+    grid-column: 1 / -1;
   }
 
   .overview {

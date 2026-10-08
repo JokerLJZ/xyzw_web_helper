@@ -188,7 +188,7 @@ export function formatRedFeatherCatchNotification(results) {
 /**
  * 格式化定时任务完成通知 (Markdown)
  * @param {string} taskName - 定时任务名称
- * @param {Array<{name: string, status: 'completed'|'failed'|'skipped', error?: string}>} tokenResults
+ * @param {Array<{name: string, status: 'completed'|'failed'|'skipped'|'pending'|'stopped', error?: string}>} tokenResults
  * @param {Date} startTime - 任务开始时间
  * @param {Array<{name: string, startTime: Date|string}>} [upcomingTasks] - 后续批量任务
  * @returns {{title: string, content: string}}
@@ -197,6 +197,8 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
   const total = tokenResults.length;
   const completed = tokenResults.filter((r) => r.status === "completed").length;
   const failed = tokenResults.filter((r) => r.status === "failed").length;
+  const pending = tokenResults.filter((r) => r.status === "pending").length;
+  const stopped = tokenResults.filter((r) => r.status === "stopped").length;
   const skipped = tokenResults.filter((r) => r.status === "skipped").length;
 
   const duration = Math.round((Date.now() - startTime.getTime()) / 1000);
@@ -205,8 +207,8 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
   const durationStr = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
   const endTime = new Date().toLocaleTimeString();
 
-  const statusIcon = failed === 0 ? "✅" : "⚠️";
-  const title = `${statusIcon} 定时任务完成: ${taskName} (${completed}/${total})`;
+  const statusIcon = failed === 0 && pending === 0 && stopped === 0 ? "✅" : "⚠️";
+  const title = `${statusIcon} 定时任务${pending || stopped ? "执行结束" : "完成"}: ${taskName} (${completed}/${total})`;
 
   const lines = [
     `## ${statusIcon} 定时任务执行完毕`,
@@ -218,6 +220,8 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
     `| 总账号 | ${total} |`,
     `| 成功 | ${completed} |`,
     `| 失败 | ${failed} |`,
+    ...(pending > 0 ? [`| 待继续 | ${pending} |`] : []),
+    ...(stopped > 0 ? [`| 已停止 | ${stopped} |`] : []),
     ...(skipped > 0 ? [`| 跳过 | ${skipped} |`] : []),
     `| 耗时 | ${durationStr} |`,
     `| 完成时间 | ${endTime} |`,
@@ -239,6 +243,14 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
       .forEach((r) => {
         lines.push(`- ${r.name}`);
       });
+  }
+
+  for (const [status, label] of [["pending", "待继续"], ["stopped", "已停止"]]) {
+    const accounts = tokenResults.filter((result) => result.status === status);
+    if (accounts.length) {
+      lines.push(``, `### ${label}账号`);
+      accounts.forEach((result) => lines.push(`- ${result.name}`));
+    }
   }
 
   if (completed > 0) {
@@ -269,7 +281,7 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
 
 /**
  * 格式化批量日常任务完成通知 (Markdown)
- * @param {Array<{name: string, status: 'completed'|'failed', error?: string}>} tokenResults
+ * @param {Array<{name: string, status: 'completed'|'failed'|'pending'|'stopped', error?: string}>} tokenResults
  * @param {Date} startTime - 任务开始时间
  * @returns {{title: string, content: string}}
  */
@@ -277,6 +289,8 @@ export function formatBatchTaskNotification(tokenResults, startTime) {
   const total = tokenResults.length;
   const completed = tokenResults.filter((r) => r.status === "completed").length;
   const failed = tokenResults.filter((r) => r.status === "failed").length;
+  const pending = tokenResults.filter((r) => r.status === "pending").length;
+  const stopped = tokenResults.filter((r) => r.status === "stopped").length;
 
   const duration = Math.round((Date.now() - startTime.getTime()) / 1000);
   const minutes = Math.floor(duration / 60);
@@ -284,8 +298,8 @@ export function formatBatchTaskNotification(tokenResults, startTime) {
   const durationStr = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
   const endTime = new Date().toLocaleTimeString();
 
-  const statusIcon = failed === 0 ? "✅" : "⚠️";
-  const title = `${statusIcon} 批量日常任务完成 (${completed}/${total})`;
+  const statusIcon = failed === 0 && pending === 0 && stopped === 0 ? "✅" : "⚠️";
+  const title = `${statusIcon} 批量日常任务${pending || stopped ? "执行结束" : "完成"} (${completed}/${total})`;
 
   const lines = [
     `## ${statusIcon} 批量日常任务执行完毕`,
@@ -295,6 +309,8 @@ export function formatBatchTaskNotification(tokenResults, startTime) {
     `| 总账号 | ${total} |`,
     `| 成功 | ${completed} |`,
     `| 失败 | ${failed} |`,
+    ...(pending > 0 ? [`| 待继续 | ${pending} |`] : []),
+    ...(stopped > 0 ? [`| 已停止 | ${stopped} |`] : []),
     `| 耗时 | ${durationStr} |`,
     `| 完成时间 | ${endTime} |`,
   ];
@@ -306,6 +322,14 @@ export function formatBatchTaskNotification(tokenResults, startTime) {
       .forEach((r) => {
         lines.push(`- **${r.name}**${r.error ? `：${r.error}` : ""}`);
       });
+  }
+
+  for (const [status, label] of [["pending", "待继续"], ["stopped", "已停止"]]) {
+    const accounts = tokenResults.filter((result) => result.status === status);
+    if (accounts.length) {
+      lines.push(``, `### ${label}账号`);
+      accounts.forEach((result) => lines.push(`- ${result.name}`));
+    }
   }
 
   if (completed > 0) {

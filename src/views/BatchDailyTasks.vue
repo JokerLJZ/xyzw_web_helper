@@ -247,7 +247,8 @@
               <n-grid
                 :x-gap="12"
                 :y-gap="8"
-                :cols="batchSettings.tokenListColumns"
+                cols="1 760:2"
+                responsive="self"
               >
                 <n-grid-item
                   v-for="(token, index) in sortedTokens"
@@ -3131,24 +3132,7 @@
               >系统设置</n-divider
             >
             <div class="settings-grid">
-              <div
-                class="setting-item"
-                style="
-                  flex-direction: row;
-                  justify-content: space-between;
-                  align-items: center;
-                "
-              >
-                <label class="setting-label">列表每行数量</label>
-                <n-input-number
-                  v-model:value="batchSettings.tokenListColumns"
-                  :min="1"
-                  :max="10"
-                  :step="1"
-                  size="small"
-                  style="width: 100px"
-                />
-              </div>
+
               <div
                 class="setting-item"
                 style="
@@ -4490,7 +4474,6 @@ const batchSettings = reactive({
   targetBoxPoints: 1000,
   receiverId: "",
   password: "",
-  tokenListColumns: 2,
   // 延迟配置（毫秒）
   commandDelay: 500, // 命令间延迟
   taskDelay: 500, // 任务间延迟
@@ -7391,6 +7374,8 @@ const getStatusText = (tokenId) => {
   const status = tokenStatus.value[tokenId];
   if (status === "completed") return "已完成";
   if (status === "failed") return "失败";
+  if (status === "stopped") return "已停止";
+  if (status === "pending") return "待继续";
   if (status === "running") return "执行中";
   return "等待中";
 };
@@ -7686,7 +7671,13 @@ const endScheduledTokenSession = (tokenId, tokenName) => {
 
 const waitForConnectionSlot = async () => {
   while (connectionQueue.active >= batchSettings.maxActive) {
+    if (shouldStop.value) break;
     await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (shouldStop.value) {
+    const error = new Error("批量任务已停止，取消等待连接槽位");
+    error.interrupted = true;
+    throw error;
   }
   connectionQueue.active++;
 };
@@ -7697,7 +7688,7 @@ const releaseConnectionSlot = () => {
   }
 };
 
-const ensureConnection = async (tokenId, maxRetries = 2) => {
+const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null) => {
   const latestToken = tokens.value.find((t) => t.id === tokenId);
   if (!latestToken) {
     throw new Error(`Token not found: ${tokenId}`);
@@ -7711,12 +7702,16 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     return scheduledTokenSession.initResult || true;
   }
 
-  let status = tokenStore.getWebSocketStatus(tokenId);
+  let acquiredSlot = false;
+  try {
+  const status = tokenStore.getWebSocketStatus(tokenId);
   let connected = status === "connected";
 
   if (!connected) {
     // 等待连接槽位，限制并发连接数
     await waitForConnectionSlot();
+    acquiredSlot = true;
+    onSlotChange?.(true);
 
     if (isScheduledTokenSession(tokenId)) {
       scheduledTokenSession.ownsConnection = true;
@@ -7763,12 +7758,6 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
     }
 
     if (!connected) {
-      // 连接失败，释放槽位
-      releaseConnectionSlot();
-      if (isScheduledTokenSession(tokenId)) {
-        scheduledTokenSession.ownsConnection = false;
-        scheduledTokenSession.slotAcquired = false;
-      }
       throw new Error("连接失败 (重试后仍超时)");
     }
   }
@@ -7811,6 +7800,20 @@ const ensureConnection = async (tokenId, maxRetries = 2) => {
   }
 
   return mainLevelResult || true;
+  } catch (error) {
+    if (acquiredSlot) {
+      try { tokenStore.closeWebSocketConnection(tokenId); }
+      finally {
+        releaseConnectionSlot();
+        onSlotChange?.(false);
+        if (isScheduledTokenSession(tokenId)) {
+          scheduledTokenSession.ownsConnection = false;
+          scheduledTokenSession.slotAcquired = false;
+        }
+      }
+    }
+    throw error;
+  }
 };
 
 // 任务模块使用的会话感知依赖：普通批量任务行为不变，定时任务会话期间
@@ -8152,121 +8155,55 @@ const onFootballPickChange = async (val) => {
 };
 
 const startBatch = async () => {
+  if (isRunning.value && !scheduledTaskExecutionActive) return;
   if (selectedTokens.value.length === 0) return;
-
   selectedTokens.value = normalizeTokenIdsByBatchOrder(selectedTokens.value);
   isRunning.value = true;
-  if (!scheduledTaskExecutionActive) {
-    shouldStop.value = false;
-  }
-  const batchStartTime = new Date();
-  // 不再重置logs数组，保留之前的日志
-  // logs.value = [];
-
-  // Reset status
-  selectedTokens.value.forEach((id) => {
-    tokenStatus.value[id] = "waiting";
-  });
-
-  // 并行执行任务，但通过connectionQueue限制并发连接数
-  const taskPromises = selectedTokens.value.map(async (tokenId) => {
-    if (shouldStop.value) return;
-
+  if (!scheduledTaskExecutionActive) shouldStop.value = false;
+  const tokenIds = [...selectedTokens.value];
+  tokenIds.forEach((id) => { tokenStatus.value[id] = "waiting"; });
+  const taskPromises = tokenIds.map(async (tokenId) => {
+    if (shouldStop.value) { tokenStatus.value[tokenId] = "stopped"; return; }
+    const token = tokens.value.find((t) => t.id === tokenId);
+    if (!token) { tokenStatus.value[tokenId] = "failed"; return; }
     tokenStatus.value[tokenId] = "running";
-
-    let retryCount = 0;
-    const MAX_RETRIES = 1;
-    let success = false;
-
-    while (retryCount <= MAX_RETRIES && !success) {
-      if (shouldStop.value) break;
-
-      const token = tokens.value.find((t) => t.id === tokenId);
-
-      try {
-        if (retryCount === 0) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `=== 开始执行: ${token.name} ===`,
-            type: "info",
-          });
-        } else {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `=== 尝试重试: ${token.name} (第${retryCount}次) ===`,
-            type: "info",
-          });
-        }
-
-        await ensureConnection(tokenId);
-
-        // Create runner with delay settings
-        const runner = new DailyTaskRunner(tokenStore, {
-          commandDelay: batchSettings.commandDelay,
-          taskDelay: batchSettings.taskDelay,
-        });
-
-        // Run tasks
-        await runner.run(tokenId, {
-          shouldStop: () => shouldStop.value,
-          onLog: (log) => addLog(log),
-          onProgress: (p) => {
-            // 每个token维护自己的进度
-          },
-        });
-
-        success = true;
-        tokenStatus.value[tokenId] = "completed";
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 执行完成 ===`,
-          type: "success",
-        });
-      } catch (error) {
-        console.error(error);
-        if (retryCount < MAX_RETRIES && !shouldStop.value) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 执行出错: ${error.message}，等待3秒后重试...`,
-            type: "warning",
-          });
-          // Wait for potential token refresh in store
-          await new Promise((r) => setTimeout(r, 3000));
-          retryCount++;
-        } else {
-          tokenStatus.value[tokenId] = "failed";
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 执行失败: ${error.message}`,
-            type: "error",
-          });
-        }
-      } finally {
-        // 定时任务按账号复用连接，统一由 executeScheduledTask 在账号全部
-        // 任务完成后关闭；普通批量执行仍保持原来的释放行为。
-        if (!isScheduledTokenSession(tokenId)) {
-          tokenStore.closeWebSocketConnection(tokenId);
-          releaseConnectionSlot();
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
-            type: "info",
-          });
-        }
+    let ownsSlot = false;
+    try {
+      addLog({ time: new Date().toLocaleTimeString(), message: `=== 开始执行: ${token.name} ===`, type: "info" });
+      await ensureConnection(tokenId, 2, (owned) => { ownsSlot = owned; });
+      const runner = new DailyTaskRunner(tokenStore, {
+        commandDelay: batchSettings.commandDelay,
+        taskDelay: batchSettings.taskDelay,
+      });
+      const result = await runner.run(tokenId, {
+        shouldStop: () => shouldStop.value,
+        onLog: (log) => addLog({ ...log, message: `${token.name}: ${log.message}` }),
+        onProgress: (progress) => addLog({ time: new Date().toLocaleTimeString(), message: `${token.name}: 服务器每日任务完成并领奖 ${progress}%`, type: "info" }),
+      });
+      tokenStatus.value[tokenId] = result.incomplete ? "pending" : "completed";
+      addLog({ time: new Date().toLocaleTimeString(), message: result.incomplete ? `=== ${token.name} 本轮结束，${result.incomplete} 个步骤待继续 ===` : `=== ${token.name} 执行完成 ===`, type: result.incomplete ? "warning" : "success" });
+    } catch (error) {
+      tokenStatus.value[tokenId] = error.interrupted ? "stopped" : "failed";
+      addLog({ time: new Date().toLocaleTimeString(), message: `${token.name}: ${error.message}`, type: error.interrupted ? "warning" : "error" });
+    } finally {
+      // 定时执行继续交给账号会话统一清理；普通执行只清理本次取得的连接。
+      if (ownsSlot && !isScheduledTokenSession(tokenId)) {
+        try { tokenStore.closeWebSocketConnection(tokenId); }
+        finally { releaseConnectionSlot(); }
       }
     }
   });
-
-  // 等待所有任务完成
-  await Promise.all(taskPromises);
-
-  // 等待所有任务完成后再继续
-  await new Promise((r) => setTimeout(r, 1000));
-
+  try { await Promise.all(taskPromises); }
+  finally {
+    if (!scheduledTaskExecutionActive) {
+      isRunning.value = false;
+      currentRunningTokenId.value = null;
+    }
+  }
   if (!scheduledTaskExecutionActive) {
-    isRunning.value = false;
-    currentRunningTokenId.value = null;
-    message.success("批量任务执行结束");
+    if (shouldStop.value) message.info("批量任务已停止，再次开始将读取服务器状态补差");
+    else if (tokenIds.some((id) => tokenStatus.value[id] !== "completed")) message.warning("本轮结束，仍有未完成任务，可再次开始继续");
+    else message.success("批量任务执行结束");
   }
 };
 
@@ -8391,6 +8328,9 @@ const stopBatch = () => {
 .token-item {
   display: flex;
   align-items: center;
+  min-width: 0;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
 }
 
 .log-card {
@@ -8560,7 +8500,17 @@ const stopBatch = () => {
   align-items: center;
   justify-content: space-between;
   padding-right: 8px;
+  gap: 4px;
+  min-width: 0;
 }
+
+.token-row :deep(.n-checkbox) { min-width: 0; }
+.token-row :deep(.n-checkbox__label) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.token-row > :deep(.n-button) { flex-shrink: 0; }
 
 /* Settings Modal Styles */
 .settings-grid {
