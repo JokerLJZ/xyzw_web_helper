@@ -1,7 +1,11 @@
 export const HERO_AWAKENING_STAR_THRESHOLDS = [22, 25, 27, 30];
 
 const getRole = (roleInfo) =>
-  roleInfo?.role || roleInfo?.data?.role || roleInfo?.body?.role || roleInfo || {};
+  roleInfo?.role ||
+  roleInfo?.data?.role ||
+  roleInfo?.body?.role ||
+  roleInfo?._raw?.body?.role ||
+  roleInfo || {};
 
 export const getHeroFromAwakeningRole = (roleInfo, heroId) => {
   const heroes = getRole(roleInfo)?.heroes;
@@ -37,7 +41,9 @@ export function planHeroAwakenings(roleInfo, selectedHeroIds) {
     if (!hero) return [];
     const star = Math.max(0, Number(hero.star) || 0);
 
-    return HERO_AWAKENING_STAR_THRESHOLDS.flatMap((threshold, index) => {
+    return HERO_AWAKENING_STAR_THRESHOLDS.flatMap((threshold, slot) => {
+      // 采集：主动技能 index=-1，被动技能依次为 0、1、2。
+      const index = slot - 1;
       if (star < threshold) return [];
       if (isHeroAwakeSlot(hero, index)) return [];
       return [{ heroId, index, star, threshold }];

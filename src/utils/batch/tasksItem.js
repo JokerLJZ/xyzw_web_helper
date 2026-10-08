@@ -2272,7 +2272,7 @@ export function createTasksItem(deps) {
 
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 已确认${awakeningPlan.length}个可觉醒技能：${awakeningPlan.map(({ heroId, index }) => `${HERO_DICT[heroId]?.name || heroId}第${index + 1}技能`).join("、")}`,
+          message: `${tokenName} 已确认${awakeningPlan.length}个可觉醒技能：${awakeningPlan.map(({ heroId, index }) => `${HERO_DICT[heroId]?.name || heroId}第${index + 2}技能`).join("、")}`,
           type: "info",
         });
 
@@ -2297,7 +2297,7 @@ export function createTasksItem(deps) {
               completedPlan.push(operation);
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${tokenName} ${heroName}第${operation.index + 1}技能觉醒指令执行成功`,
+                message: `${tokenName} ${heroName}第${operation.index + 2}技能觉醒指令执行成功`,
                 type: "success",
               });
               break;
@@ -2308,7 +2308,7 @@ export function createTasksItem(deps) {
               ) {
                 addLog({
                   time: new Date().toLocaleTimeString(),
-                  message: `${tokenName} ${heroName}第${operation.index + 1}技能觉醒失败，已跳过：${getErrorMessage(error)}`,
+                  message: `${tokenName} ${heroName}第${operation.index + 2}技能觉醒失败，已跳过：${getErrorMessage(error)}`,
                   type: "warning",
                 });
                 break;
@@ -2332,12 +2332,12 @@ export function createTasksItem(deps) {
           isHeroAwakeSlot(getHeroFromAwakeningRole(roleInfo, heroId), index),
         ).length;
         tokenStatus.value[tokenId] =
-          verifiedCount === completedPlan.length ? "completed" : "failed";
+          verifiedCount === awakeningPlan.length ? "completed" : "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 技能觉醒完成：计划${awakeningPlan.length}个，指令成功${completedPlan.length}个，复查确认${verifiedCount}个`,
+          message: `${tokenName} 技能觉醒任务结束：计划${awakeningPlan.length}个，指令成功${completedPlan.length}个，复查确认${verifiedCount}个`,
           type:
-            verifiedCount === completedPlan.length ? "success" : "warning",
+            verifiedCount === awakeningPlan.length ? "success" : "warning",
         });
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";
