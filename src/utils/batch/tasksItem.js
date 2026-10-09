@@ -284,7 +284,7 @@ export function createTasksItem(deps) {
 
   /**
    * 领取当前周活动商店的免费福利。
-   * 招募周使用“限时商店”(activityId=5)，宝箱周使用活动商店(activityId=7)；
+   * 招募周使用“限时商店”(activityId=6)，宝箱周使用活动商店(activityId=7)；
    * 黑市周使用“金砖商店”(activityId=9)，免费商品均为 goodsIndex=0。
    */
   const batchClaimWeeklyActivityBenefit = async () => {
@@ -296,7 +296,7 @@ export function createTasksItem(deps) {
       黑市周: 11,
     };
     const WEEK_ACTIVITY_FREE_SHOPS = {
-      招募周: { activityId: 5, goodsIndex: 0, shopName: "限时商店" },
+      招募周: { activityId: 6, goodsIndex: 0, shopName: "限时商店" },
       宝箱周: { activityId: 7, goodsIndex: 0, shopName: "活动商店" },
       黑市周: { activityId: 9, goodsIndex: 0, shopName: "金砖商店" },
     };
@@ -361,7 +361,7 @@ export function createTasksItem(deps) {
       const tokenName = token?.name || tokenId;
       const weekName = activityWeek?.value;
       const weeklyInfoId = WEEK_ACTIVITY_INFO_IDS[weekName];
-      const freeShop = WEEK_ACTIVITY_FREE_SHOPS[weekName];
+      let freeShop = WEEK_ACTIVITY_FREE_SHOPS[weekName];
 
       try {
         tokenStatus.value[tokenId] = "running";
@@ -379,13 +379,36 @@ export function createTasksItem(deps) {
             ),
         );
         const activity = getActivity(activityResult);
+        // activity_get 返回实际开放的商店与价格，避免周轮换后使用过期活动编号。
+        // 招募周抓包：type=4/id=6/招募福利；黑市周免费商品为500金砖。
+        const shops = activity?.activity;
+        if (Array.isArray(shops) && freeShop) {
+          const shop = shops.find((entry) =>
+            Number(entry?.type) === 4 &&
+            (entry.name === freeShop.shopName ||
+              Number(entry.id) === freeShop.activityId),
+          );
+          const goodsIndex = shop?.data?.goodsList?.findIndex((goods) =>
+            Number(goods.price) === 0 &&
+            Array.isArray(goods.rewardList) && goods.rewardList.some((reward) =>
+              weekName === "招募周"
+                ? Number(reward.itemId) === 1001 && Number(reward.value) === 5
+                : weekName === "黑市周"
+                  ? Number(reward.type) === 2 && Number(reward.value) === 500
+                  : Number(reward.value) > 0,
+            ),
+          );
+          freeShop = shop && goodsIndex >= 0
+            ? { activityId: shop.id, goodsIndex, shopName: shop.name }
+            : null;
+        }
         const weeklyInfo =
           weeklyInfoId == null
             ? null
             : activity?.myTotalInfo?.[weeklyInfoId] ??
               activity?.myTotalInfo?.[String(weeklyInfoId)];
 
-        if (!weekName || !weeklyInfo || !freeShop) {
+        if (!weekName || (!weeklyInfo && !Array.isArray(shops)) || !freeShop) {
           tokenStatus.value[tokenId] = "completed";
           addLog({
             time: new Date().toLocaleTimeString(),
@@ -434,7 +457,8 @@ export function createTasksItem(deps) {
             type: "success",
           });
         } catch (claimError) {
-          if (isRateLimitError(claimError) || isConnectionError(claimError)) {
+          if (isRateLimitError(claimError) || isConnectionError(claimError) ||
+              !/已领取|已购买|购买次数|购买上限|不可购买|未开放/.test(getErrorMessage(claimError))) {
             throw claimError;
           }
           // 免费商品只能领取一次。已领取、商店未开放或商品不可购买均按正常跳过处理。
