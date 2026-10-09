@@ -95,3 +95,26 @@ test("确实升级后复用升级流程核对的快照，不额外查询每个�
   assert.equal(f.calls.filter(cmd=>cmd === "role_getroleinfo").length,2);
   assert.equal(f.calls.filter(cmd=>cmd === "fight_startgenie").length,1);
 });
+
+for (const used of [0, 6, 8, 10]) {
+  test(`日常魏蜀吴各最多一次，群雄用完剩余次数（今日已用${used}次）`, async () => {
+    const f = fixture({ used });
+    const factions = [];
+    const send = f.store.sendMessageWithPromise;
+    f.store.sendMessageWithPromise = async (id, cmd, params) => {
+      if (cmd === "fight_startgenie") factions.push(params.genieId);
+      return send(id, cmd, params);
+    };
+    await runDailyGenieChallenges({
+      tokenId: "t", tokenStore: f.store, stopped: () => false,
+      log: () => {}, delaySettings: { commandDelay: 0 },
+      createTasks: deps => createTasksItem({ ...deps, genieSleep: async () => {} }),
+    });
+    const remaining = 10 - used;
+    assert.deepEqual(factions, [1, 2, 3].slice(0, remaining).concat(
+      Array(Math.max(0, remaining - 3)).fill(4),
+    ));
+    assert.equal(f.role.statistics["genie:battle"], 10);
+    assert.equal(f.calls.filter(cmd => cmd === "role_getroleinfo").length, 1);
+  });
+}

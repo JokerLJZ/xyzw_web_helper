@@ -15,6 +15,7 @@ export async function runDailyGenieChallenges({ tokenId, tokenStore, stopped, lo
     selectedTokens: { value: [tokenId] }, tokens: { value: tokenStore.gameTokens || [] },
     tokenStatus: status, isRunning: { value: true }, shouldStop,
     currentRunningTokenId: { value: tokenId },
+    genieThreeKingdomsOnce: true,
     getGenieRoleInfo: async () => {
       if (!roleInfo) roleInfo = await tokenStore.sendGetRoleInfo(tokenId, {}, 2);
       return roleInfo;

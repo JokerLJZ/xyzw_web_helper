@@ -4307,12 +4307,13 @@ export function createTasksItem(deps) {
         const availableChallenges = getRemainingGenieChallenges(role);
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 查询到今日剩余灯神挑战次数${availableChallenges}次，魏蜀吴轮流使用`,
+          message: `${tokenName} 查询到今日剩余灯神挑战次数${availableChallenges}次，${deps.genieThreeKingdomsOnce ? "魏蜀吴各挑战一次，剩余次数留给群雄" : "魏蜀吴轮流使用"}`,
           type: "info",
         });
         const prepared = new Set();
         const unavailable = new Set();
-        for (let turn = 0; turn < availableChallenges * 3 && completed < availableChallenges; turn++) {
+        const maxTurns = deps.genieThreeKingdomsOnce ? 3 : availableChallenges * 3;
+        for (let turn = 0; turn < maxTurns && completed < availableChallenges; turn++) {
           const genieId = [1, 2, 3][turn % 3];
           if (unavailable.has(genieId)) continue;
           if (shouldStop.value) break;
