@@ -1063,6 +1063,10 @@
               ><n-switch v-model:value="currentSettings.whiteJadePurchase" />
             </div>
             <div class="switch-row">
+              <span class="switch-label" title="仅北京时间周一；按余额和剩余额度采购">周一采购万能红碎片及成长脆饼</span>
+              <n-switch v-model:value="currentSettings.mondayResourcePurchase" />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">付费招募</span
               ><n-switch v-model:value="currentSettings.payRecruit" />
             </div>
@@ -1194,6 +1198,10 @@
             <div class="switch-row">
               <span class="switch-label">周一购买白玉</span
               ><n-switch v-model:value="currentTemplate.whiteJadePurchase" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label" title="仅北京时间周一；按余额和剩余额度采购">周一采购万能红碎片及成长脆饼</span>
+              <n-switch v-model:value="currentTemplate.mondayResourcePurchase" />
             </div>
             <div class="switch-row">
               <span class="switch-label">付费招募</span
@@ -4314,6 +4322,7 @@ const currentSettings = reactive({
   blackMarketDiscountPurchase: false,
   holyBeastFragmentPurchase: false,
   whiteJadePurchase: false,
+  mondayResourcePurchase: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -4348,6 +4357,7 @@ const currentTemplate = reactive({
   blackMarketDiscountPurchase: false,
   holyBeastFragmentPurchase: false,
   whiteJadePurchase: false,
+  mondayResourcePurchase: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -7048,6 +7058,7 @@ const loadSettings = (tokenId) => {
       blackMarketDiscountPurchase: false,
       holyBeastFragmentPurchase: false,
       whiteJadePurchase: false,
+      mondayResourcePurchase: false,
       studyEnable: true,
       dreamEnable: true,
       genieSweepEnable: false,
@@ -7102,6 +7113,7 @@ const openTaskTemplateModal = () => {
     blackMarketDiscountPurchase: false,
     holyBeastFragmentPurchase: false,
     whiteJadePurchase: false,
+    mondayResourcePurchase: false,
     studyEnable: true,
     dreamEnable: true,
     genieSweepEnable: false,
@@ -7261,6 +7273,7 @@ const resetTemplateForm = () => {
     blackMarketDiscountPurchase: false,
     holyBeastFragmentPurchase: false,
     whiteJadePurchase: false,
+    mondayResourcePurchase: false,
     studyEnable: true,
     dreamEnable: true,
     genieSweepEnable: false,

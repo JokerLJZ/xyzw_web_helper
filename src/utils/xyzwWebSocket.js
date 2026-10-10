@@ -405,6 +405,8 @@ export function registerDefaultCommands(reg) {
     // 珍宝阁相关
     .register("collection_claimfreereward")
     .register("collection_goodslist")
+    .register("collection_exchange")
+    .register("legion_storegoodslist")
 
     // 扭蛋相关
     .register("gacha_drawreward", { num: 1, isGroup: false })

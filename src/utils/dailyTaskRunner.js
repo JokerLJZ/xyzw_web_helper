@@ -1,4 +1,5 @@
 import { runDailyGenieChallenges } from "./dailyGenieChallenges.js";
+import { isChinaMonday, runMondayResourcePurchase } from "./mondayResourcePurchase.js";
 import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
 import {
   DREAM_PUSH_INTERVAL_MS,
@@ -749,6 +750,14 @@ export class DailyTaskRunner {
     this.log("白玉购买成功", "success");
   }
 
+  async runMondayResourcePurchase(tokenId) {
+    return runMondayResourcePurchase({
+      send: (cmd, params) => this.executeGameCommand(tokenId, cmd, params, "", 15000),
+      wait: ms => this.sleep(Math.max(ms, this.delaySettings.commandDelay)),
+      log: (text, type) => this.log(text, type),
+    });
+  }
+
   async getLatestRole(tokenId, description = "获取最新角色信息") {
     const snapshot = this.roleSnapshots.get(tokenId);
     if (snapshot) return snapshot;
@@ -1235,6 +1244,7 @@ export class DailyTaskRunner {
         blackMarketDiscountPurchase: false,
         holyBeastFragmentPurchase: false,
         whiteJadePurchase: false,
+        mondayResourcePurchase: false,
         freeGachaEnable: true,
         studyEnable: true,
         dreamEnable: true,
@@ -1805,6 +1815,14 @@ export class DailyTaskRunner {
       name: "领取珍宝阁免费礼包",
       execute: () => this.claimCollectionFreeRewardIfAvailable(tokenId),
     });
+
+    if (settings.mondayResourcePurchase === true) {
+      if (isChinaMonday()) {
+        taskList.push({ name: "周一采购万能红碎片及成长脆饼", execute: () => this.runMondayResourcePurchase(tokenId) });
+      } else {
+        this.log("万能红碎片及成长脆饼采购跳过：仅北京时间周一执行", "info");
+      }
+    }
 
     if (
       settings.freeGachaEnable !== false
