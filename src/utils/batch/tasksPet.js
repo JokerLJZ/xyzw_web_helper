@@ -1,5 +1,6 @@
 import { runPetMerge } from "../petMerge.js";
 import { getClaimableGachaStages, gachaBody } from "../gachaRewards.js";
+import { activatePetBooks, equipHighestLevelPet } from "../petManagement.js";
 /** 抓包：PetService.useEXPItem，消耗15001；响应pets仅含槽位增量。 */
 export function getPetUpgradeTargets(role) {
   return Object.entries(role?.petData?.pets || {}).flatMap(([key, pet]) => {
@@ -23,7 +24,8 @@ export function createPetTasks(deps) {
   const { selectedTokens, tokens, tokenStatus, isRunning, shouldStop,
     currentRunningTokenId, ensureConnection, releaseConnectionSlot,
     tokenStore, addLog, message, delayConfig } = deps;
-  const runPetTask = async (claimRewards = false, mergePets = false) => {
+  const runPetTask = async (claimRewards = false, mergePets = false, management = "") => {
+    const taskLabel = management === "book" ? "宠物图鉴激活领奖" : management === "equip" ? "佩戴最高等级宠物" : mergePets ? "宠物合成" : claimRewards ? "扭蛋领奖" : "宠物升级";
     if (!selectedTokens.value.length) return;
     isRunning.value = true;
     shouldStop.value = false;
@@ -40,6 +42,23 @@ export function createPetTasks(deps) {
           currentRunningTokenId.value = id;
           await ensureConnection(id);
           connected = true;
+          if (management) {
+            const options = {
+              getRole: async () => (await tokenStore.sendGetRoleInfo(id))?.role,
+              send: (cmd, params) => tokenStore.sendMessageWithPromise(id, cmd, params, 15000),
+              shouldStop: () => shouldStop.value,
+              wait: ms => new Promise(resolve => setTimeout(resolve, Math.max(ms, Number(delayConfig?.command) || 0))),
+            };
+            if (management === "book") {
+              const result = await activatePetBooks({ ...options, onResult: ({ petId, action }) => log(`宠物${petId}图鉴${action === "activate" ? "激活" : "领奖"}成功`, "success") });
+              log(`宠物图鉴任务结束：激活${result.activated}项、领取${result.claimed}项奖励`);
+            } else {
+              const result = await equipHighestLevelPet(options);
+              log(result.changed ? `已佩戴最高等级宠物${result.target.uId}（${result.target.level}级）` : result.reason === "equipped" ? "最高等级宠物已经佩戴，跳过" : "没有可佩戴宠物或任务已停止，跳过", result.changed ? "success" : "info");
+            }
+            tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
+            continue;
+          }
           if (claimRewards) {
             const info = gachaBody(await tokenStore.sendMessageWithPromise(id, "gacha_getinfo", {}, 15000));
             const stages = getClaimableGachaStages(info?.roleGacha);
@@ -117,7 +136,7 @@ export function createPetTasks(deps) {
           tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
         } catch (error) {
           tokenStatus.value[id] = "failed";
-          log(`${mergePets ? "宠物合成" : claimRewards ? "扭蛋领奖" : "宠物升级"}失败：${error.message}，未自动重试`, "error");
+          log(`${taskLabel}失败：${error.message}，未自动重试`, "error");
         } finally {
           if (connected) {
             try { tokenStore.closeWebSocketConnection(id); }
@@ -130,7 +149,7 @@ export function createPetTasks(deps) {
       isRunning.value = false;
       currentRunningTokenId.value = null;
     }
-    message.info(`${mergePets ? "宠物合成" : claimRewards ? "扭蛋领奖" : "宠物升级"}任务结束，请查看各账号日志`);
+    message.info(`${taskLabel}任务结束，请查看各账号日志`);
   };
-  return { batchUpgradeAllPets: () => runPetTask(false), batchClaimGachaRewards: () => runPetTask(true), batchMergePets: () => runPetTask(false, true) };
+  return { batchUpgradeAllPets: () => runPetTask(false), batchClaimGachaRewards: () => runPetTask(true), batchMergePets: () => runPetTask(false, true), batchActivatePetBooks: () => runPetTask(false, false, "book"), batchEquipHighestLevelPet: () => runPetTask(false, false, "equip") };
 }

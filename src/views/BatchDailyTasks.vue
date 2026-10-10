@@ -720,6 +720,8 @@
             </n-tab-pane>
             <n-tab-pane name="pet" tab="宠物">
               <n-space>
+                <n-button size="small" @click="batchActivatePetBooks" :disabled="isRunning || selectedTokens.length === 0" title="激活已解锁但未激活的宠物图鉴，并领取未领图鉴奖励">宠物图鉴一键激活领奖</n-button>
+                <n-button size="small" @click="batchEquipHighestLevelPet" :disabled="isRunning || selectedTokens.length === 0" title="按等级选择最高宠物，同等级优先保留当前佩戴">佩戴最高等级宠物</n-button>
                 <n-button
                   size="small"
                   @click="batchClaimGachaRewards"
@@ -4979,7 +4981,7 @@ const taskGroupDefinitions = [
       "batchAdjustMainLevelFormation",
     ],
   },
-  { name: "pet", label: "宠物", tasks: ["batchUpgradeAllPets", "batchMergePets", "batchClaimGachaRewards"] },
+  { name: "pet", label: "宠物", tasks: ["batchUpgradeAllPets", "batchMergePets", "batchClaimGachaRewards", "batchActivatePetBooks", "batchEquipHighestLevelPet"] },
   {
     name: "small-account",
     label: "小号任务",
@@ -8094,6 +8096,8 @@ const {
   batchUpgradeEquipment,
   batchReplaceBestFishArtifact,
   batchUpgradeAllPets,
+  batchActivatePetBooks,
+  batchEquipHighestLevelPet,
   batchClaimGachaRewards,
   batchUpgradeShoeToy,
   batchMaxWarriorLegionTech,
@@ -8204,6 +8208,8 @@ const getScheduledTaskFunction = (name) => {
     batchUpgradeCrystal,
     batchClaimGachaRewards,
     batchUpgradeAllPets,
+    batchActivatePetBooks,
+    batchEquipHighestLevelPet,
     batchMergePets,
     batchMaxWarriorLegionTech,
     batchClaimAchievementRewards,

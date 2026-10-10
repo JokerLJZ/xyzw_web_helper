@@ -44,3 +44,9 @@ PetService.merge({fromSlotUId, toSlotUId, inheritSlot})
 ## 请求间隔
 
 实际用户日志反馈连续操作触发200400（操作太快）。调整为角色查询后至少等待2500毫秒再开蛋/合成，操作完成后至少等待1500毫秒再查询角色，因此连续消耗操作间隔至少4秒；用户配置的命令间隔更大时采用更大值。所有操作串行，不并发查询，限流或超时后仍停止，不自动重发消耗请求。上述间隔是降频策略，服务器实际限流阈值未公开。
+
+## 图鉴激活领奖、佩戴最高等级宠物
+
+接口来自上述game加载的游戏代码。`PetRoleDataView`定义图鉴状态：Unclaimed=0，Claimed=1，Locked=2；缺失记录按Locked处理。`PetModule.sendActiveBook`调用`PetService.activateBook({petId})`；`sendClaimBookReward`调用`PetService.claimBookReward({petId})`。`PetRedDotData.judgePetBookPetActiveAward`仅允许已激活且`bookReward[petId] !== 1`的图鉴领奖。API目录图鉴领奖记录确认激活响应`role.petData.books[602]=1`、领奖响应`role.petData.bookReward[602]=1`。游戏中的图鉴只有激活与领奖，本体升星使用`upgradeStar({slotUId})`且消耗碎片，属于另一项功能。
+
+佩戴来自`PetEquipDialog._onClickUse`的`PetService.load({slotUId:{slot,uId}})`，命令`pet_load`，装备槽位`PET_EQUIP_SLOT_ID=-1`。任务先按等级取最高宠物，同等级优先保留当前佩戴，其次品质、红属性数量、唯一编号；佩戴后查询装备槽唯一编号确认。未重复发送已佩戴宠物，未确认成功时停止且不重试。图鉴和佩戴均采用与合成相同的2500/1500毫秒请求间隔。
