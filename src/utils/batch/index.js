@@ -36,3 +36,5 @@ export { createTasksApex } from './tasksApex.js';
 export { createTasksXuanwuBlessing } from './tasksXuanwuBlessing.js';
 
 export { createConfirmedPetMergeTask } from './confirmedPetMergeTask.js';
+
+export { createTasksResourcePurchase } from './tasksResourcePurchase.js';

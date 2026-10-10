@@ -12,21 +12,22 @@ function purchased(body, spec) {
   if (!Number.isSafeInteger(value) || value<0) throw new Error(`${spec.name}购买额度无效`);
   return value;
 }
-export async function runMondayResourcePurchase({send, wait=async()=>{}, now=()=>new Date(), log=()=>{}}) {
-  if (!isChinaMonday(now())) { log('万能红碎片及成长脆饼采购跳过：仅北京时间周一执行');return; }
+export async function runMondayResourcePurchase({send, wait=async()=>{}, now=()=>new Date(), log=()=>{}, onlyMonday=true, shouldStop=()=>false}) {
+  if (onlyMonday && !isChinaMonday(now())) { log('万能红碎片及成长脆饼采购跳过：仅北京时间周一执行');return; }
   for(const spec of MONDAY_PURCHASES) {
-    if (!isChinaMonday(now())) break;
+    if (shouldStop() || (onlyMonday && !isChinaMonday(now()))) break;
     const role=bodyOf(await send('role_getroleinfo',{}))?.role;
-    if (!role?.items) throw new Error('未获取到完整资源库存，停止周一采购');
+    if (!role?.items) throw new Error('未获取到完整资源库存，停止采购');
     const balance=Number(role.items[spec.costId]?.quantity??0);
     if(!Number.isSafeInteger(balance)||balance<0)throw new Error('兑换资源数量无法确认');
     if(balance<spec.price){log(`${spec.name}余额不足，跳过`);continue;}
     await wait(1500);
+    if (shouldStop()) break;
     const count=purchased(bodyOf(await send(spec.list,{})),spec);
     const num=Math.min(Math.max(0,spec.limit-count),Math.floor(balance/spec.price));
     if(!num){log(`${spec.name}已达限购额度，跳过`);continue;}
     await wait(2500);
-    if(!isChinaMonday(now()))break;
+    if(shouldStop() || (onlyMonday && !isChinaMonday(now())))break;
     await send(spec.buy,spec.id===6001?{goodsId:spec.id,goodsNum:num}:{id:spec.id,num});
     await wait(1500);
     const after=purchased(bodyOf(await send(spec.list,{})),spec);

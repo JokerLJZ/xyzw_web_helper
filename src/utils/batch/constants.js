@@ -78,6 +78,7 @@ export const availableTasks = [
   { label: "收取邮件", value: "batchClaimMailAttachments" },
   { label: "自动技能觉醒", value: "batchAwakenHeroSkills" },
   { label: "小号自动洗练", value: "batchAltAccountRefine" },
+  { label: "采购万能红碎片及成长脆饼", value: "batchBuyRedFragmentsAndPetCookies" },
   { label: "珍珠买赤羽", value: "batchBuyRedFeatherWithPearls" },
   { label: "珍珠买八卦鱼", value: "batchBuyBaguaWithPearls" },
   { label: "珍珠采购（赤羽优先，再买八卦）", value: "batchBuyPearlFish" },

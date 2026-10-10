@@ -25,3 +25,10 @@ test('未知额度或购买未确认停止，避免重复消耗',async()=>{
  let reads=0;await assert.rejects(runMondayResourcePurchase({now:monday,send:async cmd=>{if(cmd==='role_getroleinfo')return {role:{items:{70001:{quantity:50}}}};if(cmd==='collection_goodslist'){reads++;return unknown?{}:{storeInfo:{exchangeStoreMap:{6001:{buyNum:0}}}};}return {};}}));assert.equal(reads,unknown?1:2);
  }
 });
+
+test('独立批量入口可取消星期限制，但默认日常入口仍限定周一',async()=>{
+ const f=fixture();await runMondayResourcePurchase({send:f.send,onlyMonday:false,now:()=>new Date('2026-10-10T00:00:00Z')});assert.equal(f.calls.filter(c=>c.cmd==='collection_exchange'||c.cmd==='legion_storebuygoods').length,2);
+});
+test('批量停止在采购前等待时不消耗资源',async()=>{
+ const f=fixture();let stop=false;await runMondayResourcePurchase({send:f.send,onlyMonday:false,shouldStop:()=>stop,wait:async ms=>{if(ms===2500)stop=true;}});assert.equal(f.calls.some(c=>c.cmd==='collection_exchange'),false);
+});
