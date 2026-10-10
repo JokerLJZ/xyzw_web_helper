@@ -40,3 +40,7 @@ PetService.merge({fromSlotUId, toSlotUId, inheritSlot})
 `ResidentGachaData.canClaimReward` 和 `ResidentGachaRewardDialog._canClaimStageReward` 均要求 `stageGachaCnt >= GachaAccumRewardConf.num` 且该ID未领取。官方配置包含阶段1至10，门槛依次10、20、30、40、50、60、70、80、90、100次。
 
 先调用 `GachaService.getInfo({})` / `gacha_getinfo` 获取本轮次数与 `claimedStageIdMap`，然后调用 `GachaService.claimStageReward({stageId})` / `gacha_claimstagereward`。`api采集/宠物/扭蛋领奖.txt`实际阶段4响应只有 `roleGacha.claimedStageIdMap[4]=true` 增量，以及奖励/物品增量；必须合并领取状态。测试夹具 `test/fixtures/gacha-claim-stage4.json` 取自该记录，保留相关字段。任务领取所有达标未领阶段，不发送抽奖请求。
+
+## 请求间隔
+
+实际用户日志反馈连续操作触发200400（操作太快）。调整为角色查询后至少等待2500毫秒再开蛋/合成，操作完成后至少等待1500毫秒再查询角色，因此连续消耗操作间隔至少4秒；用户配置的命令间隔更大时采用更大值。所有操作串行，不并发查询，限流或超时后仍停止，不自动重发消耗请求。上述间隔是降频策略，服务器实际限流阈值未公开。

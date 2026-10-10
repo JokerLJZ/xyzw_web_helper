@@ -74,3 +74,19 @@ test('确认后批量入口固定账号和品质，调用合成协议并释放�
  const pending=task.batchMergePets();deps.selectedTokens.value=['b'];deps.batchSettings.petMergeMaxColor=6;approve(true);await pending;
  assert.equal(calls[0][1],'a');assert.equal(calls[1][1],'pet_merge');assert.equal(calls.at(-1)[1],'a');assert.equal(released,1);assert.equal(deps.tokenStatus.value.a,'completed');assert.equal(deps.isRunning.value,false);
 });
+
+test('开蛋、合成、角色查询之间均有等待，连续操作间隔至少4秒',async()=>{
+ let time=0,r={petData:{pets:{}},items:{37011:{quantity:2}}},serial=0;const events=[];
+ await runPetMerge({getRole:async()=>{events.push(['query',time]);return structuredClone(r);},wait:async ms=>{time+=ms;},openEgg:async()=>{events.push(['egg',time]);r.items[37011].quantity--;r.petData.pets[++serial]=pet(`p${serial}`);},send:async p=>{events.push(['merge',time]);delete r.petData.pets[p.fromSlotUId.slot];r.petData.pets[p.toSlotUId.slot]=pet('new',201);return {isSuccess:true};}});
+ assert.deepEqual(events.map(e=>e[0]),['query','egg','query','egg','query','merge','query']);
+ for(let i=1;i<events.length;i++)assert.ok(events[i][1]-events[i-1][1]>=1500);
+ const actions=events.filter(e=>e[0]!=='query');for(let i=1;i<actions.length;i++)assert.ok(actions[i][1]-actions[i-1][1]>=4000);
+});
+test('操作前等待期间停止时不发消耗请求',async()=>{
+ let stop=false;
+ const result=await runPetMerge({getRole:async()=>role(),wait:async()=>{stop=true;},shouldStop:()=>stop,send:async()=>assert.fail('不能发送合成')});
+ assert.equal(result.count,0);assert.equal(result.stopped,true);
+});
+test('200400限流错误不自动重发消耗请求',async()=>{
+ let calls=0;await assert.rejects(runPetMerge({getRole:async()=>role(),send:async()=>{calls++;throw Error('服务器错误: 200400 - 操作太快，请稍后再试');}}),/200400/);assert.equal(calls,1);
+});

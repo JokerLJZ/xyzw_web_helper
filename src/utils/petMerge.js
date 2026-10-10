@@ -135,6 +135,8 @@ export function selectPetMergePair(role, maxColor = 4) {
 }
 
 export const PET_EGG_ITEMS = [37011, 37012, 37013];
+export const PET_MERGE_QUERY_DELAY = 1500;
+export const PET_MERGE_OPERATION_DELAY = 2500;
 const boardPets = role => Object.entries(role?.petData?.pets ?? {}).filter(([slot, pet]) => Number(slot) > 0 && pet?.uId);
 export async function runPetMerge({ getRole, send, openEgg, maxColor = 4, shouldStop = () => false, wait = async () => {}, onResult = () => {} }) {
   if (!Number.isInteger(maxColor) || maxColor < 1 || maxColor > 6) throw new Error("宠物合成品质范围无效");
@@ -148,7 +150,11 @@ export async function runPetMerge({ getRole, send, openEgg, maxColor = 4, should
     if (egg && empty && openEgg) {
       const quantity = Number(role.items[egg].quantity);
       const beforeCount = boardPets(role).length;
+      await wait(PET_MERGE_OPERATION_DELAY);
+      if (shouldStop()) break;
       await openEgg({ itemId: egg });
+      // 开蛋和角色查询也会计入请求频率，避免紧接着发送查询。
+      await wait(PET_MERGE_QUERY_DELAY);
       const after = await getRole();
       const remaining = after?.items ? Number(after.items[egg]?.quantity ?? 0) : NaN;
       if (!after?.petData?.pets || !Number.isFinite(remaining) || remaining !== quantity - 1 || boardPets(after).length !== beforeCount + 1) {
@@ -157,22 +163,23 @@ export async function runPetMerge({ getRole, send, openEgg, maxColor = 4, should
       eggsOpened++;
       onResult({ eggsOpened, itemId: egg, openedEgg: true });
       role = after;
-      if (!shouldStop()) await wait();
       continue;
     }
     const params = selectPetMergePair(role, maxColor);
     if (!params) break;
+    await wait(PET_MERGE_OPERATION_DELAY);
+    if (shouldStop()) break;
     const raw = await send(params);
     const result = raw?._raw?.body ?? raw?.body ?? raw;
     count++;
     if (typeof result?.isSuccess !== "boolean") throw new Error("合成响应缺少isSuccess，停止且不重试");
+    await wait(PET_MERGE_QUERY_DELAY);
     const after = await getRole();
     if (!after?.petData?.pets) throw new Error("无法确认合成后宠物列表，停止且不重试");
     const beforeCount = boardPets(role).length;
     if (boardPets(after).length >= beforeCount) throw new Error("合成后宠物数量未减少，停止以避免重复消耗");
     onResult({ count, isSuccess: result.isSuccess, params });
     role = after;
-    if (!shouldStop()) await wait();
   }
   return { count, eggsOpened, blockedByCapacity: PET_EGG_ITEMS.some(id => Number(role?.items?.[id]?.quantity) > 0), stopped: shouldStop() };
 }

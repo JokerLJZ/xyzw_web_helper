@@ -70,7 +70,7 @@ export function createPetTasks(deps) {
               getRole: async () => (await tokenStore.sendGetRoleInfo(id))?.role,
               send: params => tokenStore.sendMessageWithPromise(id, "pet_merge", params, 15000),
               openEgg: params => tokenStore.sendMessageWithPromise(id, "pet_openegg", params, 15000),
-              wait: () => new Promise(resolve => setTimeout(resolve, Math.max(500, Number(delayConfig?.command) || 0))),
+              wait: ms => new Promise(resolve => setTimeout(resolve, Math.max(ms, Number(delayConfig?.command) || 0))),
               onResult: ({ count, isSuccess, openedEgg, eggsOpened }) => openedEgg
                 ? log(`已使用${eggsOpened}个白、绿、蓝宠物蛋，已刷新宠物列表`)
                 : log(`第${count}次宠物合成${isSuccess ? "成功" : "失败"}，已刷新宠物列表`, isSuccess ? "success" : "warning"),
