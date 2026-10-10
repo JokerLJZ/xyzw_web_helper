@@ -12,6 +12,35 @@ const { CommandRegistry, registerDefaultCommands, XyzwWebSocketClient } = await 
   `data:text/javascript;base64,${Buffer.from(prelude + source).toString("base64")}`
 );
 
+test("洗练采集200040错误显示版本过低，并保留服务器error字段", async () => {
+  // api采集/洗练/旧Z.txt：quench返回code:200040,error:版本过低，请升级。
+  for (const useResp of [true, false]) {
+    for (const errorText of [undefined, "版本过低，请升级", "请升级洗练协议"]) {
+      const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+      client.connected = true;
+      const promise = client.sendWithPromise("equipment_quench", { heroId:102, part:1 }, 1000);
+      const task = client.sendQueue.shift();
+      const rejection = assert.rejects(promise, new RegExp(errorText || "版本过低，请升级"));
+      client._handlePromiseResponse({ ...(useResp ? {resp:task.seq} : {}), cmd:"equipment_quenchresp", code:200040, error:errorText });
+      await rejection;
+      assert.equal(Object.keys(client.promises).length,0);
+      client._clearTimers();
+    }
+  }
+});
+
+test("珍珠采购按采集参数构造请求并匹配syncrewardresp",async()=>{
+  const registry=registerDefaultCommands(new CommandRegistry());
+  assert.deepEqual(registry.build("activity_buygoods",0,1,{type:1,goodsId:8206}).body,{type:1,goodsId:8206});
+  const client=new XyzwWebSocketClient({url:"wss://test",utils:{}});client.connected=true;
+  const promise=client.sendWithPromise("activity_buygoods",{type:1,goodsId:8304},1000);
+  client.sendQueue.shift();
+  const body={role:{items:{1013:{quantity:117}}},reward:[{type:3,itemId:13041,value:1}]};
+  client._handlePromiseResponse({cmd:"syncrewardresp",body});
+  const result=await promise;assert.equal(result.reward[0].itemId,13041);
+  client._clearTimers();
+});
+
 test("灯神战力计算按抓包编码，并按resp序号接收战力响应", async () => {
   const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
   client.connected = true;

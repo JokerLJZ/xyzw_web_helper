@@ -22,6 +22,8 @@ export { createTasksBottle } from './tasksBottle.js';
 export { createTasksTower } from './tasksTower.js';
 export { createTasksItem } from './tasksItem.js';
 export { createTasksRefine } from './tasksRefine.js';
+export { createTasksPearlFish } from './tasksPearlFish.js';
+export { createConfirmedPearlFishTasks } from './confirmedPearlFishTasks.js';
 export { createTasksDungeon } from './tasksDungeon.js';
 export { createTasksArena } from './tasksArena.js';
 export { createTasksStore } from './tasksStore.js';

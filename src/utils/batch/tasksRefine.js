@@ -55,7 +55,12 @@ export function createTasksRefine(deps) {
             heroId, equipment, limit, shouldStop: () => shouldStop.value,
             send: async (cmd, params) => {
               if (tokenStore.getWebSocketStatus(id) !== "connected") throw new Error("连接已断开");
-              return tokenStore.sendMessageWithPromise(id, cmd, params, 15000);
+              try {
+                return await tokenStore.sendMessageWithPromise(id, cmd, params, 15000);
+              } catch (error) {
+                const action = cmd === "equipment_confirm" ? "确认洗练" : "洗练";
+                throw new Error(`${partNames[params.part]}${action}请求(${cmd})失败：${error.message}`);
+              }
             },
             onUpdate: update => {
               count = update.count;

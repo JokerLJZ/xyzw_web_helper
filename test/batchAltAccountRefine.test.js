@@ -107,3 +107,18 @@ test("明确使用配置武将，缺少该武将的账号停止而不改洗其�
   };
   await g.run(); assert.equal(g.calls.length,1); assert.equal(g.calls[0].params.heroId,106);
 });
+
+test("铠甲已达标不影响武器请求，版本错误注明武器并停止该账号不重试",async()=>{
+  const f=fixture({ids:["a"],limit:1000});
+  const get=f.deps.tokenStore.sendGetRoleInfo;
+  f.deps.tokenStore.sendGetRoleInfo=async id=>{
+    const info=await get(id); info.role.heroes[107].equipment[2].quenches={1:target}; return info;
+  };
+  f.deps.tokenStore.sendMessageWithPromise=async(id,cmd,params)=>{
+    f.calls.push({id,cmd,params}); throw new Error("服务器错误: 200040 - 版本过低，请升级");
+  };
+  await f.run(); assert.equal(f.calls.length,1); assert.equal(f.calls[0].params.part,1);
+  assert.ok(f.logs.some(x=>x.message.includes("铠甲已有目标属性")));
+  assert.ok(f.logs.some(x=>x.message.includes("武器洗练请求(equipment_quench)失败") && x.message.includes("版本过低，请升级")));
+  assert.equal(f.deps.tokenStatus.value.a,"failed");
+});

@@ -760,6 +760,15 @@
                 >
                   小号自动洗练
                 </n-button>
+                <n-button size="small" @click="batchBuyRedFeatherWithPearls"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="每条60珍珠，只补齐最高星赤羽升4星所缺材料；采购后升星并给吕布佩戴">珍珠买赤羽</n-button>
+                <n-button size="small" @click="batchBuyBaguaWithPearls"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="赤羽升4星材料补齐后，用剩余珍珠购买；采购后升星并给诸葛亮佩戴">珍珠买八卦鱼</n-button>
+                <n-button size="small" @click="batchBuyPearlFish"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="先补赤羽升4星所需数量，再用剩余珍珠买八卦；实际采购后自动升星并佩戴">珍珠采购（赤羽优先，再买八卦）</n-button>
                 <n-button
                   size="small"
                   @click="batchReplaceBestFishArtifact"
@@ -2654,6 +2663,16 @@
                 class="setting-item"
                 style="flex-direction: row; justify-content: space-between; align-items: center"
               >
+                <label class="setting-label">珍珠采购后自动升星</label>
+                <n-switch v-model:value="batchSettings.pearlFishAutoUpgrade" />
+              </div>
+              <div class="setting-item">
+                <span class="setting-description">优先补齐当前最高星赤羽升4星所缺数量（60珍珠/条），再用剩余珍珠买八卦（75珍珠/条）。仅对本次实际采购成功的鱼灵升星并佩戴：吕布戴最高星赤羽，诸葛亮戴最高星八卦。赤羽最多升4星，八卦最多升5星；没有采购则不操作。</span>
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
                 <label class="setting-label">鱼灵替换武将</label>
                 <n-select
                   v-model:value="batchSettings.fishReplacementHeroId"
@@ -3751,6 +3770,7 @@ import {
   createTasksTower,
   createTasksItem,
   createTasksRefine,
+  createConfirmedPearlFishTasks,
   createTasksDungeon,
   createTasksArena,
   createTasksStore,
@@ -4482,6 +4502,7 @@ const batchSettings = reactive({
   equipmentUpgradeHeroId: 107,
   altRefineHeroId: 107,
   altRefineLimit: 1000,
+  pearlFishAutoUpgrade: true,
   fishReplacementHeroId: 107,
   awakeningHeroIds: [],
   useUniversalRed: true,
@@ -4959,6 +4980,9 @@ const taskGroupDefinitions = [
       "batchClaimMailAttachments",
       "batchAwakenHeroSkills",
       "batchAltAccountRefine",
+      "batchBuyRedFeatherWithPearls",
+      "batchBuyBaguaWithPearls",
+      "batchBuyPearlFish",
       "batchChallengeGroupGenie",
       "batchChallengeThreeKingdomsGenie",
       "batchTopUpGoldFish",
@@ -7994,6 +8018,30 @@ const {
 
 const tasksItem = createTasksItem(createTaskDeps());
 const { batchAltAccountRefine } = createTasksRefine(createTaskDeps());
+const { batchBuyRedFeatherWithPearls, batchBuyBaguaWithPearls, batchBuyPearlFish } = createConfirmedPearlFishTasks(createTaskDeps(), {
+  isBusy: () => isRunning.value && !scheduledTokenSession.active,
+  onCancel: () => {
+    if (scheduledTokenSession.active) shouldStop.value = true;
+    addLog({ time: new Date().toLocaleTimeString(), message: "已取消珍珠采购，未执行任务", type: "info" });
+  },
+  confirm: ({ taskName, names, autoUpgrade }) => new Promise(resolve => {
+    const descriptions = {
+      batchBuyRedFeatherWithPearls: "每条60珍珠，补齐当前最高星赤羽升至4星所缺数量。",
+      batchBuyBaguaWithPearls: "赤羽升4星材料补齐后，用剩余珍珠购买八卦鱼，每条75珍珠。",
+      batchBuyPearlFish: "先以每条60珍珠补齐赤羽升4星所缺数量，再用剩余珍珠购买八卦鱼（75珍珠/条）。",
+    };
+    dialog.warning({
+      title: "确认珍珠采购",
+      content: `将对${names.length}个账号执行珍珠采购：${names.join("、")}。${descriptions[taskName]}${autoUpgrade ? "实际采购后自动升星：赤羽最多4星，八卦最多5星。" : "本次不自动升星。"}实际采购后给吕布佩戴最高星赤羽、给诸葛亮佩戴最高星八卦；未购买的鱼灵不调整。此操作会消耗珍珠${autoUpgrade ? "和鱼灵升星材料" : ""}。`,
+      positiveText: "确认采购",
+      negativeText: "取消",
+      maskClosable: false,
+      onPositiveClick: () => { resolve(true); },
+      onNegativeClick: () => { resolve(false); },
+      onClose: () => { resolve(false); },
+    });
+  }),
+});
 const {
   batchOpenBox,
   batchOpenBoxByPoints,
@@ -8134,6 +8182,9 @@ const getScheduledTaskFunction = (name) => {
     batchClaimMailAttachments,
     batchAwakenHeroSkills,
     batchAltAccountRefine,
+    batchBuyRedFeatherWithPearls,
+    batchBuyBaguaWithPearls,
+    batchBuyPearlFish,
     batchTopUpArena,
     skinChallenge,
     legion_storebuygoods,

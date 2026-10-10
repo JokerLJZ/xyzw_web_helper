@@ -18,6 +18,8 @@ const errorCodeMap = {
   3300060: "扫荡条件不满足",
   1300050: "请修改您的采购次数",
   200020: "出了点小问题，请尝试重启游戏解决～",
+  // api采集/洗练/旧Z.txt 中的服务器原始错误。
+  200040: "版本过低，请升级",
   200160: "模块未开启",
   7500140: "请先输入密码",
   7500100: "密码输入错误",
@@ -356,6 +358,7 @@ export function registerDefaultCommands(reg) {
     .register("dungeon_buymerchant")
     // 活动/任务
     .register("activity_get")
+    .register("activity_buygoods", { type: 1, goodsId: 8304 })
     .register("activity_claimweekactreward", {
       selectRewardsMap: { 1: 1 },
       typ: 1,
@@ -1116,7 +1119,7 @@ export class XyzwWebSocketClient {
       } else {
         // 获取错误描述
         const errorDesc =
-          errorCodeMap[packet.code] || packet.hint || "未知错误";
+          (typeof packet.error === "string" && packet.error) || packet.hint || errorCodeMap[packet.code] || "未知错误";
 
         promiseData.reject(
           new Error(`服务器错误: ${packet.code} - ${errorDesc}`),
@@ -1303,6 +1306,7 @@ export class XyzwWebSocketClient {
         "lordweapon_upgradepassiveskilllevel",
       ],
       syncrewardresp: [
+        "activity_buygoods",
         "role_backclaimreward",
         "activity_commonbuygoods",
         "activity_buystoregoods",
@@ -1355,7 +1359,7 @@ export class XyzwWebSocketClient {
         } else {
           // 获取错误描述
           const errorDesc =
-            errorCodeMap[packet.code] || packet.hint || "未知错误";
+            (typeof packet.error === "string" && packet.error) || packet.hint || errorCodeMap[packet.code] || "未知错误";
 
           promiseData.reject(
             new Error(`服务器错误: ${packet.code} - ${errorDesc}`),
