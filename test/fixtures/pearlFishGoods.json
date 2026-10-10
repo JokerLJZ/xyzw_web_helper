@@ -1,0 +1,51 @@
+{
+  "source": "Official config a7495acce5, discovered from api采集/caches HTTP cache",
+  "goods": [
+    {
+      "id": 8304,
+      "rank": 41,
+      "activityID": 8,
+      "price": 60,
+      "paymentType": 4,
+      "costItemID": 1013,
+      "limit": 9999,
+      "relation": 0,
+      "broadcast": "MerchandiseConf_broadcast_28",
+      "description": "",
+      "hide": 0,
+      "limitStartTime": 0,
+      "limitTime": 0,
+      "merchandise": [
+        {
+          "type": 3,
+          "itemId": 13041,
+          "weight": 1,
+          "value": 1
+        }
+      ]
+    },
+    {
+      "id": 8206,
+      "rank": 21,
+      "activityID": 8,
+      "price": 75,
+      "paymentType": 4,
+      "costItemID": 1013,
+      "limit": 9999,
+      "relation": 0,
+      "broadcast": "MerchandiseConf_broadcast_14",
+      "description": "",
+      "hide": 0,
+      "limitStartTime": 0,
+      "limitTime": 0,
+      "merchandise": [
+        {
+          "type": 3,
+          "itemId": 12061,
+          "weight": 1,
+          "value": 1
+        }
+      ]
+    }
+  ]
+}

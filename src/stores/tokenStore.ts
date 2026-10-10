@@ -25,6 +25,8 @@ declare interface TokenData {
   token: string; // 原始Base64 token
   wsUrl: string | null; // 可选的自定义WebSocket URL
   server: string;
+  roleId?: string | number; // 游戏角色ID（BIN/扫码导入时可用）
+  roleIndex?: number; // 同一区服下角色序号
   remark?: string; // 备注信息
   importMethod?: "manual" | "bin" | "url" | "wxQrcode"; // 导入方式：manual（手动）、bin文件或url链接
   sourceUrl?: string; // 当importMethod为url时，存储url链接
@@ -94,7 +96,6 @@ export const useTokenStore = defineStore("tokens", () => {
     roleInfo: null,
     legionInfo: null,
     commonActivityInfo: null, // 消耗活动进度
-    bossTowerInfo: null, //宝库
     evoTowerInfo: null, //怪异塔
     presetTeam: null,
     battleVersion: null as number | null, // 战斗版本号
@@ -212,6 +213,8 @@ export const useTokenStore = defineStore("tokens", () => {
       token: tokenData.token, // 保存原始Base64 token
       wsUrl: tokenData.wsUrl || null, // 可选的自定义WebSocket URL
       server: tokenData.server || "",
+      roleId: tokenData.roleId || "",
+      roleIndex: tokenData.roleIndex,
       remark: tokenData.remark || "", // 备注信息
       level: tokenData.level || 1,
       profession: tokenData.profession || "",
@@ -980,6 +983,7 @@ export const useTokenStore = defineStore("tokens", () => {
       "fight_startboss",
       "fight_startlegionboss",
       "fight_startdungeon",
+      "fight_level",
     ];
     if (battleCommands.includes(cmd)) {
       const battleVersion = gameData.value.battleVersion;

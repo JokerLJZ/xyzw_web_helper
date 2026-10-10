@@ -1,0 +1,63 @@
+{
+  "_raw": {
+    "cmd": "equipment_quenchresp",
+    "body": {
+      "role": {
+        "heroes": {
+          "107": {
+            "equipment": {
+              "1": {
+                "equipId": 0,
+                "equipConfId": 0,
+                "equipSlot": 0,
+                "level": 4000,
+                "forgeExp": 0,
+                "forge": 0,
+                "star": 0,
+                "attack": 45492,
+                "defense": 0,
+                "hp": 0,
+                "curQuenchId": 0,
+                "quenchTimes": 4251,
+                "quenches": {
+                  "1": {
+                    "colorId": 1,
+                    "attrId": 20,
+                    "attrNum": 4,
+                    "isLocked": false
+                  },
+                  "2": {
+                    "colorId": 1,
+                    "attrId": 14,
+                    "attrNum": 2,
+                    "isLocked": false
+                  },
+                  "3": {
+                    "colorId": 1,
+                    "attrId": 15,
+                    "attrNum": 1,
+                    "isLocked": false
+                  },
+                  "4": {
+                    "colorId": 1,
+                    "attrId": 8,
+                    "attrNum": 3,
+                    "isLocked": false
+                  }
+                },
+                "quenchTimes2": 0,
+                "quenches2": null,
+                "quenchAttackExt": 19188,
+                "quenchDefenseExt": 0,
+                "quenchHpExt": 0,
+                "quenchLogId": "115789831-21894304",
+                "quenchLogId2": "",
+                "seed": 0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

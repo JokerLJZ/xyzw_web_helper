@@ -636,35 +636,25 @@
        'evotowerinforesp': 'evotower_getinfo',
        'evotower_fightresp': 'evotower_fight',
      'item_openpackresp': 'item_openpack',
-       // 咸王宝库
        'matchteam_getroleteaminforesp': 'matchteam_getroleteaminfo',
-       'bosstower_getinforesp': 'bosstower_getinfo',
-       'bosstower_startbossreso': 'bosstower_startboss',
-       'bosstower_startboxresp': 'bosstower_startbox',
        'discount_getdiscountinforesp': 'discount_getdiscountinfo',
        // 升星相关响应映射
+       'hero_syntheticresp': 'hero_synthetic',
        'hero_heroupgradestarresp': 'hero_heroupgradestar',
        'book_upgraderesp': 'book_upgrade',
        'book_claimpointrewardresp': 'book_claimpointreward',
        // 军团信息
        'legion_getinforesp': 'legion_getinfo',
        'legion_getinforresp': 'legion_getinfo',
-       // 车辆相关响应映射
-       'car_getrolecarresp': 'car_getrolecar',
-       'car_refreshresp': 'car_refresh',
-       'car_claimresp': 'car_claim',
-       'car_sendresp': 'car_send',
-       'car_getmemberhelpingcntresp': 'car_getmemberhelpingcnt',
        'role_gettargetteamresp': 'role_gettargetteam',
        'activity_warorderclaimresp': 'activity_recyclewarorderrewardclaim',
        'arena_getarearankresp': 'arena_getarearank',
-       'bosstower_gethelprankresp': 'bosstower_gethelprank',
        // 特殊响应映射 - 有些命令有独立响应，有些用同步响应
        'task_claimdailyrewardresp': 'task_claimdailyreward',
        'task_claimweekrewardresp': 'task_claimweekreward',
  
        // 同步响应映射（优先级低）
-       'syncresp': ['system_mysharecallback', 'task_claimdailypoint'],
+       'syncresp': ['system_mysharecallback', 'task_claimdailypoint', 'hero_synthetic'],
        'syncrewardresp': ['system_buygold', 'discount_claimreward', 'card_claimreward',
          'artifact_lottery', 'genie_sweep', 'genie_buysweep', 'system_signinreward', 'dungeon_selecthero']
      }
@@ -713,5 +703,4 @@
  }
  
  /** 默认导出 */
- export default XyzwLegionWarWebSocketClient
- 
+export default XyzwLegionWarWebSocketClient

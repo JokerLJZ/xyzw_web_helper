@@ -84,7 +84,7 @@
       v-model:show="showSettings"
       preset="card"
       title="任务设置"
-      style="width: 90%; max-width: 400px"
+      style="width: 92%; max-width: 720px"
     >
       <template #header>
         <div class="modal-header">
@@ -173,6 +173,11 @@
             </div>
 
             <div class="switch-row">
+              <span class="switch-label">钻石宝箱+付费招募</span>
+              <n-switch v-model:value="settings.autoDiamondBoxPaidRecruit" />
+            </div>
+
+            <div class="switch-row">
               <span class="switch-label">领取邮件奖励</span>
               <n-switch v-model:value="settings.claimEmail" />
             </div>
@@ -180,10 +185,60 @@
               <span class="switch-label">黑市购买物品</span>
               <n-switch v-model:value="settings.blackMarketPurchase" />
             </div>
+            <div class="switch-row">
+              <span
+                class="switch-label"
+                title="按批量设置中的折扣阈值直购，并按刷新次数继续采购，不影响游戏内采购清单"
+              >黑市按折扣直购</span>
+              <n-switch v-model:value="settings.blackMarketDiscountPurchase" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">周一购买四圣碎片</span>
+              <n-switch v-model:value="settings.holyBeastFragmentPurchase" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">周一购买白玉</span>
+              <n-switch v-model:value="settings.whiteJadePurchase" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label" title="仅北京时间周一；按余额和剩余限购额度兑换万能红碎片及成长脆饼">周一采购万能红碎片及成长脆饼</span>
+              <n-switch v-model:value="settings.mondayResourcePurchase" />
+            </div>
 
             <div class="switch-row">
               <span class="switch-label">付费招募</span>
               <n-switch v-model:value="settings.payRecruit" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">一键答题</span>
+              <n-switch v-model:value="settings.studyEnable" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label" title="仅使用吕布推层，每次挑战间隔3秒，推层结束后按清单采购；关闭时跳过梦境任务">自动梦境</span>
+              <n-switch v-model:value="settings.dreamEnable" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label" title="先执行魏蜀吴，再执行群雄；会消耗升级资源和共享挑战次数">自动灯神挑战</span>
+              <n-switch v-model:value="settings.genieChallengeEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">一键灯神扫荡</span>
+              <n-switch v-model:value="settings.genieSweepEnable" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">月度钓鱼补齐</span>
+              <n-switch v-model:value="settings.monthlyFishTopUpEnable" />
+            </div>
+
+            <div class="switch-row">
+              <span class="switch-label">月度竞技场补齐</span>
+              <n-switch v-model:value="settings.monthlyArenaTopUpEnable" />
             </div>
           </div>
         </div>
@@ -226,10 +281,15 @@
               <CheckmarkCircle v-if="task.completed" />
               <EllipseOutline v-else />
             </n-icon>
-            <span class="task-name">{{ task.name }}</span>
+            <span class="task-name"
+              >{{ task.name
+              }}<template v-if="task.required"
+                >（{{ task.progress }}/{{ task.required }}）</template
+              ></span
+            >
           </div>
           <n-tag :type="task.completed ? 'success' : 'default'" size="small">
-            {{ task.completed ? "已完成" : "未完成" }}
+            {{ task.statusText || "状态未知" }}
           </n-tag>
         </div>
       </div>
@@ -295,6 +355,10 @@ import {
   DocumentText,
   Refresh,
 } from "@vicons/ionicons5";
+import {
+  getDailyTaskStates,
+  loadDailyTaskConfig,
+} from "@/utils/dailyTaskState";
 
 const tokenStore = useTokenStore();
 const message = useMessage();
@@ -312,33 +376,69 @@ const settings = reactive({
   bossFormation: 1,
   bossTimes: 2,
   claimBottle: true,
-  payRecruit: true,
-  openBox: true,
+  payRecruit: false,
+  openBox: false,
+  autoDiamondBoxPaidRecruit: false,
   arenaEnable: true,
   claimHangUp: true,
   claimEmail: true,
   blackMarketPurchase: true,
+  blackMarketDiscountPurchase: false,
+  holyBeastFragmentPurchase: false,
+  whiteJadePurchase: false,
+  mondayResourcePurchase: false,
+  studyEnable: true,
+  dreamEnable: true,
+  genieSweepEnable: false,
+  genieChallengeEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
   commandDelay: 500,
   taskDelay: 500,
 });
 
+const defaultDailySettings = {
+  arenaFormation: 1,
+  bossFormation: 1,
+  bossTimes: 2,
+  claimBottle: true,
+  payRecruit: false,
+  openBox: false,
+  autoDiamondBoxPaidRecruit: false,
+  arenaEnable: true,
+  claimHangUp: true,
+  claimEmail: true,
+  blackMarketPurchase: true,
+  blackMarketDiscountPurchase: false,
+  holyBeastFragmentPurchase: false,
+  whiteJadePurchase: false,
+  mondayResourcePurchase: false,
+  studyEnable: true,
+  dreamEnable: true,
+  genieSweepEnable: false,
+  genieChallengeEnable: false,
+  monthlyFishTopUpEnable: true,
+  monthlyArenaTopUpEnable: true,
+  commandDelay: 500,
+  taskDelay: 500,
+};
+
 // 每日任务列表
 const tasks = ref([
-  { id: 1, name: "登录一次游戏", completed: false, loading: false },
-  { id: 2, name: "分享一次游戏", completed: false, loading: false },
-  { id: 3, name: "赠送好友3次金币", completed: false, loading: false },
-  { id: 4, name: "进行2次招募", completed: false, loading: false },
-  { id: 5, name: "领取5次挂机奖励", completed: false, loading: false },
-  { id: 6, name: "进行3次点金", completed: false, loading: false },
-  { id: 7, name: "开启3次宝箱", completed: false, loading: false },
+  { id: 1, name: "登录一次游戏", completed: false },
+  { id: 2, name: "分享一次游戏", completed: false },
+  { id: 3, name: "赠送好友3次金币", completed: false },
+  { id: 4, name: "进行2次招募", completed: false },
+  { id: 5, name: "领取5次挂机奖励", completed: false },
+  { id: 6, name: "进行3次点金", completed: false },
+  { id: 7, name: "开启3次宝箱", completed: false },
   {
     id: 12,
     name: "黑市购买1次物品（请设置采购清单）",
     completed: false,
-    loading: false,
   },
-  { id: 13, name: "进行1场竞技场战斗", completed: false, loading: false },
-  { id: 14, name: "收获1个任意盐罐", completed: false, loading: false },
+  { id: 13, name: "进行1场竞技场战斗", completed: false },
+  { id: 14, name: "收获1个任意盐罐", completed: false },
 ]);
 
 // 选项配置
@@ -391,51 +491,53 @@ const log = (message, type = "info") => {
 };
 
 // 同步服务器任务完成状态
-const syncCompleteFromServer = (resp) => {
-  if (!resp?.role?.dailyTask?.complete) {
-    log("角色信息中无任务完成数据", "warning");
-    return;
-  }
+let configRequest = null;
+let configTokenId = null;
+let statusSyncVersion = 0;
 
-  const complete = resp.role.dailyTask.complete;
-  const isDone = (v) => v === -1;
-
-  log("开始同步任务完成状态...");
-  log(`服务器返回的任务完成数据: ${JSON.stringify(complete)}`);
-
-  let syncedCount = 0;
-  let completedCount = 0;
-
-  // 先重置所有任务为未完成，然后根据服务器数据更新
-  tasks.value.forEach((task) => {
-    task.completed = false;
-  });
-
-  // 同步服务器返回的完成状态
-  Object.keys(complete).forEach((k) => {
-    const id = Number(k);
-    const idx = tasks.value.findIndex((t) => t.id === id);
-
-    if (idx >= 0) {
-      const isCompleted = isDone(complete[k]);
-      tasks.value[idx].completed = isCompleted;
-      syncedCount++;
-
-      if (isCompleted) {
-        completedCount++;
-      }
-
-      log(
-        `任务${id} "${tasks.value[idx].name}": ${isCompleted ? "已完成" : "未完成"}`,
-        isCompleted ? "success" : "info",
-      );
-    } else {
-      log(`服务器返回未知任务ID: ${id} (完成值: ${complete[k]})`, "warning");
+// Configuration is versioned public data; completion always comes from a live response.
+const syncCompleteFromServer = async (resp, { silent = false } = {}) => {
+  const tokenId = tokenStore.selectedToken?.id;
+  if (!tokenId) return;
+  const version = ++statusSyncVersion;
+  try {
+    if (!isConnected.value) throw new Error("WebSocket 已断开，任务状态未知");
+    if (configTokenId !== tokenId || !configRequest) {
+      configTokenId = tokenId;
+      configRequest = loadDailyTaskConfig(tokenStore, tokenId);
     }
-  });
-
-  log(`任务状态同步完成: ${completedCount}/${syncedCount} 已完成`);
-  log(`当前进度: ${roleDailyPoint.value}/100`);
+    const config = await configRequest;
+    if (
+      version !== statusSyncVersion ||
+      tokenStore.selectedToken?.id !== tokenId
+    )
+      return;
+    if (!isConnected.value) throw new Error("WebSocket 已断开，任务状态未知");
+    const states = getDailyTaskStates(resp?.role, config);
+    const labels = {
+      pending: "未完成",
+      claimable: "已完成·待领奖",
+      claimed: "已领奖",
+    };
+    for (const task of tasks.value) {
+      const state = states.find((state) => state.condition === task.id);
+      task.completed = state ? state.status !== "pending" : false;
+      task.statusText = state ? labels[state.status] : "状态未知";
+      task.progress = state?.progress;
+      task.required = state?.required;
+    }
+    if (!silent) log("服务器任务状态已同步，完成与领奖分开显示", "success");
+  } catch (error) {
+    if (version !== statusSyncVersion) return;
+    configRequest = null;
+    for (const task of tasks.value) {
+      task.completed = false;
+      task.statusText = "状态未知";
+      task.progress = null;
+      task.required = null;
+    }
+    log(`无法判断服务器任务状态: ${error.message}`, "warning");
+  }
 };
 
 // 刷新角色信息
@@ -452,8 +554,8 @@ const refreshRoleInfo = async () => {
     log("角色信息获取成功", "success");
 
     // 同步任务状态
-    if (response) {
-      syncCompleteFromServer(response);
+    if (response && tokenStore.selectedToken?.id === tokenId) {
+      await syncCompleteFromServer(response);
     }
 
     return response;
@@ -488,29 +590,25 @@ const runDailyFix = async () => {
       taskDelay: settings.taskDelay,
     });
 
-    await runner.run(
+    const result = await runner.run(
       tokenStore.selectedToken.id,
       {
         onLog: (logItem) => log(logItem.message, logItem.type),
         onProgress: (progress) => {
-          log(`任务进度: ${progress}%`);
+          log(`服务器每日任务完成并领奖: ${progress}%`);
         },
       },
       settings,
     ); // 传入当前组件的响应式 settings
 
-    log("=== 任务执行完成 ===", "success");
-    message.success("每日任务补差执行完成");
-
-    // 最终刷新角色信息
-    setTimeout(async () => {
-      try {
-        await refreshRoleInfo();
-        log("最终角色信息刷新完成", "success");
-      } catch (error) {
-        log(`最终刷新失败: ${error.message}`, "warning");
-      }
-    }, 3000);
+    const incomplete = result.incomplete;
+    if (incomplete) {
+      log(`=== 本轮结束，${incomplete} 个步骤待继续 ===`, "warning");
+      message.warning("仍有未完成步骤，再次补差将重新读取服务器任务状态");
+    } else {
+      log("=== 任务执行完成 ===", "success");
+      message.success("每日任务补差执行完成");
+    }
   } catch (error) {
     log(`任务执行失败: ${error.message}`, "error");
     console.error("详细错误信息:", error);
@@ -537,13 +635,6 @@ const handleRefreshTaskStatus = async () => {
   }
 };
 
-// 辅助函数
-const getCurrentRole = () => {
-  return tokenStore.selectedToken
-    ? { roleId: tokenStore.selectedToken.id }
-    : null;
-};
-
 const loadSettings = (roleId) => {
   try {
     const raw = localStorage.getItem(`daily-settings:${roleId}`);
@@ -562,12 +653,16 @@ const saveSettings = (roleId, s) => {
   }
 };
 
+const applySettings = (saved) => {
+  Object.assign(settings, defaultDailySettings, saved || {});
+};
+
 // 监听设置变化
 watch(
   settings,
   (cur) => {
-    const role = getCurrentRole();
-    if (role) saveSettings(role.roleId, cur);
+    const tokenId = tokenStore.selectedToken?.id;
+    if (tokenId) saveSettings(tokenId, cur);
   },
   { deep: true },
 );
@@ -576,12 +671,19 @@ watch(
 watch(
   () => tokenStore.selectedToken,
   async (newToken, oldToken) => {
+    statusSyncVersion++;
+    for (const task of tasks.value) {
+      task.completed = false;
+      task.statusText = "状态未知";
+      task.progress = null;
+      task.required = null;
+    }
     if (newToken && newToken !== oldToken) {
       log(`切换到Token: ${newToken.name}`);
 
       // 加载新token的设置
       const saved = loadSettings(newToken.id);
-      if (saved) Object.assign(settings, saved);
+      applySettings(saved);
 
       // 如果WebSocket已连接，尝试获取最新角色信息
       if (isConnected.value) {
@@ -596,38 +698,34 @@ watch(
   { immediate: true },
 );
 
+// A disconnected page cannot present its last snapshot as current server truth.
+watch(isConnected, (connected) => {
+  if (!connected) {
+    configRequest = null;
+    statusSyncVersion++;
+    for (const task of tasks.value) {
+      task.completed = false;
+      task.statusText = "状态未知";
+      task.progress = null;
+      task.required = null;
+    }
+  }
+});
+
 // 监听角色信息变化，自动同步任务状态
 watch(
   () => tokenStore.selectedTokenRoleInfo,
   (newRoleInfo) => {
     if (newRoleInfo?.role?.dailyTask?.complete) {
-      log("角色信息更新，同步任务状态");
-      syncCompleteFromServer(newRoleInfo);
+      syncCompleteFromServer(newRoleInfo, { silent: true });
     }
   },
   { immediate: true, deep: true },
 );
 
 // 生命周期
-onMounted(async () => {
+onMounted(() => {
   log("组件初始化完成");
-
-  // 首次拉取角色信息（如果有选中的token且已连接）
-  if (tokenStore.selectedToken && isConnected.value) {
-    try {
-      await refreshRoleInfo();
-    } catch (error) {
-      console.warn("初始化时获取角色信息失败:", error.message);
-    }
-  }
-
-  const role = getCurrentRole();
-  if (role) {
-    const saved = loadSettings(role.roleId);
-    if (saved) Object.assign(settings, saved);
-  }
-
-  // 初始化时的任务状态同步会通过 watch selectedTokenRoleInfo 自动处理
 });
 
 onBeforeUnmount(() => {
@@ -812,8 +910,8 @@ onBeforeUnmount(() => {
 }
 
 .settings-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--spacing-lg);
 }
 
@@ -829,8 +927,9 @@ onBeforeUnmount(() => {
 }
 
 .setting-switches {
-  display: flex;
-  flex-direction: column;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--spacing-md);
 }
 
@@ -844,6 +943,11 @@ onBeforeUnmount(() => {
   &:last-child {
     border-bottom: none;
   }
+}
+
+.setting-item :deep(.n-input-number),
+.setting-item :deep(.n-select) {
+  width: 100%;
 }
 
 .switch-label {
@@ -942,6 +1046,11 @@ onBeforeUnmount(() => {
     width: 100%;
     justify-content: space-between;
     margin-top: var(--spacing-sm);
+  }
+
+  .settings-grid,
+  .setting-switches {
+    grid-template-columns: 1fr;
   }
 }
 </style>
