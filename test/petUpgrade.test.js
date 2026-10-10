@@ -117,3 +117,17 @@ test("经验增加但未升一级时仍继续升级，切换佩戴宠物后停�
   await f.run();
   assert.equal(f.calls.length, 2);
 });
+
+test('经验道具耗尽后完整库存省略15001按0处理，整个库存缺失仍视为未知',async()=>{
+ for(const missingInventory of [false,true]){
+  const f=fixture({quantity:5});let reads=0;const logs=[];
+  const before={pet:{petUId:'143-U9U'},items:{15001:{quantity:5}},petData:{pets:{'-1':{uId:'143-U9U',level:49,exp:0}}}};
+  const after={pet:{petUId:'143-U9U'},...(missingInventory?{}:{items:{}}),petData:{pets:{'-1':{uId:'143-U9U',level:49,exp:500}}}};
+  f.deps.addLog=l=>logs.push(l.message);
+  f.deps.tokenStore.sendGetRoleInfo=async()=>({role:reads++?after:before});
+  f.deps.tokenStore.sendMessageWithPromise=async()=>{f.calls.push({});return {};};
+  await f.run();assert.equal(f.calls.length,1);
+  assert.equal(logs.some(l=>l.includes('剩余经验道具未知')),missingInventory);
+  assert.equal(logs.some(l=>l.includes('资源或进度无法确认')),missingInventory);
+ }
+});

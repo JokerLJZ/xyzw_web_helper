@@ -172,13 +172,18 @@ export async function runPetMerge({ getRole, send, openEgg, maxColor = 4, should
     const raw = await send(params);
     const result = raw?._raw?.body ?? raw?.body ?? raw;
     count++;
-    if (typeof result?.isSuccess !== "boolean") throw new Error("合成响应缺少isSuccess，停止且不重试");
+    // game 用 isSuccess 的真假判断失败；原始响应可能省略 false。
+    // 仅有可识别的宠物增量时接受省略值，再查询完整列表确认实际消耗。
+    if (typeof result?.isSuccess !== "boolean" &&
+        !(result?.isSuccess === undefined && result?.role?.petData?.pets && typeof result.role.petData.pets === "object")) {
+      throw new Error("合成响应缺少有效结果及宠物数据，停止且不重试");
+    }
     await wait(PET_MERGE_QUERY_DELAY);
     const after = await getRole();
     if (!after?.petData?.pets) throw new Error("无法确认合成后宠物列表，停止且不重试");
     const beforeCount = boardPets(role).length;
     if (boardPets(after).length >= beforeCount) throw new Error("合成后宠物数量未减少，停止以避免重复消耗");
-    onResult({ count, isSuccess: result.isSuccess, params });
+    onResult({ count, isSuccess: result.isSuccess === true, params });
     role = after;
   }
   return { count, eggsOpened, blockedByCapacity: PET_EGG_ITEMS.some(id => Number(role?.items?.[id]?.quantity) > 0), stopped: shouldStop() };

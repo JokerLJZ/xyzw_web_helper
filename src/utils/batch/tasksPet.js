@@ -106,7 +106,7 @@ export function createPetTasks(deps) {
           while (target && !shouldStop.value) {
             const current = getEquippedPetUpgradeTarget(role).find((p) => p.uId === target.uId);
             if (!current) { log(`宠物${target.uId}已不再佩戴或身份无法确认，停止升级`, "warning"); break; }
-            const quantity = Number(role?.items?.[15001]?.quantity);
+            const quantity = role?.items ? Number(role.items[15001]?.quantity ?? 0) : NaN;
             const exp = Number(role?.petData?.pets?.[current.slot]?.exp ?? 0);
             if (!Number.isFinite(quantity) || quantity <= 0) {
               log("宠物经验道具不足或数量无法确认，结束升级", "warning");
@@ -119,7 +119,7 @@ export function createPetTasks(deps) {
             role = (await tokenStore.sendGetRoleInfo(id))?.role;
             const after = getPetUpgradeTargets(role).find((p) => p.uId === current.uId);
             if (!after) throw new Error("升级后无法确认宠物状态，停止继续消耗");
-            const afterQuantity = Number(role?.items?.[15001]?.quantity);
+            const afterQuantity = role?.items ? Number(role.items[15001]?.quantity ?? 0) : NaN;
             const afterExp = Number(role?.petData?.pets?.[after.slot]?.exp ?? 0);
             log(`宠物${current.uId}一键升级：${current.level}级 → ${after.level}级，剩余经验道具${Number.isFinite(afterQuantity) ? afterQuantity : "未知"}`);
             if (after.level === current.level && afterExp === exp && afterQuantity === quantity) {

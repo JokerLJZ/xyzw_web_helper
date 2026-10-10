@@ -50,3 +50,9 @@ PetService.merge({fromSlotUId, toSlotUId, inheritSlot})
 接口来自上述game加载的游戏代码。`PetRoleDataView`定义图鉴状态：Unclaimed=0，Claimed=1，Locked=2；缺失记录按Locked处理。`PetModule.sendActiveBook`调用`PetService.activateBook({petId})`；`sendClaimBookReward`调用`PetService.claimBookReward({petId})`。`PetRedDotData.judgePetBookPetActiveAward`仅允许已激活且`bookReward[petId] !== 1`的图鉴领奖。API目录图鉴领奖记录确认激活响应`role.petData.books[602]=1`、领奖响应`role.petData.bookReward[602]=1`。游戏中的图鉴只有激活与领奖，本体升星使用`upgradeStar({slotUId})`且消耗碎片，属于另一项功能。
 
 佩戴来自`PetEquipDialog._onClickUse`的`PetService.load({slotUId:{slot,uId}})`，命令`pet_load`，装备槽位`PET_EQUIP_SLOT_ID=-1`。任务先按等级取最高宠物，同等级优先保留当前佩戴，其次品质、红属性数量、唯一编号；佩戴后查询装备槽唯一编号确认。未重复发送已佩戴宠物，未确认成功时停止且不重试。图鉴和佩戴均采用与合成相同的2500/1500毫秒请求间隔。
+
+## 原始响应兼容
+
+用户实号日志出现合成响应省略isSuccess。game直接以`e.isSuccess`真假值决定成功/失败分支，原始数据缺省与该真假值分支兼容；任务仅在省略字段同时有宠物增量、完整查询确认数量减少后按失败分支继续，不对空响应或非布尔异常值猜测。省略字段的实际失败抓包仍待收集，测试为模拟省略值回归。
+
+升级后完整角色库存省略已耗尽经验道具15001时按0处理；完整items对象缺失仍属于无法确认库存。等级未变但经验增加属于有效升级进度，耗尽后正常结束。

@@ -90,3 +90,13 @@ test('操作前等待期间停止时不发消耗请求',async()=>{
 test('200400限流错误不自动重发消耗请求',async()=>{
  let calls=0;await assert.rejects(runPetMerge({getRole:async()=>role(),send:async()=>{calls++;throw Error('服务器错误: 200400 - 操作太快，请稍后再试');}}),/200400/);assert.equal(calls,1);
 });
+
+test('游戏按假值处理省略isSuccess的失败结果，仅在宠物增量和数量减少确认后继续',async()=>{
+ let r=role(),calls=0;const results=[];
+ const result=await runPetMerge({getRole:async()=>structuredClone(r),send:async()=>{calls++;r={petData:{pets:{2:pet('remaining',101)}}};return {role:{petData:{pets:{1:null,2:pet('remaining',101)}}},reward:[]};},onResult:r=>results.push(r)});
+ assert.equal(result.count,1);assert.equal(calls,1);assert.equal(results[0].isSuccess,false);
+});
+test('省略isSuccess但宠物未变化仍停止，非法类型不当成失败',async()=>{
+ await assert.rejects(runPetMerge({getRole:async()=>role(),send:async()=>({role:{petData:{pets:{}}}})}),/数量未减少/);
+ await assert.rejects(runPetMerge({getRole:async()=>role(),send:async()=>({isSuccess:'false',role:{petData:{pets:{}}}})}),/缺少有效结果/);
+});
