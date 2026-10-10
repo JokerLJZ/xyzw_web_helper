@@ -722,6 +722,14 @@
               <n-space>
                 <n-button
                   size="small"
+                  @click="batchClaimGachaRewards"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="按本轮扭蛋次数领取10至100次已达标且未领取的累计奖励"
+                >
+                  领取扭蛋奖励
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchUpgradeAllPets"
                   :disabled="isRunning || selectedTokens.length === 0"
                   title="对当前佩戴且等级最高的宠物持续一键升级，直到道具不足或无法继续升级"
@@ -790,14 +798,7 @@
                 >
                   一键替换鱼灵
                 </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimGachaRewards"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                  title="尝试领取抓包确认的扭蛋阶段1、2、4奖励，已领取的跳过；不执行抽奖"
-                >
-                  领取扭蛋奖励
-                </n-button>
+
 
                 <n-button
                   size="small"
@@ -4978,7 +4979,7 @@ const taskGroupDefinitions = [
       "batchAdjustMainLevelFormation",
     ],
   },
-  { name: "pet", label: "宠物", tasks: ["batchUpgradeAllPets", "batchMergePets"] },
+  { name: "pet", label: "宠物", tasks: ["batchUpgradeAllPets", "batchMergePets", "batchClaimGachaRewards"] },
   {
     name: "small-account",
     label: "小号任务",
@@ -4987,7 +4988,6 @@ const taskGroupDefinitions = [
       "batchJoinLegion",
       "batchUpgradeCrystal",
       "batchReplaceBestFishArtifact",
-      "batchClaimGachaRewards",
       "batchMaxWarriorLegionTech",
       "batchClaimAchievementRewards",
       "batchClaimMailAttachments",

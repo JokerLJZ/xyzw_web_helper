@@ -77,6 +77,7 @@ test("扭蛋领奖跳过已领阶段，按增量确认其余奖励且不抽奖",
   assert.deepEqual(calls, [
     { cmd: "gacha_getinfo", params: {} },
     { cmd: "gacha_claimstagereward", params: { stageId: 1 } },
+    { cmd: "gacha_claimstagereward", params: { stageId: 3 } },
     { cmd: "gacha_claimstagereward", params: { stageId: 4 } },
   ]);
   assert.equal(f.deps.tokenStatus.value.t, "completed");

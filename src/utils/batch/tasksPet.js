@@ -1,4 +1,5 @@
 import { runPetMerge } from "../petMerge.js";
+import { getClaimableGachaStages, gachaBody } from "../gachaRewards.js";
 /** 抓包：PetService.useEXPItem，消耗15001；响应pets仅含槽位增量。 */
 export function getPetUpgradeTargets(role) {
   return Object.entries(role?.petData?.pets || {}).flatMap(([key, pet]) => {
@@ -17,9 +18,6 @@ export function getEquippedPetUpgradeTarget(role) {
     .sort((a, b) => b.level - a.level || a.slot - b.slot)
     .slice(0, 1);
 }
-
-// 当前抓包明确出现的阶段ID；不猜测未提供的奖励阶段和领取门槛。
-export const CAPTURED_GACHA_REWARD_STAGES = [1, 2, 4];
 
 export function createPetTasks(deps) {
   const { selectedTokens, tokens, tokenStatus, isRunning, shouldStop,
@@ -43,18 +41,19 @@ export function createPetTasks(deps) {
           await ensureConnection(id);
           connected = true;
           if (claimRewards) {
-            const info = await tokenStore.sendMessageWithPromise(id, "gacha_getinfo", {}, 15000);
-            if (!info?.roleGacha) throw new Error("未获取到扭蛋奖励状态");
-            const claimed = { ...info.roleGacha.claimedStageIdMap };
+            const info = gachaBody(await tokenStore.sendMessageWithPromise(id, "gacha_getinfo", {}, 15000));
+            const stages = getClaimableGachaStages(info?.roleGacha);
+            const state = { ...info.roleGacha, claimedStageIdMap: { ...info.roleGacha.claimedStageIdMap } };
+            if (!stages.length) log(`本轮扭蛋${state.stageGachaCnt}次，没有可领取的累计奖励`);
             let failures = 0;
-            for (const stageId of CAPTURED_GACHA_REWARD_STAGES) {
+            for (const { id: stageId, num } of stages) {
               if (shouldStop.value) break;
-              if (claimed[stageId]) continue;
+              if (!getClaimableGachaStages(state).some(s => s.id === stageId)) continue;
               try {
-                const response = await tokenStore.sendMessageWithPromise(id, "gacha_claimstagereward", { stageId }, 15000);
-                Object.assign(claimed, response?.roleGacha?.claimedStageIdMap);
-                if (!claimed[stageId]) throw new Error("响应未确认领取成功");
-                log(`扭蛋阶段${stageId}奖励领取成功`, "success");
+                const response = gachaBody(await tokenStore.sendMessageWithPromise(id, "gacha_claimstagereward", { stageId }, 15000));
+                if (response?.roleGacha?.claimedStageIdMap?.[stageId] !== true) throw new Error("响应未确认领取成功");
+                Object.assign(state, response.roleGacha, { claimedStageIdMap: { ...state.claimedStageIdMap, ...response.roleGacha.claimedStageIdMap } });
+                log(`扭蛋阶段${stageId}（${num}次）奖励领取成功`, "success");
               } catch (error) {
                 failures++;
                 log(`扭蛋阶段${stageId}未领取：${error.message}`, "warning");

@@ -34,3 +34,9 @@ PetService.merge({fromSlotUId, toSlotUId, inheritSlot})
 默认合成白绿蓝紫，保护佩戴和锁定宠物。每次开蛋/合成后查询完整角色，验证蛋库存和槽位数量变化；未知响应、超时或未确认进展时停止且不重试。满槽时合成腾位再开蛋，无配对可腾位则保留剩余蛋。手动及定时入口均执行确认弹窗。
 
 上线前仍需要真实合成成功、失败和开蛋响应验证，本实现没有使用真实账号执行消耗操作。
+
+## 扭蛋累计奖励
+
+`ResidentGachaData.canClaimReward` 和 `ResidentGachaRewardDialog._canClaimStageReward` 均要求 `stageGachaCnt >= GachaAccumRewardConf.num` 且该ID未领取。官方配置包含阶段1至10，门槛依次10、20、30、40、50、60、70、80、90、100次。
+
+先调用 `GachaService.getInfo({})` / `gacha_getinfo` 获取本轮次数与 `claimedStageIdMap`，然后调用 `GachaService.claimStageReward({stageId})` / `gacha_claimstagereward`。`api采集/宠物/扭蛋领奖.txt`实际阶段4响应只有 `roleGacha.claimedStageIdMap[4]=true` 增量，以及奖励/物品增量；必须合并领取状态。测试夹具 `test/fixtures/gacha-claim-stage4.json` 取自该记录，保留相关字段。任务领取所有达标未领阶段，不发送抽奖请求。
