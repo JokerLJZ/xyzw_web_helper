@@ -718,6 +718,19 @@
                 </n-button>
               </n-space>
             </n-tab-pane>
+            <n-tab-pane name="pet" tab="宠物">
+              <n-space>
+                <n-button
+                  size="small"
+                  @click="batchUpgradeAllPets"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="对当前佩戴且等级最高的宠物持续一键升级，直到道具不足或无法继续升级"
+                >
+                  升级当前佩戴宠物
+                </n-button>
+                <n-button size="small" @click="batchMergePets" :disabled="isRunning || selectedTokens.length === 0" title="循环使用白绿蓝宠物蛋并合成腾位，跳过当前佩戴及锁定宠物；紫色及以上继承较高等级宠物">自动合成宠物</n-button>
+              </n-space>
+            </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
               <n-space>
                 <n-button
@@ -785,14 +798,7 @@
                 >
                   领取扭蛋奖励
                 </n-button>
-                <n-button
-                  size="small"
-                  @click="batchUpgradeAllPets"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                  title="对当前佩戴且等级最高的宠物持续一键升级，直到道具不足或无法继续升级"
-                >
-                  升级当前佩戴宠物
-                </n-button>
+
                 <n-button
                   size="small"
                   @click="batchUpgradeShoeToy"
@@ -2652,6 +2658,11 @@
                 />
               </div>
               <div class="setting-item">
+                <label class="setting-label">宠物自动合成最高品质</label>
+                <n-select v-model:value="batchSettings.petMergeMaxColor" :options="[{label:'白',value:1},{label:'绿',value:2},{label:'蓝',value:3},{label:'紫（默认）',value:4},{label:'橙',value:5},{label:'红',value:6}]" size="small" />
+                <span class="setting-description">先使用白、绿、蓝宠物蛋，槽位满时合成腾位并继续开蛋；不购买槽位。默认合成白、绿、蓝、紫；跳过当前佩戴、锁定及金色宠物。紫色及以上继承较高等级宠物，同等级优先靠前槽位。执行前弹窗确认。</span>
+              </div>
+              <div class="setting-item">
                 <label class="setting-label">单次白玉使用次数上限（每个账号）</label>
                 <n-input-number
                   v-model:value="batchSettings.altRefineLimit"
@@ -3771,6 +3782,7 @@ import {
   createTasksItem,
   createTasksRefine,
   createConfirmedPearlFishTasks,
+  createConfirmedPetMergeTask,
   createTasksDungeon,
   createTasksArena,
   createTasksStore,
@@ -4503,6 +4515,7 @@ const batchSettings = reactive({
   altRefineHeroId: 107,
   altRefineLimit: 1000,
   pearlFishAutoUpgrade: true,
+  petMergeMaxColor: 4,
   fishReplacementHeroId: 107,
   awakeningHeroIds: [],
   useUniversalRed: true,
@@ -4965,6 +4978,7 @@ const taskGroupDefinitions = [
       "batchAdjustMainLevelFormation",
     ],
   },
+  { name: "pet", label: "宠物", tasks: ["batchUpgradeAllPets", "batchMergePets"] },
   {
     name: "small-account",
     label: "小号任务",
@@ -4973,7 +4987,6 @@ const taskGroupDefinitions = [
       "batchJoinLegion",
       "batchUpgradeCrystal",
       "batchReplaceBestFishArtifact",
-      "batchUpgradeAllPets",
       "batchClaimGachaRewards",
       "batchMaxWarriorLegionTech",
       "batchClaimAchievementRewards",
@@ -8042,6 +8055,20 @@ const { batchBuyRedFeatherWithPearls, batchBuyBaguaWithPearls, batchBuyPearlFish
     });
   }),
 });
+const { batchMergePets } = createConfirmedPetMergeTask(createTaskDeps(), {
+  isBusy: () => isRunning.value && !scheduledTokenSession.active,
+  onCancel: () => { if (scheduledTokenSession.active) shouldStop.value = true; },
+  confirm: ({ names, maxColor }) => new Promise(resolve => {
+    dialog.warning({
+      title: "确认宠物合成",
+      content: `将为${names.length}个账号自动合成宠物：${names.join("、")}。合成范围：${["", "白", "绿", "蓝", "紫", "橙", "红"][maxColor]}色及以下。先使用库存白、绿、蓝宠物蛋，槽位满时合成腾位，再继续开蛋，直到蛋耗尽且无可合成配对或无法腾位。同品质配对，跳过当前佩戴和锁定宠物；紫色及以上继承较高等级宠物（同等级优先靠前槽位）。合成可能失败，两只原宠物会发生变化。`,
+      positiveText: "确认合成", negativeText: "取消", maskClosable: false,
+      onPositiveClick: () => { resolve(true); },
+      onNegativeClick: () => { resolve(false); },
+      onClose: () => { resolve(false); },
+    });
+  }),
+});
 const {
   batchOpenBox,
   batchOpenBoxByPoints,
@@ -8177,6 +8204,7 @@ const getScheduledTaskFunction = (name) => {
     batchUpgradeCrystal,
     batchClaimGachaRewards,
     batchUpgradeAllPets,
+    batchMergePets,
     batchMaxWarriorLegionTech,
     batchClaimAchievementRewards,
     batchClaimMailAttachments,

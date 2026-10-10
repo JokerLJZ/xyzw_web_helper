@@ -1,3 +1,4 @@
+import { runPetMerge } from "../petMerge.js";
 /** 抓包：PetService.useEXPItem，消耗15001；响应pets仅含槽位增量。 */
 export function getPetUpgradeTargets(role) {
   return Object.entries(role?.petData?.pets || {}).flatMap(([key, pet]) => {
@@ -24,7 +25,7 @@ export function createPetTasks(deps) {
   const { selectedTokens, tokens, tokenStatus, isRunning, shouldStop,
     currentRunningTokenId, ensureConnection, releaseConnectionSlot,
     tokenStore, addLog, message, delayConfig } = deps;
-  const runPetTask = async (claimRewards = false) => {
+  const runPetTask = async (claimRewards = false, mergePets = false) => {
     if (!selectedTokens.value.length) return;
     isRunning.value = true;
     shouldStop.value = false;
@@ -61,6 +62,23 @@ export function createPetTasks(deps) {
               await new Promise((resolve) => setTimeout(resolve, Math.max(500, Number(delayConfig?.command) || 0)));
             }
             tokenStatus.value[id] = shouldStop.value ? "stopped" : failures ? "failed" : "completed";
+            continue;
+          }
+          if (mergePets) {
+            const result = await runPetMerge({
+              maxColor: deps.batchSettings?.petMergeMaxColor ?? 4,
+              shouldStop: () => shouldStop.value,
+              getRole: async () => (await tokenStore.sendGetRoleInfo(id))?.role,
+              send: params => tokenStore.sendMessageWithPromise(id, "pet_merge", params, 15000),
+              openEgg: params => tokenStore.sendMessageWithPromise(id, "pet_openegg", params, 15000),
+              wait: () => new Promise(resolve => setTimeout(resolve, Math.max(500, Number(delayConfig?.command) || 0))),
+              onResult: ({ count, isSuccess, openedEgg, eggsOpened }) => openedEgg
+                ? log(`已使用${eggsOpened}个白、绿、蓝宠物蛋，已刷新宠物列表`)
+                : log(`第${count}次宠物合成${isSuccess ? "成功" : "失败"}，已刷新宠物列表`, isSuccess ? "success" : "warning"),
+            });
+            log(`宠物合成结束，本次开蛋${result.eggsOpened}个、合成${result.count}次；跳过佩戴、锁定和范围外宠物`);
+            if (result.blockedByCapacity && !result.stopped) log("仍有宠物蛋，但无可继续合成的宠物或空槽，已停止；不会购买槽位", "warning");
+            tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
             continue;
           }
           let role = (await tokenStore.sendGetRoleInfo(id))?.role;
@@ -100,7 +118,7 @@ export function createPetTasks(deps) {
           tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
         } catch (error) {
           tokenStatus.value[id] = "failed";
-          log(`${claimRewards ? "扭蛋领奖" : "宠物升级"}失败：${error.message}，未自动重试`, "error");
+          log(`${mergePets ? "宠物合成" : claimRewards ? "扭蛋领奖" : "宠物升级"}失败：${error.message}，未自动重试`, "error");
         } finally {
           if (connected) {
             try { tokenStore.closeWebSocketConnection(id); }
@@ -113,7 +131,7 @@ export function createPetTasks(deps) {
       isRunning.value = false;
       currentRunningTokenId.value = null;
     }
-    message.info(`${claimRewards ? "扭蛋领奖" : "宠物升级"}任务结束，请查看各账号日志`);
+    message.info(`${mergePets ? "宠物合成" : claimRewards ? "扭蛋领奖" : "宠物升级"}任务结束，请查看各账号日志`);
   };
-  return { batchUpgradeAllPets: () => runPetTask(false), batchClaimGachaRewards: () => runPetTask(true) };
+  return { batchUpgradeAllPets: () => runPetTask(false), batchClaimGachaRewards: () => runPetTask(true), batchMergePets: () => runPetTask(false, true) };
 }

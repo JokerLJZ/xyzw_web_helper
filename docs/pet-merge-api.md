@@ -1,0 +1,36 @@
+# 宠物开蛋和合成接口依据
+
+核对日期：2026-10-10。
+
+## 已有 API 采集
+
+https://github.com/xiangfu1027/xyzw_web_helper/tree/magic/api%E9%87%87%E9%9B%86/%E5%AE%A0%E7%89%A9
+
+已核对目录及宠物升级、扭蛋记录。升级为 `pet_useexpitem`；扭蛋是 `gacha_drawreward`，与库存宠物蛋使用不同。目录尚无 `pet_merge`、`pet_openegg` 的实际成功/失败抓包。本次合成、开蛋依据官方客户端代码，测试中的合成数据为模拟状态，不冒充真实抓包。
+
+## game 加载的官方客户端
+
+入口 `public/game/main.2a00e.js`：获取 manifest，再加载远程游戏与协议模块。
+
+- 游戏：https://xxz-xyzw-res.hortorgames.com/remote/game/index.22c3b.jsc
+- 协议：https://xxz-xyzw-res.hortorgames.com/remote/TEST_REMOTE_MODULE/index.dcdf9.jsc
+- 配置：https://xxz-xyzw-res.hortorgames.com/remote/config/import/7c/7cb951cc-bb1a-4cff-8d57-c26146b9b999.19b64.json
+
+`PetModule.sendOpenEgg` 调用 `PetService.openEgg({itemId})`，响应从 `role.petData.pets` 取得宠物增量。客户端检查 `rolePet.unlockedSlot` 范围的空槽才发送。PetEggConf：白37011、绿37012、蓝37013；PetTilesConf前8槽免费，最多16槽，任务只使用已开放槽位。
+
+`PetModule._sendMerge` 调用：
+
+```js
+PetService.merge({fromSlotUId, toSlotUId, inheritSlot})
+// SlotUId: {slot: number, uId: string}
+```
+
+协议命令为 `pet_merge`，响应 `pet_mergeresp`。客户端分别检查协议错误与 `isSuccess`，读取 `reward` 和 `role.petData.pets`；因此接口返回正常不等于合成成功。
+
+`sendDragDropPet`：同品质、双方未锁定、非金色才合成，否则交换。`PetConstData.needMergeConfirm` 从PetConstant.mergeConfirmColor读取阈值4。白绿蓝inheritSlot=0，紫及以上选择继承对象的槽位。任务继承等级较高者，同等级优先靠前槽位。
+
+## 任务验证策略
+
+默认合成白绿蓝紫，保护佩戴和锁定宠物。每次开蛋/合成后查询完整角色，验证蛋库存和槽位数量变化；未知响应、超时或未确认进展时停止且不重试。满槽时合成腾位再开蛋，无配对可腾位则保留剩余蛋。手动及定时入口均执行确认弹窗。
+
+上线前仍需要真实合成成功、失败和开蛋响应验证，本实现没有使用真实账号执行消耗操作。

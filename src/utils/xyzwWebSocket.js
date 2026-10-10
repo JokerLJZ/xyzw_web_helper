@@ -296,6 +296,8 @@ export function registerDefaultCommands(reg) {
 
     // 宠物经验道具一键升级
     .register("pet_useexpitem")
+    .register("pet_merge")
+    .register("pet_openegg")
 
     // 灯神相关
     .register("hero_calcpowerbyteam")
