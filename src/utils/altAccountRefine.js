@@ -38,7 +38,14 @@ export async function runAltAccountRefine({
       if (Object.values(current.quenches ?? {}).some(s => s.isLocked || s.locked)) {
         throw new Error(`装备${part}存在锁定孔位，请先手动解锁后再使用小号洗练`);
       }
-      const params = { heroId, part, quenchId: 0, quenches: {} };
+      // 游戏客户端提交当前方案和完整孔位，不能对已有洗练的装备始终传空数据。
+      const params = {
+        heroId, part,
+        quenchId: current.curQuenchId ?? 0,
+        quenches: Object.fromEntries(
+          Object.entries(current.quenches ?? {}).map(([slot, value]) => [slot, { ...value }]),
+        ),
+      };
       let seed = 0;
       if (Object.values(current.quenches ?? {}).some(s => s.colorId >= 5)) {
         const confirmed = bodyOf(await send("equipment_confirm", params));

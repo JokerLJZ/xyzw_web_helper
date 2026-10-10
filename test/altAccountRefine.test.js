@@ -50,7 +50,7 @@ test("非目标橙红属性先确认，确认仅返回seed仍保留装备，再�
     return cmd==="equipment_confirm" ? {_raw:{body:response(p.part,{seed:867222})}} : response(p.part,target());
   }});
   assert.equal(r.reason,"completed"); assert.equal(calls[0].cmd,"equipment_confirm");
-  assert.deepEqual(calls[0].p,{heroId:107,part:1,quenchId:0,quenches:{}});
+  assert.deepEqual(calls[0].p,{heroId:107,part:1,quenchId:0,quenches:target(2,6).quenches});
   assert.equal(calls[1].p.seed,867222); assert.equal(equip[1].level,4000);
 });
 
@@ -97,4 +97,19 @@ test("无效上限或装备等级不足时不发送请求",async()=>{
   for(const limit of [null,0,-1,1.5,NaN]) await assert.rejects(runAltAccountRefine({heroId:107,equipment:equipment(),limit,send}));
   const equip=equipment(); equip[1].level=3999;
   await assert.rejects(runAltAccountRefine({heroId:107,equipment:equip,send}),/等级不足/);
+});
+
+ test("已有普通属性使用当前方案和完整属性；后续请求使用增量更新后的属性",async()=>{
+  const equip=equipment();
+  const first={1:{attrId:16,attrNum:1,colorId:1,isLocked:false,allAttrNum:1}};
+  const next={1:{attrId:6,attrNum:4,colorId:1,isLocked:false,allAttrNum:4}};
+  equip[1]={...equip[1],curQuenchId:1,quenches:first};
+  const calls=[];
+  const r=await runAltAccountRefine({heroId:107,equipment:equip,limit:2,send:async(cmd,p)=>{
+    calls.push(p);return response(1,{curQuenchId:2,quenches:next});
+  }});
+  assert.equal(r.reason,"limit");
+  assert.equal(calls[0].quenchId,1);assert.deepEqual(calls[0].quenches,first);
+  assert.equal(calls[1].quenchId,2);assert.deepEqual(calls[1].quenches,next);
+  assert.notEqual(calls[0].quenches,first);
 });
