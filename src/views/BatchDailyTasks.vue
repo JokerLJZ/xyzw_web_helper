@@ -754,6 +754,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchAltAccountRefine"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="按装备顺序洗练，命中橙色减伤或红色攻击、减伤、技能伤害即换下一件；武将和次数上限在全局任务设置中配置"
+                >
+                  小号自动洗练
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchReplaceBestFishArtifact"
                   :disabled="isRunning || selectedTokens.length === 0"
                   title="按赤羽、焰神、其他红鱼，再按橙紫蓝品质选择最高星鱼灵"
@@ -2627,6 +2635,25 @@
                 class="setting-item"
                 style="flex-direction: row; justify-content: space-between; align-items: center"
               >
+                <label class="setting-label">小号洗练武将</label>
+                <n-select
+                  v-model:value="batchSettings.altRefineHeroId"
+                  :options="heroLevelUpgradeHeroOptions"
+                  filterable size="small" style="width: 180px"
+                />
+              </div>
+              <div class="setting-item">
+                <label class="setting-label">单次白玉使用次数上限（每个账号）</label>
+                <n-input-number
+                  v-model:value="batchSettings.altRefineLimit"
+                  :min="1" :precision="0" size="small"
+                />
+                <span class="setting-description">默认1000次，为每个账号本次四件装备的累计洗练次数。按武器、铠甲、头冠、坐骑顺序执行，已有目标属性直接跳过；未达标装备的锁定孔位需先手动解锁。</span>
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
                 <label class="setting-label">鱼灵替换武将</label>
                 <n-select
                   v-model:value="batchSettings.fishReplacementHeroId"
@@ -3723,6 +3750,7 @@ import {
   createTasksBottle,
   createTasksTower,
   createTasksItem,
+  createTasksRefine,
   createTasksDungeon,
   createTasksArena,
   createTasksStore,
@@ -4452,6 +4480,8 @@ const batchSettings = reactive({
   crystalHeroId: 107,
   crystalLockAttribute: true,
   equipmentUpgradeHeroId: 107,
+  altRefineHeroId: 107,
+  altRefineLimit: 1000,
   fishReplacementHeroId: 107,
   awakeningHeroIds: [],
   useUniversalRed: true,
@@ -4928,6 +4958,7 @@ const taskGroupDefinitions = [
       "batchClaimAchievementRewards",
       "batchClaimMailAttachments",
       "batchAwakenHeroSkills",
+      "batchAltAccountRefine",
       "batchChallengeGroupGenie",
       "batchChallengeThreeKingdomsGenie",
       "batchTopUpGoldFish",
@@ -7962,6 +7993,7 @@ const {
 } = tasksTower;
 
 const tasksItem = createTasksItem(createTaskDeps());
+const { batchAltAccountRefine } = createTasksRefine(createTaskDeps());
 const {
   batchOpenBox,
   batchOpenBoxByPoints,
@@ -8101,6 +8133,7 @@ const getScheduledTaskFunction = (name) => {
     batchClaimAchievementRewards,
     batchClaimMailAttachments,
     batchAwakenHeroSkills,
+    batchAltAccountRefine,
     batchTopUpArena,
     skinChallenge,
     legion_storebuygoods,

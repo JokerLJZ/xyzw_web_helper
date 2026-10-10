@@ -14,7 +14,7 @@
       <div class="refine-container">
         <!-- 工具栏 -->
         <div class="toolbar">
-          <n-button type="primary" size="small" @click="refreshHeroes"
+          <n-button type="primary" size="small" :disabled="state.isRunning" @click="refreshHeroes"
             >刷新阵容</n-button
           >
           <n-button size="small" @click="resetCount">清零</n-button>
@@ -49,6 +49,22 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <div v-if="selectedHeroId" class="auto-section">
+          <h4>小号自动洗练</h4>
+          <p>所选武将按武器 → 铠甲 → 头冠 → 坐骑顺序洗练，每件装备出现橙色减伤、红色攻击、红色减伤或红色技能伤害中的任一属性即跳到下一件，已有目标属性直接跳过。</p>
+          <div class="auto-form">
+            <span>单次白玉使用次数上限</span>
+            <n-input-number v-model:value="altRefineLimit" :min="1" :precision="0"
+              :disabled="state.isRunning" size="small" style="width: 140px" />
+            <n-button type="primary" size="small" :disabled="state.isRunning || loading"
+              @click="startAltRefine">开始小号洗练</n-button>
+            <n-button size="small" type="error" :disabled="!altRefineRunning || altStopRequested"
+              @click="stopQuench">停止</n-button>
+            <span>{{ altRefineStatus }} · 本次已使用 {{ altRefineCount }} 次</span>
+          </div>
+          <p>上限为本次运行所有装备的累计洗练次数；使用白玉洗练，需手动解锁未达标装备的孔位。</p>
         </div>
 
         <!-- 装备列表 -->
@@ -97,6 +113,7 @@
               >
                 <n-checkbox
                   v-model:checked="slot.isLocked"
+                  :disabled="state.isRunning"
                   @change="handleSlotLock(slot.id, slot.isLocked)"
                 ></n-checkbox>
                 <span class="slot-label">孔{{ slot.id }}</span>
@@ -257,11 +274,12 @@
 </template>
 
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, watch, onBeforeUnmount } from "vue";
 import { useMessage } from "naive-ui";
 import { useTokenStore } from "@/stores/tokenStore";
 import MyCard from "../Common/MyCard.vue";
 import { HERO_DICT } from "@/utils/HeroList.js";
+import { DEFAULT_ALT_REFINE_LIMIT, runAltAccountRefine } from "@/utils/altAccountRefine.js";
 
 const tokenStore = useTokenStore();
 const message = useMessage();
@@ -273,6 +291,12 @@ const selectedHeroId = ref(null);
 const selectedPart = ref(null);
 const quenchCount = ref(0);
 const delay = ref(350);
+const altRefineLimit = ref(DEFAULT_ALT_REFINE_LIMIT);
+const altRefineCount = ref(0);
+const altRefineStatus = ref("待开始");
+const altRefineRunning = ref(false);
+const altStopRequested = ref(false);
+let disposed = false;
 // 将单个条件改为数组形式，支持多个条件
 const targetConditions = ref([{
   attrId: null,
@@ -498,6 +522,7 @@ const buildHeroList = (teamData, heroData) => {
 
 // 选择英雄
 const selectHero = (heroId) => {
+  if (state.value.isRunning) return;
   selectedHeroId.value = heroId;
   selectedPart.value = null;
   quenchCount.value = 0;
@@ -509,6 +534,7 @@ const selectHero = (heroId) => {
 
 // 选择装备部位
 const selectPart = (partId) => {
+  if (state.value.isRunning) return;
   selectedPart.value = partId;
   quenchCount.value = 0;
 
@@ -1000,6 +1026,11 @@ const checkTargetAttr = (result) => {
 
 // 停止淬炼
 const stopQuench = () => {
+  if (altRefineRunning.value) {
+    altStopRequested.value = true;
+    altRefineStatus.value = "正在停止，等待当前请求结束";
+    return;
+  }
   state.value.continuousQuenching = false;
   state.value.autoQuenching = false;
   state.value.isRunning = false;
@@ -1016,6 +1047,80 @@ const stopQuench = () => {
 
   message.success("淬炼已停止");
 };
+
+const startAltRefine = async () => {
+  if (state.value.isRunning) return;
+  const tokenId = tokenStore.selectedToken?.id;
+  const heroId = selectedHeroId.value;
+  const limit = altRefineLimit.value;
+  if (!tokenId || !heroId) return message.warning("请先选择Token和武将");
+  if (!Number.isSafeInteger(limit) || limit < 1) return message.warning("请输入正整数次数上限");
+  if (tokenStore.getWebSocketStatus(tokenId) !== "connected") return message.error("WebSocket未连接");
+  state.value.isRunning = true;
+  altRefineRunning.value = true;
+  altStopRequested.value = false;
+  altRefineCount.value = 0;
+  altRefineStatus.value = "正在刷新装备";
+  const shouldStop = () => disposed || altStopRequested.value ||
+    tokenStore.selectedToken?.id !== tokenId;
+  try {
+    const roleInfo = await tokenStore.sendMessageWithPromise(tokenId, "role_getroleinfo", {});
+    if (shouldStop()) return;
+    const role = roleInfo?.role ?? roleInfo;
+    const equipment = role?.heroes?.[heroId]?.equipment;
+    if (!equipment) throw new Error("未获取到武将装备，请刷新阵容");
+    allHeroesData.value = role.heroes;
+    heroEquipment.value = equipment;
+    jadeCount.value = role.items?.["1022"]?.quantity ?? jadeCount.value;
+    colorJadeCount.value = role.items?.["1023"]?.quantity ?? colorJadeCount.value;
+    const result = await runAltAccountRefine({
+      heroId, equipment, limit, shouldStop,
+      send: async (cmd, params) => {
+        if (tokenStore.getWebSocketStatus(tokenId) !== "connected") throw new Error("连接已断开");
+        altRefineStatus.value = `正在洗练${partMap[params.part]}`;
+        return tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000);
+      },
+      onUpdate: ({ part, count, equipment: updated, items }) => {
+        if (disposed || tokenStore.selectedToken?.id !== tokenId) return;
+        heroEquipment.value = { ...equipment };
+        selectedPart.value = part;
+        quenchTimes.value = updated.quenchTimes ?? 0;
+        equipBonusName.value = part === 1 ? "攻击" : part === 3 ? "防御" : "血量";
+        equipBonusValue.value = updated[part === 1 ? "quenchAttackExt" : part === 3 ? "quenchDefenseExt" : "quenchHpExt"] ?? 0;
+        updateSlots(updated.quenches);
+        altRefineCount.value = count;
+        jadeCount.value = items?.["1022"]?.quantity ?? jadeCount.value;
+        colorJadeCount.value = items?.["1023"]?.quantity ?? colorJadeCount.value;
+      },
+      wait: () => new Promise(resolve => setTimeout(resolve, Math.max(350, delay.value || 350))),
+    });
+    altRefineStatus.value = result.reason === "completed" ? "四件装备均已达标" :
+      result.reason === "limit" ? "已达本次次数上限" : "已停止";
+    if (!disposed) message.info(altRefineStatus.value);
+  } catch (error) {
+    altRefineStatus.value = `已停止：${error.message}`;
+    if (!disposed) message.error(altRefineStatus.value);
+  } finally {
+    if (altStopRequested.value) altRefineStatus.value = "已停止";
+    altRefineRunning.value = false;
+    state.value.isRunning = false;
+  }
+};
+
+watch(() => tokenStore.selectedToken?.id, () => {
+  if (state.value.isRunning) stopQuench();
+  selectedHeroId.value = null;
+  selectedPart.value = null;
+  heroes.value = [];
+  allHeroesData.value = {};
+  heroEquipment.value = {};
+  resetPasswordValidation();
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
+  if (state.value.isRunning) stopQuench();
+});
 
 // 重置淬炼次数
 const resetCount = () => {

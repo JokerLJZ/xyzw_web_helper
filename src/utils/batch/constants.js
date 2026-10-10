@@ -74,6 +74,7 @@ export const availableTasks = [
   { label: "领取成就奖励", value: "batchClaimAchievementRewards" },
   { label: "收取邮件", value: "batchClaimMailAttachments" },
   { label: "自动技能觉醒", value: "batchAwakenHeroSkills" },
+  { label: "小号自动洗练", value: "batchAltAccountRefine" },
   { label: "一键竞技场补齐", value: "batchTopUpArena" },
   { label: "一键换皮闯关", value: "skinChallenge" },
   { label: "一键购买四圣碎片", value: "legion_storebuygoods" },
@@ -179,6 +180,8 @@ export const defaultSettings = {
 export const defaultBatchSettings = {
   legionId: null,
   crystalHeroId: 107,
+  altRefineHeroId: 107,
+  altRefineLimit: 1000,
   fishReplacementHeroId: 107,
   crystalLockAttribute: true,
   redemptionCodeMode: REDEMPTION_CODE_MODES.DEFAULT,
