@@ -233,6 +233,10 @@ export function registerDefaultCommands(reg) {
     .register("legion_signup") // 盐场报名
     // 营地挑战 / 俱乐部战
     .register("club_getinfo")
+    .register("club_signup")
+    .register("legion_getpayloadlegioninfo")
+    .register("saltroad_getseasonoutrank")
+    .register("saltroad_outcheer", { legionId: 0 })
     .register("club_attack", { useItem: false })
     .register("club_attackmonster", { useItem: false })
     .register("club_gettargetteam", { targetId: 0 })
@@ -1229,6 +1233,9 @@ export class XyzwWebSocketClient {
       legionmatch_getrankresp: "legionmatch_getrank",
       legionmatch_getbattlerecordresp: "legionmatch_getbattlerecord",
       club_getinforesp: "club_getinfo",
+      club_signupresp: "club_signup",
+      legion_getpayloadlegioninforesp: "legion_getpayloadlegioninfo",
+      saltroad_getseasonoutrankresp: "saltroad_getseasonoutrank",
       club_attackresp: "club_attack",
       club_attackmonsterresp: "club_attackmonster",
       club_gettargetteamresp: "club_gettargetteam",

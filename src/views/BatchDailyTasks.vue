@@ -381,8 +381,9 @@
                   @click="batchCampSignup"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  一键营地报名
+                  自动营地报名
                 </n-button>
+                <n-button size="small" @click="batchPeachSignup()" :disabled="isRunning || selectedTokens.length === 0">自动蟠桃报名</n-button>
                 <n-tooltip>
                   <template #trigger>
                     <n-button
@@ -665,6 +666,7 @@
                 >
                   月赛助威
                 </n-button>
+                <n-button size="small" @click="showGoldenCheerModal = true" :disabled="isRunning || selectedTokens.length === 0">批量黄金天宫助威</n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="formation" tab="阵容管理">
@@ -2459,6 +2461,12 @@
               </n-tabs>
             </n-checkbox-group>
           </div>
+          <div v-if="taskForm.selectedTasks.includes('batchGoldenCheer')" class="setting-item">
+            <label class="setting-label">黄金天宫助威目标</label>
+            <p>各账号本期一次；跨期后须刷新列表并重新选择目标。</p>
+            <n-button @click="refreshGoldenCheerOptions(true)" :loading="goldenCheerLoading" :disabled="isRunning">刷新本期俱乐部</n-button>
+            <n-select v-model:value="taskForm.taskConfig.batchGoldenCheer.legionId" :options="goldenCheerOptions" filterable placeholder="选择俱乐部" />
+          </div>
           <div
             v-if="
               hasSmartBoxWeeklySelected ||
@@ -3363,6 +3371,15 @@
       </div>
     </n-modal>
 
+    <n-modal v-model:show="showGoldenCheerModal" preset="card" title="黄金天宫助威" style="width: 600px; max-width: 90%">
+      <p>每个选中账号本期助威一次；已助威账号自动跳过。请先刷新本期俱乐部列表。</p>
+      <n-space vertical>
+        <n-button @click="refreshGoldenCheerOptions(false)" :loading="goldenCheerLoading" :disabled="isRunning">刷新本期俱乐部</n-button>
+        <n-select v-model:value="batchSettings.goldenCheerLegionId" :options="goldenCheerOptions" filterable placeholder="选择要助威的俱乐部" />
+        <n-button type="primary" @click="handleGoldenCheer" :disabled="isRunning || !batchSettings.goldenCheerLegionId || !batchSettings.goldenCheerPhase">开始批量助威</n-button>
+      </n-space>
+    </n-modal>
+
     <!-- War Guess Modal -->
     <n-modal
       v-model:show="showWarGuessModal"
@@ -3807,6 +3824,7 @@ import {
   createTasksApex,
   createTasksXuanwuBlessing,
 } from "@/utils/batch";
+import { createTasksSignupCheer } from "@/utils/batch/tasksSignupCheer.js";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
 import {
@@ -4547,6 +4565,8 @@ const batchSettings = reactive({
   weeklyRewardChoices: { box: 1, recruit: 1, blackMarket: 1 },
   boxCount: 100,
   fishCount: 100,
+  goldenCheerLegionId: null,
+  goldenCheerPhase: "",
   recruitCount: 100,
   defaultBoxType: 2001,
   defaultFishType: 1,
@@ -4752,6 +4772,7 @@ const showTasksModal = ref(false); // Control the visibility of the tasks list m
 const editingTask = ref(null); // Currently editing task
 
 const createScheduledTaskConfig = (config = {}) => ({
+  batchGoldenCheer: { legionId: config.batchGoldenCheer?.legionId ?? batchSettings.goldenCheerLegionId, expectedPhase: config.batchGoldenCheer?.expectedPhase ?? batchSettings.goldenCheerPhase },
   batchSmartBoxWeekly: {
     rewardChoice: normalizeWeeklyRewardChoice(config.batchSmartBoxWeekly?.rewardChoice ?? batchSettings.weeklyRewardChoices.box),
     smartBoxTypes: Array.isArray(config.batchSmartBoxWeekly?.smartBoxTypes)
@@ -4931,6 +4952,8 @@ const taskGroupDefinitions = [
       "batchclubsign",
       "batchSaltSignup",
       "batchCampSignup",
+      "batchPeachSignup",
+      "batchGoldenCheer",
       "batchCampChallenge",
       "batcharenafight",
       "store_syncpurchaseconfig",
@@ -5427,6 +5450,11 @@ const saveTask = () => {
 
   if (taskForm.selectedTasks.length === 0) {
     message.warning("请选择至少一个任务");
+    return;
+  }
+
+  if (taskForm.selectedTasks.includes("batchGoldenCheer") && (!Number(taskForm.taskConfig.batchGoldenCheer.legionId) || !taskForm.taskConfig.batchGoldenCheer.expectedPhase)) {
+    message.warning("请刷新黄金天宫俱乐部列表并选择助威目标");
     return;
   }
 
@@ -6482,6 +6510,7 @@ const executeScheduledTask = async (task) => {
           "batchSmartBoxWeekly",
           "batchSmartRecruitWeekly",
           "batchSmartBlackMarketWeekly",
+          "batchGoldenCheer",
         ].includes(taskName)
       ) {
         await taskFunction(task.taskConfig?.[taskName] || {});
@@ -7461,6 +7490,7 @@ const getStatusText = (tokenId) => {
   if (status === "completed") return "已完成";
   if (status === "failed") return "失败";
   if (status === "stopped") return "已停止";
+  if (status === "skipped") return "已跳过";
   if (status === "pending") return "待继续";
   if (status === "running") return "执行中";
   return "等待中";
@@ -8175,7 +8205,40 @@ const {
 
 const tasksSalt = createTasksSalt(createTaskDeps());
 const { batchSaltSignup } = tasksSalt;
-const { batchCampSignup, batchCampChallenge } = createTasksCamp(createTaskDeps());
+const { batchCampChallenge } = createTasksCamp(createTaskDeps());
+const signupCheerTasks = createTasksSignupCheer(createTaskDeps());
+const { batchCampSignup, batchPeachSignup } = signupCheerTasks;
+const batchGoldenCheer = (options = {}) => signupCheerTasks.batchGoldenCheer({ legionId: batchSettings.goldenCheerLegionId, expectedPhase: batchSettings.goldenCheerPhase, ...options });
+const showGoldenCheerModal = ref(false);
+const goldenCheerLoading = ref(false);
+const goldenCheerOptions = ref([]);
+const refreshGoldenCheerOptions = async (scheduled = false) => {
+  const id = (scheduled ? taskForm.selectedTokens : selectedTokens.value)[0];
+  if (!id) { message.warning("请先选择一个账号"); return; }
+  if (isRunning.value) return;
+  goldenCheerLoading.value = true;
+  isRunning.value = true;
+  shouldStop.value = false;
+  try {
+    const { window, list } = await signupCheerTasks.fetchGoldenCheerList(id);
+    goldenCheerOptions.value = list.map(row => ({ label: `${row.name || row.id}（胜场 ${row.sOWinCnt || 0}）`, value: Number(row.id) }));
+    if (scheduled) {
+      const settings = taskForm.taskConfig.batchGoldenCheer;
+      if (settings.expectedPhase !== window.phase || !list.some(row => Number(row.id) === Number(settings.legionId))) settings.legionId = null;
+      settings.expectedPhase = window.phase;
+    } else {
+      if (batchSettings.goldenCheerPhase !== window.phase || !list.some(row => Number(row.id) === Number(batchSettings.goldenCheerLegionId))) batchSettings.goldenCheerLegionId = null;
+      batchSettings.goldenCheerPhase = window.phase;
+    }
+  } catch (error) {
+    goldenCheerOptions.value = [];
+    message.error(error.message);
+  } finally { goldenCheerLoading.value = false; isRunning.value = false; }
+};
+const handleGoldenCheer = async () => {
+  showGoldenCheerModal.value = false;
+  await batchGoldenCheer();
+};
 
 const tasksMainLevel = createTasksMainLevel(createTaskDeps());
 const { batchPushMainLevelInfo, pushMainLevelInfo } = tasksMainLevel;
@@ -8217,6 +8280,8 @@ const getScheduledTaskFunction = (name) => {
     batchclubsign,
     batchSaltSignup,
     batchCampSignup,
+    batchPeachSignup,
+    batchGoldenCheer,
     batchCampChallenge,
     batcharenafight,
     batchTopUpFish,

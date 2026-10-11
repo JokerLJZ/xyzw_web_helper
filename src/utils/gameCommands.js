@@ -844,6 +844,26 @@ export class GameCommands {
    * @param {Object} params 参数
    * @returns {Object} WebSocket 协议数据包
    */
+  club_signup(ack = 0, seq = 0, params = {}) {
+    return { ack, body: this.g_utils.bon.encode(params), cmd: "club_signup", seq, time: Date.now() };
+  }
+
+  legion_getpayloadlegioninfo(ack = 0, seq = 0, params = {}) {
+    return { ack, body: this.g_utils.bon.encode(params), cmd: "legion_getpayloadlegioninfo", seq, time: Date.now() };
+  }
+
+  saltroad_getseasonoutrank(ack = 0, seq = 0, params = {}) {
+    return { ack, body: this.g_utils.bon.encode(params), cmd: "saltroad_getseasonoutrank", seq, time: Date.now() };
+  }
+
+  saltroad_outcheer(ack = 0, seq = 0, params = {}) {
+    return { ack, body: this.g_utils.bon.encode(params), cmd: "saltroad_outcheer", seq, time: Date.now() };
+  }
+
+  legion_payloadsignup(ack = 0, seq = 0, params = {}) {
+    return { ack, body: this.g_utils.bon.encode(params), cmd: "legion_payloadsignup", seq, time: Date.now() };
+  }
+
   club_getinfo(ack = 0, seq = 0, params = {}) {
     return {
       ack,

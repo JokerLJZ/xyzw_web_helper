@@ -6,13 +6,15 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 This is a Vue 3 Token Manager application for XYZW game automation. The application manages game tokens via Base64 decoding, establishes WebSocket connections, and provides a visual interface for token management and game automation.
 
-## API Reference Requirement
+## Game Client API Reference Requirement
 
-When implementing or fixing a feature that communicates with the game server, first inspect the matching captured API records in:
+When implementing or fixing a feature that communicates with the game server, first inspect the game client under `public/game/` (the "game folder"). Trace UI handlers, module logic, Service methods, protocol definitions, and current configuration to establish command names, request parameters, preconditions, operation order, and role updates.
 
-https://github.com/xiangfu1027/xyzw_web_helper/tree/magic/api%E9%87%87%E9%9B%86
+The local game folder loads remote bundles: follow its manifest request, asset URL conversion, and decoding implementation to inspect the matching current official game/launcher/config resources. Record the analyzed resource versions; do not assume all business code is stored locally or hardcode an old bundle hash.
 
-Use those captures as the source of truth for command names, request parameters, response shapes, and incremental role updates. Add or update tests to reflect the observed API behavior.
+Do not query the previously referenced GitHub API-capture repository as a prerequisite or default lookup. Existing historical captures may be used as supplementary evidence, but current game-client logic and actual server responses take priority. Never infer a wire command solely from a Service method's name. If the current response shape is unavailable, state that limitation rather than inventing it.
+
+Add or update meaningful tests for the observed client behavior and response handling. Follow `docs/game接口定位与更新指南.md` for the lookup and game-update workflow.
 
 ## Development Commands
 
