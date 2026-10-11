@@ -1,3 +1,4 @@
+import { isSignupDay } from "./signupSchedule.js";
 import { extractRolePatch } from "../roleSnapshot.js";
 const DAY = 86400000;
 const configs = new Map();
@@ -73,7 +74,7 @@ export async function runAutoCampSignup({
   now = () => new Date()
 }) {
   const week = getWeek(now());
-  if (![0, 5, 6].includes(week.weekday)) return skipped("营地报名仅周五至周日开放");
+  if (week.weekday !== 0) return skipped("自动营地报名仅周日执行");
   if (!values(config.ClubWarScheduleConf).some(row => dayTime(row.startDate) <= +now() && +now() < dayTime(row.endDate) + DAY)) return skipped("当前没有营地赛季");
   const info = data(await send("club_getinfo", {}));
   if (!info?.club || typeof info.club.phase !== "string" || (info.club.phase && !/^\d{6}$/.test(info.club.phase))) throw new Error("营地报名状态不完整");
@@ -91,7 +92,7 @@ export async function runAutoCampSignup({
   const power = members.reduce((sum, m) => sum + Number(m.power || 0), 0);
   if (!Number.isFinite(power) || !Number.isFinite(signin)) throw new Error("营地战力或签到数据异常");
   if (members.length < limit.peopleNum || power < limit.powerNum || signin < limit.signUpNum) return skipped("营地报名条件不足（成员数、总战力或本周签到）");
-  if (getWeek(now()).monday !== week.monday || ![0, 5, 6].includes(getWeek(now()).weekday)) return skipped("营地报名窗口已变化");
+  if (getWeek(now()).monday !== week.monday || getWeek(now()).weekday !== 0) return skipped("营地报名窗口已变化");
   await send("club_signup", {});
   const fresh = data(await send("club_getinfo", {}));
   if (!fresh?.club?.phase || fresh.club.phase <= phase(week.monday)) throw new Error("营地报名结果未确认，请查看游戏状态");
@@ -118,6 +119,7 @@ export async function runAutoPeachSignup({
 }) {
   const time = +now(),
     week = getWeek(now());
+  if (week.weekday !== 0) return skipped("自动蟠桃报名仅周日执行");
   const match = values(config.PayLoadScheduleConf).find(row => dayTime(row.serverDate) === week.today);
   if (!match) return skipped("今日没有蟠桃报名场次");
   const constants = config.PayLoadConstant;
@@ -139,7 +141,7 @@ export async function runAutoPeachSignup({
   const bells = members.reduce((sum, m) => sum + Number(field(m.custom, "payload_item_cnt") || 0), 0);
   if (!Number.isFinite(bells) || !Number.isFinite(bellNeed)) throw new Error("蟠桃铃铛数据异常");
   if (members.length < constants.legionPeopleLimit || bells < bellNeed) return skipped(`蟠桃报名条件不足（人数${members.length}/${constants.legionPeopleLimit}，铃铛${bells}/${bellNeed}）`);
-  if (+now() >= end || +now() < start) return skipped("蟠桃报名窗口已变化");
+  if (!isSignupDay(now(), 0) || +now() >= end || +now() < start) return skipped("蟠桃报名窗口已变化");
   await send("legion_payloadsignup", {});
   const fresh = data(await send("legion_getpayloadlegioninfo", {}));
   if (String(field(fresh?.legion?.statistics, "payload:war:sign:up")) !== phase(week.today)) throw new Error("蟠桃报名结果未确认，请查看游戏状态");
@@ -234,6 +236,12 @@ export function createTasksSignupCheer(deps, {
         tokenStatus.value[id] = "running";
         const name = tokens.value.find(t => t.id === id)?.name || id;
         try {
+          if ((runner === runAutoCampSignup || runner === runAutoPeachSignup) && !isSignupDay(now(), 0)) {
+            tokenStatus.value[id] = "skipped";
+            skips++;
+            log(`${name}：${label}仅周日执行，已跳过`);
+            continue;
+          }
           const result = await withAccount(id, async send => runner({
             send,
             config: await loadConfig(send),

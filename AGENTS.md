@@ -16,6 +16,14 @@ Do not query the previously referenced GitHub API-capture repository as a prereq
 
 Add or update meaningful tests for the observed client behavior and response handling. Follow `docs/game接口定位与更新指南.md` for the lookup and game-update workflow.
 
+## Commit Update Notes Requirement
+
+Maintain `CHANGELOG.md` in the project root as the canonical update notes. Every future commit must update this file in the same commit, including features, fixes, refactors, tests, configuration, documentation and maintenance. This is a standing user requirement.
+
+Before committing, inspect the final changes and describe their actual effect in plain Chinese. Record the date, title, changed behavior or usage, and validation results or remaining limitations. For changes without visible behavior, state their purpose. Never claim validation that was not performed.
+
+Draft uncommitted changes under “待提交”; finalize the entry with date and title when committing. A commit hash is optional and may be added later; do not amend a commit solely to insert its own hash. Keep entries newest first and preserve history. Check that CHANGELOG.md is staged before every commit. Do not create a commit merely because notes were requested.
+
 ## Development Commands
 
 ### Core Commands

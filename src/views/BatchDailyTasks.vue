@@ -374,16 +374,16 @@
                   @click="batchSaltSignup"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  一键盐场报名
+                  一键盐场报名（周六）
                 </n-button>
                 <n-button
                   size="small"
                   @click="batchCampSignup"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  自动营地报名
+                  自动营地报名（周日）
                 </n-button>
-                <n-button size="small" @click="batchPeachSignup()" :disabled="isRunning || selectedTokens.length === 0">自动蟠桃报名</n-button>
+                <n-button size="small" @click="batchPeachSignup()" :disabled="isRunning || selectedTokens.length === 0">自动蟠桃报名（周日）</n-button>
                 <n-tooltip>
                   <template #trigger>
                     <n-button

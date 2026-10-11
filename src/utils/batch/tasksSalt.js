@@ -1,3 +1,4 @@
+import { isSignupDay } from "./signupSchedule.js";
 /**
  * 盐场类任务
  * 包含: batchSaltSignup
@@ -20,7 +21,7 @@ const isAlreadySignedError = (error) => {
  * @param {Object} deps - 依赖项
  * @returns {Object} 任务函数集合
  */
-export function createTasksSalt(deps) {
+export function createTasksSalt(deps, { now = () => new Date() } = {}) {
   const {
     selectedTokens,
     tokens,
@@ -43,6 +44,10 @@ export function createTasksSalt(deps) {
    */
   const batchSaltSignup = async () => {
     if (selectedTokens.value.length === 0) return;
+    if (!isSignupDay(now(), 6)) {
+      addLog({ time: new Date().toLocaleTimeString(), message: "自动盐场报名仅周六执行，已跳过", type: "info" });
+      return;
+    }
 
     isRunning.value = true;
     shouldStop.value = false;
@@ -91,7 +96,7 @@ export function createTasksSalt(deps) {
           return;
         }
 
-        const nowSec = Math.floor(Date.now() / 1000);
+        const nowSec = Math.floor(+now() / 1000);
         const startTime = battlefieldInfo.signupStartTime || 0;
         const endTime = battlefieldInfo.signupEndTime || 0;
 
@@ -123,6 +128,12 @@ export function createTasksSalt(deps) {
           type: "info",
         });
 
+        if (!isSignupDay(now(), 6)) {
+          skippedCount++;
+          tokenStatus.value[tokenId] = "completed";
+          addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} 已离开周六，跳过盐场报名`, type: "info" });
+          return;
+        }
         await tokenStore.sendMessageWithPromise(
           tokenId,
           "legion_signup",
