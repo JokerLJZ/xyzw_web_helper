@@ -74,7 +74,7 @@ export function createApexDailySender({ send, stopped = () => false, log = () =>
       if (stopped()) throw Object.assign(new Error("逐鹿盐山任务已停止"), { interrupted: true });
       return send(command, params);
     },
-    { maxRetry: ["apex_vote", "apex_guess", "apex_taskclaim"].includes(command) ? 0 : 1,
+    { maxRetry: ["apex_vote", "apex_guess", "apex_taskclaim", "apex_guessclaim"].includes(command) ? 0 : 1,
       onWait: reportWait },
   );
 }
@@ -89,13 +89,15 @@ export async function runApexDailyTask(options) {
   try { return await pending; } finally { ACTIVE.delete(accountId); }
 }
 
-async function runAccount({ accountId, send, config, loadConfig = loadApexDailyConfig, now = Date.now, stopped = () => false, log = () => {}, storage = globalThis.localStorage }) {
+export const runApexGuessTask = options => runApexDailyTask({ ...options, guessOnly: true });
+
+async function runAccount({ guessOnly = false, accountId, send, config, loadConfig = loadApexDailyConfig, now = Date.now, stopped = () => false, log = () => {}, storage = globalThis.localStorage }) {
   if (!storage?.getItem || !storage?.setItem) throw new Error("无法保存逐鹿盐山执行记录，停止自动操作");
   const key = `apex-daily:v1:${accountId}`;
   const record = JSON.parse(storage.getItem(key) || "{}");
   if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("逐鹿盐山本地执行记录异常");
   const today = getApexChinaDate(now());
-  if (record.checkedDay === today.day && !record.pending) return { status: "skipped", reason: "今天已检查逐鹿盐山" };
+  const checkedToday = !guessOnly && record.checkedDay === today.day && !record.pending;
   const save = () => storage.setItem(key, JSON.stringify(record));
   const guard = () => {
     if (stopped()) throw Object.assign(new Error("逐鹿盐山任务已停止"), { interrupted: true });
@@ -104,7 +106,7 @@ async function runAccount({ accountId, send, config, loadConfig = loadApexDailyC
   const readRole = async () => {
     guard();
     const info = data(await send("apex_getroleinfo", {}))?.apexRoleInfo;
-    if (!info || !info.guessMap || !info.voteMap || !info.taskProgress || !info.taskClaimedMap || !info.resetTime) throw new Error("逐鹿盐山账号状态不完整");
+    if (!info || !info.guessMap || !info.guessClaimMap || !info.voteMap || !info.taskProgress || !info.taskClaimedMap || !info.resetTime) throw new Error("逐鹿盐山账号状态不完整");
     guard();
     return info;
   };
@@ -112,15 +114,11 @@ async function runAccount({ accountId, send, config, loadConfig = loadApexDailyC
   config ||= await loadConfig(send);
   const rules = buildApexDailyRules(config);
   const season = rules.getCurrentSeason(now());
-  if (season <= 0) {
-    record.checkedDay = today.day; save();
-    return { status: "skipped", reason: "逐鹿盐山赛季未开放" };
-  }
-  if (Number(info.resetTime.season) !== season) throw new Error("逐鹿盐山账号赛季与当前配置不一致，请刷新游戏状态");
+  if (season > 0 && Number(info.resetTime.season) !== season) throw new Error("逐鹿盐山账号赛季与当前配置不一致，请刷新游戏状态");
   // 中断后重新查询，确认历史写操作；跨赛季/周无法可靠复查时不自动重发。
   if (record.pending) {
     const pending = record.pending;
-    if (pending.week !== today.week || pending.season !== season) throw new Error("上次逐鹿盐山操作结果待确认，期次已变化，请先检查游戏状态");
+    if ((["apex_vote", "apex_taskclaim"].includes(pending.command) && pending.week !== today.week) || pending.season !== season) throw new Error("上次逐鹿盐山操作结果待确认，期次已变化，请先检查游戏状态");
     if (pending.command === "apex_vote") {
       const actual = voteCount(info, pending.params.round, pending.params.teamId);
       if (actual < pending.before || (actual > pending.before && actual < pending.before + pending.params.voteCnt)) throw new Error("上次助威数量未完全确认，请检查游戏状态");
@@ -148,7 +146,7 @@ async function runAccount({ accountId, send, config, loadConfig = loadApexDailyC
     }
   };
 
-  if (today.weekday === 1 && record.supportWeek !== today.week) {
+  if (!guessOnly && !checkedToday && today.weekday === 1 && record.supportWeek !== today.week) {
     const round = rules.getCurrentRounds(season, now()).find(round => rules.checkSupportInTime(round, season, now()));
     const initialCount = count(info.voteItemCnt, "助威道具数量");
     if (!round) log("周一助威跳过：当前不在可助威窗口");
@@ -190,13 +188,13 @@ async function runAccount({ accountId, send, config, loadConfig = loadApexDailyC
     }
     // 同周助威已完成而领奖中断时，重新运行仍应补领大厅奖励。
     await claimTasks();
-  } else if (today.weekday === 1 || today.weekday === 0) {
+  } else if (!guessOnly && !checkedToday && (today.weekday === 1 || today.weekday === 0)) {
     await claimTasks();
   }
 
   // 每个开放赛程先完整分页，再逐组选择支持人数较多的一方；已预测的对阵保持原选择。
   let guesses = 0;
-  for (const round of rules.getCurrentRounds(season, now())) {
+  for (const round of checkedToday ? [] : rules.getCurrentRounds(season, now())) {
     for (const tab of rules.getGuessTabs(round, season, now())) {
       guard();
       if (!rules.canGuessNow(tab.state)) continue;
@@ -228,6 +226,32 @@ async function runAccount({ accountId, send, config, loadConfig = loadApexDailyC
       }
     }
   }
-  guard(); record.checkedDay = today.day; save();
-  return { status: "completed", reason: guesses ? `逐鹿盐山检查完成，新增${guesses}次预测` : "逐鹿盐山检查完成，没有待预测对阵", guesses };
+  let rewards = 0;
+  for (const [scheduleKey, predicted] of info.guessMap instanceof Map ? info.guessMap.entries() : Object.entries(info.guessMap)) {
+    guard();
+    const scheduleId = Number(scheduleKey);
+    const claimMap = field(info.guessClaimMap, scheduleKey);
+    if (!claimMap || !rules.getScheduleConf(scheduleId) || !Array.isArray(predicted)) continue;
+    const pendingIds = predicted.filter(id => field(claimMap, id) !== true).map(String);
+    if (!pendingIds.length) continue;
+    const groups = []; let last = false;
+    for (let page = 0; page < 50 && !last; page++) {
+      guard();
+      const response = data(await send("apex_getguesslist", { scheduleId, idx: groups.length }));
+      if (!Array.isArray(response?.apexGuessList) || (!response.apexGuessList.length && response.last !== true)) throw new Error("竞猜奖励对阵清单不完整");
+      groups.push(...response.apexGuessList); last = response.last === true;
+    }
+    if (!last) throw new Error("竞猜奖励对阵清单未完整读取");
+    for (const group of groups) {
+      if (!Array.isArray(group)) throw new Error("竞猜奖励对阵格式异常");
+      for (const team of group) {
+        if (!pendingIds.includes(String(team?.teamId)) || team.isWin !== true || team.isOut !== false || field(field(info.guessClaimMap, scheduleKey), team.teamId) === true) continue;
+        await writeVerified("apex_guessclaim", { scheduleId, teamId: team.teamId }, latest => field(field(latest.guessClaimMap, scheduleKey), team.teamId) === true);
+        rewards++;
+        log(`竞猜奖励已领取：赛程${scheduleId}，${team.name || team.teamId}`);
+      }
+    }
+  }
+  guard(); if (!guessOnly) record.checkedDay = today.day; save();
+  return { status: "completed", reason: `逐鹿盐山检查完成，新增${guesses}次预测，领取${rewards}份竞猜奖励${checkedToday ? "（今天已检查，跳过重复预测）" : ""}`, guesses, rewards };
 }

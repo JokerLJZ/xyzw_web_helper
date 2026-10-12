@@ -477,6 +477,7 @@ export function registerDefaultCommands(reg) {
     .register("apex_getroleinfo")
     .register("apex_getguesslist", { scheduleId: 0, idx: 0 })
     .register("apex_guess", { teamId: "" })
+    .register("apex_guessclaim", { scheduleId: 0, teamId: "" })
     .register("apex_get64oppomap", { scheduleId: 0, groupId: 0 })
     // —— APEX 逐鹿盐山：按需注册，仅登记组件实际调用的命令 ——
     .register("apex_getvotelist")
@@ -1171,6 +1172,7 @@ export class XyzwWebSocketClient {
       apex_getroleinforesp: "apex_getroleinfo",
       apex_getguesslistresp: "apex_getguesslist",
       apex_guessresp: "apex_guess",
+      apex_guessclaimresp: "apex_guessclaim",
       apex_get64oppomapresp: "apex_get64oppomap",
       apex_getvotelistresp: "apex_getvotelist",
       apex_voteresp: "apex_vote",

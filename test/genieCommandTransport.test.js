@@ -99,3 +99,12 @@ test("逐鹿盐山助威携带数量，竞技大厅领奖匹配独立任务响�
   assert.equal(Object.keys(client.promises).length, 0);
   client._clearTimers();
 });
+
+test("竞猜奖励按赛程和队伍发送，并匹配竞猜领取独立响应", async () => {
+  const client = new XyzwWebSocketClient({url:"wss://test",utils:{}});client.connected=true;
+  const params={scheduleId:124,teamId:"winner"};
+  assert.deepEqual(client.registry.build("apex_guessclaim",0,1,params).body,params);
+  const promise=client.sendWithPromise("apex_guessclaim",params,1000);client.sendQueue.shift();
+  client._handlePromiseResponse({cmd:"apex_guessclaimresp",body:{apexRoleInfo:{guessClaimMap:{124:{winner:true}}}}});
+  assert.equal((await promise).apexRoleInfo.guessClaimMap[124].winner,true);client._clearTimers();
+});

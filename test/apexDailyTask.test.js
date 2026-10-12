@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runApexDailyTask, buildApexDailyRules, getApexChinaDate, createApexDailySender } from "../src/utils/apexDailyTask.js";
+import { runApexGuessTask, runApexDailyTask, buildApexDailyRules, getApexChinaDate, createApexDailySender } from "../src/utils/apexDailyTask.js";
 import { defaultSettings, defaultTemplate } from "../src/utils/batch/constants.js";
 import { DailyTaskRunner } from "../src/utils/dailyTaskRunner.js";
 
@@ -23,7 +23,7 @@ function fixture({ time = MONDAY, inventory = 3, voteList, groups, guessMap = {}
   const c = config(), calls = [], logs = [];
   const memory = new Map();
   const storage = sharedStorage || { getItem: key => memory.get(key) || null, setItem: (key, value) => memory.set(key, value) };
-  let info = { roleId: 1, resetTime: {season:1, day:261012}, voteItemCnt: inventory, voteMap: {}, guessMap, taskClaimedMap: {}, taskProgress: { 1: 0, 4: 0 }, group: {} };
+  let info = { roleId: 1, resetTime: {season:1, day:261012}, voteItemCnt: inventory, voteMap: {}, guessClaimMap: {}, guessMap, taskClaimedMap: {}, taskProgress: { 1: 0, 4: 0 }, group: {} };
   const read = () => structuredClone(info);
   const send = async (cmd, params) => {
     calls.push({cmd, params});
@@ -38,6 +38,7 @@ function fixture({ time = MONDAY, inventory = 3, voteList, groups, guessMap = {}
       info.taskProgress[4] += params.voteCnt;
     } else if (cmd === "apex_taskclaim") info.taskClaimedMap[params.confId] = true;
     else if (cmd === "apex_getguesslist") return { apexGuessList: groups || [[{teamId:"low",cheerCnt:1},{teamId:"high",cheerCnt:12}], [{teamId:"tie-first",cheerCnt:2},{teamId:"tie-second",cheerCnt:2}]], last: true };
+    else if (cmd === "apex_guessclaim") { (info.guessClaimMap[params.scheduleId] ||= {})[params.teamId] = true; }
     else if (cmd === "apex_guess") { (info.guessMap[2] ||= []).push(params.teamId); }
     else throw new Error(`意外指令${cmd}`);
     if (reject === "after") throw new Error("请求超时");
@@ -82,7 +83,7 @@ test("非周一周日不助威和领奖，只在开放时预测支持人数多�
 test("已预测一方的对阵不反向再预测，同一天重跑不发送请求", async () => {
   const f=fixture({guessMap:{2:["low"]}});await f.run();
   assert.deepEqual(commands(f,"apex_guess").map(x=>x.params.teamId),["tie-first"]);
-  const length=f.calls.length;const result=await f.run();assert.equal(result.status,"skipped");assert.equal(f.calls.length,length);
+  const length=f.calls.length;const result=await f.run();assert.equal(result.status,"completed");assert.ok(f.calls.length > length);assert.equal(commands(f,"apex_guess").length,1);
 });
 test("同周周一重跑不会再消耗新获得的助威道具", async () => {
   const f=fixture();await f.run();
@@ -171,15 +172,6 @@ test("正式赛段助威榜使用当前阶段账号分组，淘汰赛榜使用0�
   f.info.group={1:3};await f.run();assert.equal(commands(f,"apex_getvotelist")[0].params.groupId,3);
 });
 
-test("日常今天已检查时跳过，不发送请求或关闭现有连接", async () => {
-  const original=globalThis.localStorage;
-  globalThis.localStorage={getItem:()=>JSON.stringify({checkedDay:getApexChinaDate(Date.now()).day}),setItem(){}};
-  try {
-    const runner=new DailyTaskRunner({sendMessageWithPromise:()=>assert.fail("不得发送请求"),closeWebSocketConnection:()=>assert.fail("不得关闭日常连接")});runner.roleSnapshots.set("a",{gold:100,heroes:{107:{level:900}}});
-    const result=await runner.runApexTask("a");assert.equal(result.status,"skipped");assert.equal(runner.roleStateDirty,true);
-    assert.equal(runner.roleSnapshots.get("a").gold,100);
-  } finally {globalThis.localStorage=original;}
-});
 
 test("正常短请求间隔静默，较长等待十秒内合并提示", async () => {
   let time = 0;
@@ -203,4 +195,42 @@ test("真实服务器限速重试提示不会被正常等待过滤", async () =>
   });
   await sender("apex_getroleinfo");await sender("apex_getroleinfo");
   assert.equal(logs.length,2);assert.ok(logs.every(text=>text.includes("服务器限速")));
+});
+
+
+test("历史竞猜赢家领奖，已领、输家和未出结果不领取；当天检查记录不挡领奖", async () => {
+  const f=fixture({inventory:0,groups:[[{teamId:"winner",cheerCnt:8,isWin:true,isOut:false},{teamId:"loser",cheerCnt:2,isWin:false,isOut:true}]]});
+  f.info.guessMap={3:["winner","loser"]};f.info.guessClaimMap={3:{winner:false,loser:false}};
+  f.storage.setItem("apex-daily:v1:a",JSON.stringify({checkedDay:getApexChinaDate(MONDAY).day}));
+  await f.run();assert.deepEqual(commands(f,"apex_guessclaim").map(x=>x.params),[{scheduleId:3,teamId:"winner"}]);
+  await f.run();assert.equal(commands(f,"apex_guessclaim").length,1);
+});
+test("批量竞猜共用多数选择、已有选择不反押，领奖超时已生效不重发", async () => {
+  const f=fixture({guessMap:{2:["low"],3:["winner"]},failure:cmd=>cmd==="apex_guessclaim"?"after":null});
+  f.info.guessClaimMap={3:{winner:false}};
+  const original=f.options.send;
+  f.options.send=(cmd,params)=>cmd==="apex_getguesslist"&&params.scheduleId===3?Promise.resolve({apexGuessList:[[{teamId:"winner",isWin:true,isOut:false},{teamId:"loser",isWin:false,isOut:true}]],last:true}):original(cmd,params);
+  await runApexGuessTask(f.options);
+  assert.equal(commands(f,"apex_vote").length,0);assert.equal(commands(f,"apex_taskclaim").length,0);
+  assert.deepEqual(commands(f,"apex_guess").map(x=>x.params.teamId),["tie-first"]);
+  assert.equal(f.info.guessClaimMap[3].winner,true);
+});
+
+test("没有开放竞猜或赛季结束，仍可领取历史竞猜奖励", async () => {
+  const f=fixture({time:stamp("2026-11-20T10:00:00"),groups:[[{teamId:"winner",isWin:true,isOut:false},{teamId:"loser",isWin:false,isOut:true}]]});
+  f.info.guessMap={3:["winner"]};f.info.guessClaimMap={3:{winner:false}};
+  await runApexGuessTask(f.options);
+  assert.equal(commands(f,"apex_guess").length,0);assert.equal(commands(f,"apex_guessclaim").length,1);
+});
+
+test("批量入口执行统一竞猜领奖流程，结束后释放连接", async () => {
+  const { createTasksApex } = await import("../src/utils/batch/tasksApex.js");
+  const f=fixture({guessMap:{3:["winner"]}});f.info.guessClaimMap={3:{winner:false}};
+  const original=f.options.send;
+  f.options.send=(cmd,params)=>cmd==="apex_getguesslist"&&params.scheduleId===3?Promise.resolve({apexGuessList:[[{teamId:"winner",isWin:true,isOut:false},{teamId:"loser",isWin:false,isOut:true}]],last:true}):original(cmd,params);
+  let closed=0,released=0;const status={value:{}};
+  await createTasksApex({selectedTokens:{value:["a"]},tokens:{value:[{id:"a",name:"测试"}]},tokenStatus:status,isRunning:{value:false},shouldStop:{value:false},currentRunningTokenId:{value:null},connectionQueue:{active:1},batchSettings:{maxActive:1},ensureConnection:async()=>{},releaseConnectionSlot:()=>released++,tokenStore:{closeWebSocketConnection:()=>closed++},addLog(){},message:{success(){}},apexOptions:f.options}).batchApexGuess();
+  assert.equal(status.value.a,"completed");assert.equal(closed,1);assert.equal(released,1);
+  assert.deepEqual(commands(f,"apex_guess").map(x=>x.params.teamId),["high","tie-first"]);
+  assert.equal(commands(f,"apex_guessclaim").length,1);assert.equal(commands(f,"apex_vote").length,0);
 });
