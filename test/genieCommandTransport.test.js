@@ -85,3 +85,17 @@ test("断线立即拒绝所有请求并清除队列，重连不会重放旧写�
   assert.equal(client.sendQueue.length, 0);
   client._clearTimers();
 });
+
+test("逐鹿盐山助威携带数量，竞技大厅领奖匹配独立任务响应", async () => {
+  const registry = registerDefaultCommands(new CommandRegistry());
+  assert.deepEqual(registry.build("apex_vote", 0, 1, { round: 5, teamId: "team-a", voteCnt: 9999 }).body, { round: 5, teamId: "team-a", voteCnt: 9999 });
+  assert.deepEqual(registry.build("apex_taskclaim", 0, 2, { confId: 7 }).body, { confId: 7 });
+  const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+  client.connected = true;
+  const promise = client.sendWithPromise("apex_taskclaim", { confId: 7 }, 1000);
+  client.sendQueue.shift();
+  client._handlePromiseResponse({ cmd: "apex_taskclaimresp", body: { apexRoleInfo: { taskClaimedMap: { 7: true } } } });
+  assert.equal((await promise).apexRoleInfo.taskClaimedMap[7], true);
+  assert.equal(Object.keys(client.promises).length, 0);
+  client._clearTimers();
+});

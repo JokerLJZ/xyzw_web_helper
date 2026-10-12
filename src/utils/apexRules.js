@@ -94,6 +94,10 @@ const ApexStage = {
   TAOTAI_2: 10, // 决赛
 };
 
+/** 为每日自动化使用服务器当前配置创建独立规则，避免共享可变配置。 */
+const defaultApexTables = { apexScheduleMap, apexSeasonConf, apexStageNames, apexSupportLevels };
+export function createApexRules(tables = defaultApexTables, { chinaTime = false } = {}) {
+const { apexScheduleMap, apexSeasonConf, apexStageNames, apexSupportLevels } = tables;
 // ==================== 基础时间工具 ====================
 
 /**
@@ -101,9 +105,10 @@ const ApexStage = {
  * @param {string} dateText 形如 "2026/09/21"
  * @returns {number} 无法解析时返回 NaN
  */
-export function getDateZeroTime(dateText) {
+function getDateZeroTime(dateText) {
   const m = DATE_RE.exec(String(dateText || "").trim());
   if (!m) return Number.NaN;
+  if (chinaTime) return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) - 8 * 3600000;
   return new Date(
     Number(m[1]),
     Number(m[2]) - 1,
@@ -145,13 +150,18 @@ const formatMonthDay = (ms) => {
  * @param {string|number} dayStr 服务端 resetTime.day，形如 "260915" 或 260915
  * @returns {number} 校准后的服务端当前时间（毫秒）；day 不可用时原样返回 localNowMs
  */
-export function calibrateServerTime(localNowMs, dayStr) {
+function calibrateServerTime(localNowMs, dayStr) {
   const day = String(dayStr ?? "");
   // ① 客户端同款格式闸门：严格 6 位纯数字
   if (!/^\d{6}$/.test(day)) {
     return localNowMs;
   }
 
+  if (chinaTime) {
+    const d = new Date(localNowMs + 8 * 3600000);
+    const today = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - 8 * 3600000;
+    return localNowMs + getDateZeroTime(`20${day.slice(0, 2)}/${day.slice(2, 4)}/${day.slice(4, 6)}`) - today;
+  }
   const yy = Number(day.slice(0, 2));
   const mm = Number(day.slice(2, 4));
   const dd = Number(day.slice(4, 6));
@@ -185,6 +195,11 @@ export function calibrateServerTime(localNowMs, dayStr) {
 
 /** 本周一 0 点（等价客户端 DateUtil.thisWeek，周一为一周起始） */
 const thisWeekStart = (ms) => {
+  if (chinaTime) {
+    const d = new Date(ms + 8 * 3600000);
+    const zero = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - 8 * 3600000;
+    return zero - ((d.getUTCDay() || 7) - 1) * DAY_MS;
+  }
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
   return d.getTime() - ((d.getDay() || 7) - 1) * DAY_MS;
@@ -208,7 +223,7 @@ for (const conf of allSchedules) {
 }
 
 /** 阶段简单名，如「64强赛」 */
-export const getStageName = (stage) =>
+const getStageName = (stage) =>
   apexStageNames[stage]?.simpleName || `阶段${stage}`;
 
 /**
@@ -220,7 +235,7 @@ export const getStageName = (stage) =>
  * @param {number|string} season
  * @returns {Array<object>} 该期全部赛程配置，按 id 升序
  */
-export function getRoundSchedules(round, season) {
+function getRoundSchedules(round, season) {
   return seasonRoundMap.get(Number(season))?.get(Number(round)) || [];
 }
 
@@ -234,7 +249,7 @@ export function getRoundSchedules(round, season) {
  * @param {number|string} scheduleId
  * @returns {object|null} 形如 { id, round, season, stage, date, ... }
  */
-export function getScheduleConf(scheduleId) {
+function getScheduleConf(scheduleId) {
   const conf = apexScheduleMap[scheduleId];
   return conf ? { id: Number(scheduleId), ...conf } : null;
 }
@@ -244,7 +259,7 @@ export function getScheduleConf(scheduleId) {
  * @param {number} season
  * @returns {object|null} 赛季配置；赛季不存在时为 null
  */
-export const getSeasonConf = (season) => apexSeasonConf[season] || null;
+const getSeasonConf = (season) => apexSeasonConf[season] || null;
 
 // ==================== 核心判定 ====================
 
@@ -257,7 +272,7 @@ export const getSeasonConf = (season) => apexSeasonConf[season] || null;
  * @param {number} nowMs 服务端当前时间（毫秒）
  * @returns {number} ApexScheduleStatus
  */
-export function getScheduleStatus(scheduleId, nowMs) {
+function getScheduleStatus(scheduleId, nowMs) {
   const conf = apexScheduleMap[scheduleId];
   if (!conf) return ApexScheduleStatus.None;
   const dayZero = getDateZeroTime(conf.date);
@@ -324,7 +339,7 @@ const createScheduleInfo = (type, nowMs, enableBase, start, end, extra) => {
  * @param {number} nowMs
  * @returns {Record<number, object>} key 为 ApexStageType
  */
-export function getStageInfoByRound(round, season, nowMs) {
+function getStageInfoByRound(round, season, nowMs) {
   const info = {
     [ApexStageType.SignUp]: createScheduleInfo(ApexStageType.SignUp, nowMs),
     [ApexStageType.HaiXuan]: createScheduleInfo(ApexStageType.HaiXuan, nowMs),
@@ -406,7 +421,7 @@ export function getStageInfoByRound(round, season, nowMs) {
  * @param {number} nowMs
  * @returns {number} 命中窗口的赛季号；无命中时返回 -1
  */
-export function getCurrentSeason(nowMs) {
+function getCurrentSeason(nowMs) {
   const windows = new Map();
   const order = [];
   for (const conf of allSchedules) {
@@ -441,7 +456,7 @@ export function getCurrentSeason(nowMs) {
  * @param {number} nowMs
  * @returns {{inSeason: boolean, timeLeft: number}} inSeason 表示是否落在赛季窗口内，timeLeft 为窗口内剩余毫秒
  */
-export function checkNowInSeason(nowMs) {
+function checkNowInSeason(nowMs) {
   // 客户端默认余量为 31536e6 ms（= 365 天）
   const result = { inSeason: false, timeLeft: 365 * DAY_MS };
   for (const conf of Object.values(apexSeasonConf)) {
@@ -500,7 +515,7 @@ function getRoundSignStartTime(round, season) {
  * @param {number} season
  * @returns {number} 无法解析时返回 NaN
  */
-export function getRoundEndTime(round, season) {
+function getRoundEndTime(round, season) {
   const list = getRoundSchedules(round, season);
   let max = -Infinity;
   forEachScheduleTime(list, "endTime", (at) => {
@@ -530,7 +545,7 @@ export function getRoundEndTime(round, season) {
  * @param {number} season
  * @returns {number} 无法解析时返回 NaN
  */
-export function getRoundSettleTime(round, season) {
+function getRoundSettleTime(round, season) {
   const final = getRoundSchedules(round, season).find(
     (c) => c.stage === ApexStage.TAOTAI_2,
   );
@@ -546,7 +561,7 @@ export function getRoundSettleTime(round, season) {
  * @param {number} nowMs
  * @returns {boolean} 该期末场已结束为 true
  */
-export function isRoundEnded(round, season, nowMs) {
+function isRoundEnded(round, season, nowMs) {
   const end = getRoundEndTime(round, season);
   return Number.isFinite(end) && nowMs >= end;
 }
@@ -558,7 +573,7 @@ export function isRoundEnded(round, season, nowMs) {
  * @param {number} nowMs
  * @returns {number} ApexRoundPhase
  */
-export function getRoundPhase(round, season, nowMs) {
+function getRoundPhase(round, season, nowMs) {
   const start = getRoundSignStartTime(round, season);
   if (Number.isFinite(start) && nowMs < start) return ApexRoundPhase.Upcoming;
   return isRoundEnded(round, season, nowMs)
@@ -576,7 +591,7 @@ export function getRoundPhase(round, season, nowMs) {
  * @param {number} nowMs
  * @returns {number[]} 已开期的期号列表（升序，含历史期）
  */
-export function getAvailableRounds(season, nowMs) {
+function getAvailableRounds(season, nowMs) {
   const roundMap = seasonRoundMap.get(season);
   if (!roundMap) return [];
   const result = [];
@@ -594,7 +609,7 @@ export function getAvailableRounds(season, nowMs) {
  * @param {number} nowMs
  * @returns {number[]} 进行中的期号列表（升序）
  */
-export function getCurrentRounds(season, nowMs) {
+function getCurrentRounds(season, nowMs) {
   return getAvailableRounds(season, nowMs).filter(
     (round) => !isRoundEnded(round, season, nowMs),
   );
@@ -606,7 +621,7 @@ export function getCurrentRounds(season, nowMs) {
  * @param {number} nowMs
  * @returns {number[]} 已结束的历史期号列表（升序）
  */
-export function getHistoryRounds(season, nowMs) {
+function getHistoryRounds(season, nowMs) {
   return getAvailableRounds(season, nowMs).filter((round) =>
     isRoundEnded(round, season, nowMs),
   );
@@ -646,7 +661,7 @@ const checkDuringSignUp = (round, season, nowMs) => {
  * @param {number} nowMs
  * @returns {number|null} 默认展示的期号；无可用期时为 null
  */
-export function getInitialRound(availableRounds, season, nowMs) {
+function getInitialRound(availableRounds, season, nowMs) {
   if (!availableRounds.length) return null;
 
   for (const round of availableRounds) {
@@ -682,7 +697,7 @@ export function getInitialRound(availableRounds, season, nowMs) {
  * @param {number} nowMs
  * @returns {boolean} 助威开放为 true
  */
-export function checkSupportInTime(round, season, nowMs) {
+function checkSupportInTime(round, season, nowMs) {
   const list = getRoundSchedules(round, season);
   if (!list.length) return false;
 
@@ -730,7 +745,7 @@ export function checkSupportInTime(round, season, nowMs) {
  * @param {number} nowMs
  * @returns {Array<{stage:number, scheduleId:number, title:string, state:number}>} 竞猜页签列表，按阶段升序；阶段缺配置时不出页签
  */
-export function getGuessTabs(round, season, nowMs) {
+function getGuessTabs(round, season, nowMs) {
   const list = getRoundSchedules(round, season);
   return APEX_TAOTAI_STAGES.flatMap((stage) => {
     const conf = list.find((c) => c.stage === stage);
@@ -753,7 +768,7 @@ export function getGuessTabs(round, season, nowMs) {
  * @param {number} state
  * @returns {boolean} 该场次当前可以押注为 true
  */
-export const canGuessNow = (state) =>
+const canGuessNow = (state) =>
   state === ApexScheduleStatus.Unlocked || state === ApexScheduleStatus.Locked;
 
 /**
@@ -764,7 +779,7 @@ export const canGuessNow = (state) =>
  * @param {{team1Win?:boolean, team2Win?:boolean}} row 对阵行
  * @returns {boolean} 该场次仍可押注为 true
  */
-export const canGuessRow = (state, stage, row) =>
+const canGuessRow = (state, stage, row) =>
   canGuessNow(state) &&
   !(stage === ApexStage.TAOTAI_2 && !!(row && (row.team1Win || row.team2Win)));
 
@@ -777,7 +792,7 @@ export const canGuessRow = (state, stage, row) =>
  * @param {number} stage
  * @returns {number} 0 表示该阶段不可竞猜
  */
-export function getAdvanceNum(round, season, stage) {
+function getAdvanceNum(round, season, stage) {
   if (stage === ApexStage.TAOTAI_3) return 1;
   const conf = getRoundSchedules(round, season).find(
     (c) => c.stage === stage && Number.isFinite(c.advanceNum) && c.advanceNum > 0,
@@ -791,7 +806,7 @@ export function getAdvanceNum(round, season, stage) {
  * @param {number} cheerCnt
  * @returns {number} 助威等级；未达到最低档时为 0
  */
-export function getSupportLevel(cheerCnt) {
+function getSupportLevel(cheerCnt) {
   for (let i = apexSupportLevels.length - 1; i >= 0; i--) {
     if (cheerCnt >= apexSupportLevels[i].supportNum) return apexSupportLevels[i].level;
   }
@@ -818,7 +833,7 @@ export function getSupportLevel(cheerCnt) {
  * @param {number} scheduleId 当前期的 scheduleId
  * @returns {number} 助威榜分组号（合法时原样返回，0 / 缺失 / NaN 时回退 1）
  */
-export function getSupportGroupId(groupMap, scheduleId) {
+function getSupportGroupId(groupMap, scheduleId) {
   const raw = groupMap ? groupMap[String(scheduleId)] : undefined;
   // 对齐客户端 `g != null ? g : 0`：null / undefined 视为 0
   const mine = raw == null ? 0 : raw;
@@ -834,7 +849,39 @@ export function getSupportGroupId(groupMap, scheduleId) {
  * @param {number} season 赛季号
  * @returns {number} 该阶段的 scheduleId；缺失时返回 -1（与客户端一致）
  */
-export function getScheduleIdByStage(stage, round, season) {
+function getScheduleIdByStage(stage, round, season) {
   const conf = getRoundSchedules(round, season).find((c) => c.stage === stage);
   return conf ? conf.id : -1;
 }
+
+return { getDateZeroTime, calibrateServerTime, getStageName, getRoundSchedules, getScheduleConf, getSeasonConf, getScheduleStatus, getStageInfoByRound, getCurrentSeason, checkNowInSeason, getRoundEndTime, getRoundSettleTime, isRoundEnded, getRoundPhase, getAvailableRounds, getCurrentRounds, getHistoryRounds, getInitialRound, checkSupportInTime, getGuessTabs, canGuessNow, canGuessRow, getAdvanceNum, getSupportLevel, getSupportGroupId, getScheduleIdByStage };
+}
+
+export const {
+  getDateZeroTime,
+  calibrateServerTime,
+  getStageName,
+  getRoundSchedules,
+  getScheduleConf,
+  getSeasonConf,
+  getScheduleStatus,
+  getStageInfoByRound,
+  getCurrentSeason,
+  checkNowInSeason,
+  getRoundEndTime,
+  getRoundSettleTime,
+  isRoundEnded,
+  getRoundPhase,
+  getAvailableRounds,
+  getCurrentRounds,
+  getHistoryRounds,
+  getInitialRound,
+  checkSupportInTime,
+  getGuessTabs,
+  canGuessNow,
+  canGuessRow,
+  getAdvanceNum,
+  getSupportLevel,
+  getSupportGroupId,
+  getScheduleIdByStage
+} = createApexRules();

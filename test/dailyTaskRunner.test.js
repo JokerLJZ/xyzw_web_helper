@@ -722,3 +722,14 @@ test("梦境扩展切换阵容后请求超时仍恢复原阵容", async () => {
   assert.deepEqual(f.calls.filter(c=>c.cmd === "presetteam_saveteam").map(c=>c.params.teamId),[2,1]);
   assert.equal(teamId,1);
 });
+
+test("逐鹿盐山日常缺省关闭，只有显式启用才加入日常步骤", async () => {
+  for (const enabled of [undefined, false, true]) {
+    const f = fixture();
+    const runner = f.runner();
+    let calls = 0;
+    runner.runApexTask = async () => { calls++; return { status: "completed" }; };
+    await runner.run("account-a", {}, { ...settings, apexDailyEnable: enabled });
+    assert.equal(calls, enabled === true ? 1 : 0);
+  }
+});

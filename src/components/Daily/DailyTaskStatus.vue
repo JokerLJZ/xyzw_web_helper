@@ -206,6 +206,10 @@
               <span class="switch-label" title="仅北京时间周一；按余额和剩余限购额度兑换万能红碎片及成长脆饼">周一采购万能红碎片及成长脆饼</span>
               <n-switch v-model:value="settings.mondayResourcePurchase" />
             </div>
+            <div class="switch-row">
+              <span class="switch-label" title="周一将全部助威道具用于第一支可助威队伍并领奖，周日领奖；每天预测支持人数较多的队伍（默认关闭）">逐鹿盐山助威与竞猜</span>
+              <n-switch v-model:value="settings.apexDailyEnable" />
+            </div>
 
             <div class="switch-row">
               <span class="switch-label">付费招募</span>
@@ -387,6 +391,7 @@ const settings = reactive({
   holyBeastFragmentPurchase: false,
   whiteJadePurchase: false,
   mondayResourcePurchase: false,
+  apexDailyEnable: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -413,6 +418,7 @@ const defaultDailySettings = {
   holyBeastFragmentPurchase: false,
   whiteJadePurchase: false,
   mondayResourcePurchase: false,
+  apexDailyEnable: false,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,

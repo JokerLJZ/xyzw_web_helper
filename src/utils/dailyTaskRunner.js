@@ -1,3 +1,4 @@
+import { createApexDailySender, runApexDailyTask } from "./apexDailyTask.js";
 import { runDailyGenieChallenges } from "./dailyGenieChallenges.js";
 import { isChinaMonday, runMondayResourcePurchase } from "./mondayResourcePurchase.js";
 import { ARENA_TARGET, FISH_TARGET } from "@/utils/batch/constants.js";
@@ -1226,6 +1227,27 @@ export class DailyTaskRunner {
     return result;
   }
 
+  async runApexTask(tokenId) {
+    const stopped = () => this.callbacks?.shouldStop?.() === true;
+    const log = text => this.log(text);
+    const send = createApexDailySender({
+      stopped, log,
+      send: async (command, params) => {
+        const response = await this.sendRequest(tokenId, () =>
+          this.tokenStore.sendMessageWithPromise(tokenId, command, params, 15000),
+        );
+        const snapshot = this.roleSnapshots.get(tokenId);
+        const patch = extractRolePatch(response);
+        if (snapshot && patch) mergeRoleSnapshot(snapshot, patch);
+        return response;
+      },
+    });
+    this.roleStateDirty = true;
+    const result = await runApexDailyTask({ accountId: tokenId, send, stopped, log });
+    this.log(result.reason);
+    return result;
+  }
+
   loadSettings(roleId) {
     try {
       const raw = localStorage.getItem(`daily-settings:${roleId}`);
@@ -1245,6 +1267,7 @@ export class DailyTaskRunner {
         holyBeastFragmentPurchase: false,
         whiteJadePurchase: false,
         mondayResourcePurchase: false,
+        apexDailyEnable: false,
         freeGachaEnable: true,
         studyEnable: true,
         dreamEnable: true,
@@ -1880,6 +1903,13 @@ export class DailyTaskRunner {
         `当前主线关卡${getMainLevel(roleData)}，未达到灯神开启条件${GENIE_MIN_MAIN_LEVEL}关，跳过灯神任务`,
         "info",
       );
+    }
+
+    if (settings.apexDailyEnable === true) {
+      taskList.push({
+        name: "逐鹿盐山助威与竞猜",
+        execute: () => this.runApexTask(tokenId),
+      });
     }
 
     if (settings.studyEnable !== false) {
