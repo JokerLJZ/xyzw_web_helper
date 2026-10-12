@@ -733,3 +733,17 @@ test("逐鹿盐山日常缺省关闭，只有显式启用才加入日常步骤",
     assert.equal(calls, enabled === true ? 1 : 0);
   }
 });
+
+test("竞技场日常只缺1次时仍固定打3场，完成后重跑不再触发", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date(2026,9,12,10).getTime() });
+  const f=fixture({13:0}),original=f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise=async(id,cmd,params)=>{
+    if(cmd==="arena_getareatarget")return {roleList:[{roleId:123}]};
+    if(cmd==="fight_startareaarena") { f.calls.push({cmd,params});f.role.dailyTask.complete[13]++;return {}; }
+    return original(id,cmd,params);
+  };
+  await f.runner().run("account-a",{}, {...settings,arenaEnable:true});
+  assert.equal(f.calls.filter(x=>x.cmd==="fight_startareaarena").length,3);
+  await f.runner().run("account-a",{}, {...settings,arenaEnable:true});
+  assert.equal(f.calls.filter(x=>x.cmd==="fight_startareaarena").length,3);
+});

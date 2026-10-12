@@ -1676,7 +1676,8 @@ export class DailyTaskRunner {
             "开始竞技场",
           );
 
-          const arenaAttempts = Math.min(3, this.getTaskState(13).remaining);
+          // 日常尚未完成时固定挑战3场，不以1次任务目标截断免费挑战。
+          const arenaAttempts = 3;
           for (let i = 1; i <= arenaAttempts; i++) {
             this.log(`竞技场战斗 ${i}/${arenaAttempts}`);
             const targets = await this.executeGameCommand(
