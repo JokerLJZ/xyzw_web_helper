@@ -1,16 +1,24 @@
 import { PET_MERGE_CONFIG, PET_MERGE_OPERATION_DELAY, PET_MERGE_QUERY_DELAY } from './petMerge.js';
+import { PET_EQUIP_CONFIG } from './petEquipConfig.js';
 const bodyOf = result => result?._raw?.body ?? result?.body ?? result;
 const equippedId = role => role?.petData?.pets?.[-1]?.uId ?? role?.pet?.petUId ?? role?.pet?.uId;
-const redCount = pet => Object.values(pet.quenches ?? {}).filter(q => q.color === 6 || q.colorId === 6).length;
+const attributePriority = pet => ({ armorBreak: 2, block: 1 }[PET_EQUIP_CONFIG[pet.petId]?.attribute] ?? 0);
 
+// 保留旧函数名以兼容已有任务标识；实际按品质、技能属性、等级选择。
 // PetEquipDialog._onClickUse: PetService.load({slotUId:{slot,uId}}).
 export function selectHighestLevelPet(role) {
   const equipped = equippedId(role);
   return Object.entries(role?.petData?.pets ?? {}).flatMap(([key, pet]) => {
     const slot = Number(key);
-    if (!pet || !Number.isInteger(slot) || slot < -1 || typeof pet.uId !== 'string' || !pet.uId || !Number.isSafeInteger(pet.level) || pet.level < 1) return [];
+    if (!pet || !PET_EQUIP_CONFIG[pet.petId] || !Number.isInteger(slot) || slot < -1 || typeof pet.uId !== 'string' || !pet.uId || !Number.isSafeInteger(pet.level) || pet.level < 1) return [];
     return [{ ...pet, slot }];
-  }).sort((a,b) => b.level-a.level || Number(b.uId===equipped)-Number(a.uId===equipped) || (PET_MERGE_CONFIG[b.petId]?.color??0)-(PET_MERGE_CONFIG[a.petId]?.color??0) || redCount(b)-redCount(a) || a.uId.localeCompare(b.uId))[0] ?? null;
+  }).sort((a, b) =>
+    PET_EQUIP_CONFIG[b.petId].color - PET_EQUIP_CONFIG[a.petId].color ||
+    attributePriority(b) - attributePriority(a) ||
+    b.level - a.level ||
+    Number(b.uId === equipped) - Number(a.uId === equipped) ||
+    a.uId.localeCompare(b.uId)
+  )[0] ?? null;
 }
 
 export async function equipHighestLevelPet({ getRole, send, wait = async()=>{}, shouldStop = ()=>false }) {
@@ -24,7 +32,7 @@ export async function equipHighestLevelPet({ getRole, send, wait = async()=>{}, 
   await send('pet_load', {slotUId:{slot:target.slot,uId:target.uId}});
   await wait(PET_MERGE_QUERY_DELAY);
   const after = await getRole();
-  if (equippedId(after)!==target.uId) throw new Error('响应未确认最高等级宠物已佩戴，停止且不重试');
+  if (equippedId(after)!==target.uId) throw new Error('响应未确认优先宠物已佩戴，停止且不重试');
   return { changed:true, target };
 }
 

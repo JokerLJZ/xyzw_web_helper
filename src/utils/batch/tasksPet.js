@@ -25,7 +25,7 @@ export function createPetTasks(deps) {
     currentRunningTokenId, ensureConnection, releaseConnectionSlot,
     tokenStore, addLog, message, delayConfig } = deps;
   const runPetTask = async (claimRewards = false, mergePets = false, management = "") => {
-    const taskLabel = management === "book" ? "宠物图鉴激活领奖" : management === "equip" ? "佩戴最高等级宠物" : mergePets ? "宠物合成" : claimRewards ? "扭蛋领奖" : "宠物升级";
+    const taskLabel = management === "book" ? "宠物图鉴激活领奖" : management === "equip" ? "佩戴优先宠物" : mergePets ? "宠物合成" : claimRewards ? "扭蛋领奖" : "宠物升级";
     if (!selectedTokens.value.length) return;
     isRunning.value = true;
     shouldStop.value = false;
@@ -54,7 +54,7 @@ export function createPetTasks(deps) {
               log(`宠物图鉴任务结束：激活${result.activated}项、领取${result.claimed}项奖励`);
             } else {
               const result = await equipHighestLevelPet(options);
-              log(result.changed ? `已佩戴最高等级宠物${result.target.uId}（${result.target.level}级）` : result.reason === "equipped" ? "最高等级宠物已经佩戴，跳过" : "没有可佩戴宠物或任务已停止，跳过", result.changed ? "success" : "info");
+              log(result.changed ? `已佩戴优先宠物${result.target.uId}（${result.target.level}级）` : result.reason === "equipped" ? "优先宠物已经佩戴，跳过" : "没有可佩戴宠物或任务已停止，跳过", result.changed ? "success" : "info");
             }
             tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
             continue;

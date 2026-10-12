@@ -45,14 +45,35 @@ PetService.merge({fromSlotUId, toSlotUId, inheritSlot})
 
 实际用户日志反馈连续操作触发200400（操作太快）。调整为角色查询后至少等待2500毫秒再开蛋/合成，操作完成后至少等待1500毫秒再查询角色，因此连续消耗操作间隔至少4秒；用户配置的命令间隔更大时采用更大值。所有操作串行，不并发查询，限流或超时后仍停止，不自动重发消耗请求。上述间隔是降频策略，服务器实际限流阈值未公开。
 
-## 图鉴激活领奖、佩戴最高等级宠物
+## 图鉴激活领奖、佩戴优先宠物
 
 接口来自上述game加载的游戏代码。`PetRoleDataView`定义图鉴状态：Unclaimed=0，Claimed=1，Locked=2；缺失记录按Locked处理。`PetModule.sendActiveBook`调用`PetService.activateBook({petId})`；`sendClaimBookReward`调用`PetService.claimBookReward({petId})`。`PetRedDotData.judgePetBookPetActiveAward`仅允许已激活且`bookReward[petId] !== 1`的图鉴领奖。API目录图鉴领奖记录确认激活响应`role.petData.books[602]=1`、领奖响应`role.petData.bookReward[602]=1`。游戏中的图鉴只有激活与领奖，本体升星使用`upgradeStar({slotUId})`且消耗碎片，属于另一项功能。
 
-佩戴来自`PetEquipDialog._onClickUse`的`PetService.load({slotUId:{slot,uId}})`，命令`pet_load`，装备槽位`PET_EQUIP_SLOT_ID=-1`。任务先按等级取最高宠物，同等级优先保留当前佩戴，其次品质、红属性数量、唯一编号；佩戴后查询装备槽唯一编号确认。未重复发送已佩戴宠物，未确认成功时停止且不重试。图鉴和佩戴均采用与合成相同的2500/1500毫秒请求间隔。
+佩戴来自`PetEquipDialog._onClickUse`的`PetService.load({slotUId:{slot,uId}})`，命令`pet_load`，装备槽位`PET_EQUIP_SLOT_ID=-1`。任务先选最高品质（金＞红＞橙＞紫＞蓝＞绿＞白），同品质按自身技能破甲＞格挡＞其他，再比较等级；仍相同时保留当前佩戴，最后按唯一编号稳定选择；佩戴后查询装备槽唯一编号确认。未重复发送已佩戴宠物，未确认成功时停止且不重试。图鉴和佩戴均采用与合成相同的2500/1500毫秒请求间隔。
 
 ## 原始响应兼容
 
 用户实号日志出现合成响应省略isSuccess。game直接以`e.isSuccess`真假值决定成功/失败分支，原始数据缺省与该真假值分支兼容；任务仅在省略字段同时有宠物增量、完整查询确认数量减少后按失败分支继续，不对空响应或非布尔异常值猜测。省略字段的实际失败抓包仍待收集，测试为模拟省略值回归。
 
 升级后完整角色库存省略已耗尽经验道具15001时按0处理；完整items对象缺失仍属于无法确认库存。等级未变但经验增加属于有效升级进度，耗尽后正常结束。
+
+
+## 2026-10-12 佩戴规则预设核对
+
+重新读取本地 `main.2a00e.js` 的 manifest 请求、CDN 转换和 XXTEA 解密规则。当前 manifest（platform=hortor、version=0.32.0-android）为 game=22c3b、launcher=861b5、TEST_REMOTE_MODULE=dcdf9、config=78fbc；`data/version.json` 与 manifest dataVers 均为 `4921343dff`。分析匹配版本的游戏与 launcher 代码，并读取官方 `data/4921343dff/config.json`、`tower.json`；技能描述实际在 tower 的 `SkillSchemeConf`，不能从精炼属性或宠物系列猜测。
+
+调用依据：`PetConstData.getPetSkillIds` 从 `PetConf.petPassiveSkillGroupId` 匹配 `PetPassiveSkillConf.skillGroupId`，以 `skillSchemaId` 获取技能描述；`PetEquipDialog._onClickUse` 使用背包槽位和唯一编号调用 `PetService.load`。沿既有协议注册确认继续使用 `pet_load` 和 `{slotUId:{slot,uId}}`，装备槽为 -1。只修改选择规则，保留查询完整角色及佩戴后确认、限速与不重试策略。没有使用真实账号验证当前响应。
+
+用户确认属性指宠物自身技能。预设按宠物种类分类，即使当前等级尚未解锁对应技能，也使用该种类的属性优先级。配置保存在 `src/utils/petEquipConfig.js`；未知宠物 ID 跳过，后续新增宠物需重新核对官方配置。
+
+| 品质 | 破甲优先 | 格挡其次 | 其他 |
+| --- | --- | --- | --- |
+| 金 | 赤兔马702 | 黄金章鱼701 | 玄翎鹤703、食梦貘704 |
+| 红 | 炎鬃狮602 | 甲锅龟601 | 疾风隼603、蛇尾枭604 |
+| 橙 | 雷帽绒503 | 拳击狐502 | 武虾501、灰烬兔504 |
+| 紫 | 铁头飞猪403 | 潮团兽401 | 盘牙402、长颈树404 |
+| 蓝 | 无 | 冰灯水母301 | 热狗302、幽影蝶303、烛灵304 |
+| 绿 | 你真蚌201 | 溜溜萝204 | 梨嘴鸭202、响尾蜂203 |
+| 白 | 大眼海胆101 | 小幽灵104 | 芽芽蛙102、泡泡蝇103 |
+
+原任务标识 `batchEquipHighestLevelPet` 保留以兼容已有定时任务，界面和日志改为“佩戴优先宠物”；神灯挑战中独立的最高等级宠物判断不变。游戏更新后按 `docs/game接口定位与更新指南.md` 重读 manifest 和 data 版本，核对上述三张配置表并更新预设与测试。

@@ -723,7 +723,7 @@
             <n-tab-pane name="pet" tab="宠物">
               <n-space>
                 <n-button size="small" @click="batchActivatePetBooks" :disabled="isRunning || selectedTokens.length === 0" title="激活已解锁但未激活的宠物图鉴，并领取未领图鉴奖励">宠物图鉴一键激活领奖</n-button>
-                <n-button size="small" @click="batchEquipHighestLevelPet" :disabled="isRunning || selectedTokens.length === 0" title="按等级选择最高宠物，同等级优先保留当前佩戴">佩戴最高等级宠物</n-button>
+                <n-button size="small" @click="batchEquipHighestLevelPet" :disabled="isRunning || selectedTokens.length === 0" title="优先最高品质，同品质破甲优先、其次格挡，再比较等级">佩戴优先宠物</n-button>
                 <n-button
                   size="small"
                   @click="batchClaimGachaRewards"
@@ -736,7 +736,7 @@
                   size="small"
                   @click="batchUpgradeAllPets"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="对当前佩戴且等级最高的宠物持续一键升级，直到道具不足或无法继续升级"
+                  title="对当前佩戴宠物持续一键升级，直到道具不足或无法继续升级"
                 >
                   升级当前佩戴宠物
                 </n-button>
