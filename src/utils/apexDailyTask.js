@@ -57,8 +57,20 @@ export async function loadApexDailyConfig(send, fetchConfig = globalThis.fetch) 
   return CONFIGS.get(version);
 }
 
+const operationLabel = (command, params) => ({
+  apex_getroleinfo: "查询逐鹿盐山账号状态",
+  apex_getguesslist: `查询赛程${params.scheduleId}对阵列表`,
+  apex_getvotelist: `查询第${params.round}期助威列表`,
+  apex_guess: `预测队伍${params.teamId}`,
+  apex_guessclaim: `领取赛程${params.scheduleId}队伍${params.teamId}竞猜奖励`,
+  apex_vote: `助威队伍${params.teamId}`,
+  apex_taskclaim: `领取大厅任务${params.confId}奖励`,
+  system_getdatabundlever: "读取当前游戏配置版本",
+})[command] || command;
+
 /** 写请求不在限流器中盲目重发，失败后由账号状态确认是否实际生效。 */
-export function createApexDailySender({ send, stopped = () => false, log = () => {}, action = runApexAction, now = Date.now }) {
+export function createApexDailySender({ send, stopped = () => false, log = () => {}, action = runApexAction, now = Date.now, pause = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+  let lastResponseAt = -Infinity;
   let lastWaitLogAt = -Infinity;
   const reportWait = (ms, context = {}) => {
     const rateLimited = context.reason === "rate-limit";
@@ -70,9 +82,29 @@ export function createApexDailySender({ send, stopped = () => false, log = () =>
   };
   return (command, params = {}) => action(
     command === "apex_vote" ? ApexAction.VOTE : command === "apex_guess" ? ApexAction.GUESS : ApexAction.READ,
-    () => {
-      if (stopped()) throw Object.assign(new Error("逐鹿盐山任务已停止"), { interrupted: true });
-      return send(command, params);
+    async () => {
+      const writes = ["apex_vote", "apex_guess", "apex_taskclaim", "apex_guessclaim"];
+      for (let attempt = 0; ; attempt++) {
+        const wait = Math.max(0, lastResponseAt + 1500 - now());
+        if (wait > 0) await pause(wait);
+        if (stopped()) throw Object.assign(new Error("逐鹿盐山任务已停止"), { interrupted: true });
+        let responseEndedAt;
+        try {
+          return await send(command, params);
+        } catch (error) {
+          responseEndedAt = now();
+          if (!writes.includes(command) && /200020/.test(`${error?.code} ${error?.message}`) && attempt === 0) {
+            log(`${operationLabel(command, params)}返回临时错误，等待6秒后重试一次`);
+            lastResponseAt = now();
+            await pause(6000);
+            continue;
+          }
+          if (!error.interrupted) error.message = `${operationLabel(command, params)}失败：${error.message}`;
+          throw error;
+        } finally {
+          lastResponseAt = responseEndedAt ?? now();
+        }
+      }
     },
     { maxRetry: ["apex_vote", "apex_guess", "apex_taskclaim", "apex_guessclaim"].includes(command) ? 0 : 1,
       onWait: reportWait },
@@ -91,7 +123,7 @@ export async function runApexDailyTask(options) {
 
 export const runApexGuessTask = options => runApexDailyTask({ ...options, guessOnly: true });
 
-async function runAccount({ guessOnly = false, accountId, send, config, loadConfig = loadApexDailyConfig, now = Date.now, stopped = () => false, log = () => {}, storage = globalThis.localStorage }) {
+async function runAccount({ guessOnly = false, accountId, send, config, loadConfig = loadApexDailyConfig, now = Date.now, stopped = () => false, log = () => {}, storage = globalThis.localStorage, pause = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   if (!storage?.getItem || !storage?.setItem) throw new Error("无法保存逐鹿盐山执行记录，停止自动操作");
   const key = `apex-daily:v1:${accountId}`;
   const record = JSON.parse(storage.getItem(key) || "{}");
@@ -131,8 +163,16 @@ async function runAccount({ guessOnly = false, accountId, send, config, loadConf
     save();
     let failure;
     try { await send(command, params); } catch (error) { if (error.interrupted) throw error; failure = error; }
+    if (failure && /200020|200400/.test(`${failure.code} ${failure.message}`)) {
+      log(`${operationLabel(command, params)}返回临时错误，等待6秒后确认服务器结果`);
+      await pause(6000);
+    }
     info = await readRole();
-    if (!applied(info)) throw failure || new Error(`${command}结果未确认，已停止，重新执行前会先查询状态`);
+    if (!applied(info)) {
+      const error = new Error(`${operationLabel(command, params)}结果未生效：${failure?.message || "服务器状态未确认"}，已停止，重新执行会先查询状态`, { cause: failure });
+      if (failure?.code !== undefined) error.code = failure.code;
+      throw error;
+    }
     delete record.pending; save();
   };
   const claimTasks = async () => {
@@ -232,7 +272,7 @@ async function runAccount({ guessOnly = false, accountId, send, config, loadConf
     const scheduleId = Number(scheduleKey);
     const claimMap = field(info.guessClaimMap, scheduleKey);
     if (!claimMap || !rules.getScheduleConf(scheduleId) || !Array.isArray(predicted)) continue;
-    const pendingIds = predicted.filter(id => field(claimMap, id) !== true).map(String);
+    const pendingIds = predicted.filter(id => field(claimMap, id) === false).map(String);
     if (!pendingIds.length) continue;
     const groups = []; let last = false;
     for (let page = 0; page < 50 && !last; page++) {
@@ -245,7 +285,7 @@ async function runAccount({ guessOnly = false, accountId, send, config, loadConf
     for (const group of groups) {
       if (!Array.isArray(group)) throw new Error("竞猜奖励对阵格式异常");
       for (const team of group) {
-        if (!pendingIds.includes(String(team?.teamId)) || team.isWin !== true || team.isOut !== false || field(field(info.guessClaimMap, scheduleKey), team.teamId) === true) continue;
+        if (!pendingIds.includes(String(team?.teamId)) || team.isWin !== true || team.isOut !== false || field(field(info.guessClaimMap, scheduleKey), team.teamId) !== false) continue;
         await writeVerified("apex_guessclaim", { scheduleId, teamId: team.teamId }, latest => field(field(latest.guessClaimMap, scheduleKey), team.teamId) === true);
         rewards++;
         log(`竞猜奖励已领取：赛程${scheduleId}，${team.name || team.teamId}`);

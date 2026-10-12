@@ -178,7 +178,7 @@ test("正常短请求间隔静默，较长等待十秒内合并提示", async ()
   const logs = [];
   const waits = [200, 800, 2999, 3200, 5000, 5000];
   const sender = createApexDailySender({
-    send: async () => ({}), log: text => logs.push(text), now: () => time,
+    send: async () => ({}), log: text => logs.push(text), now: () => time, pause: async () => {},
     action: async (type, fn, options) => { options.onWait(waits.shift(), {reason:"interval"}); return fn(); },
   });
   for (let i=0;i<5;i++) await sender("apex_getroleinfo");
@@ -190,7 +190,7 @@ test("正常短请求间隔静默，较长等待十秒内合并提示", async ()
 test("真实服务器限速重试提示不会被正常等待过滤", async () => {
   const logs=[];
   const sender=createApexDailySender({
-    send:async()=>({}),log:text=>logs.push(text),now:()=>0,
+    send:async()=>({}),log:text=>logs.push(text),now:()=>0,pause:async()=>{},
     action:async(type,fn,options)=>{options.onWait(800,{reason:"rate-limit"});return fn();},
   });
   await sender("apex_getroleinfo");await sender("apex_getroleinfo");
@@ -233,4 +233,29 @@ test("批量入口执行统一竞猜领奖流程，结束后释放连接", async
   assert.equal(status.value.a,"completed");assert.equal(closed,1);assert.equal(released,1);
   assert.deepEqual(commands(f,"apex_guess").map(x=>x.params.teamId),["high","tie-first"]);
   assert.equal(commands(f,"apex_guessclaim").length,1);assert.equal(commands(f,"apex_vote").length,0);
+});
+
+
+test("缺失竞猜领取标记不当作可领取，不发送猜测的领奖请求", async () => {
+  const f=fixture({time:stamp("2026-11-20T10:00:00"),groups:[[{teamId:"winner",isWin:true,isOut:false},{teamId:"loser",isWin:false,isOut:true}]]});
+  f.info.guessMap={3:["winner"]};f.info.guessClaimMap={3:{}};
+  await runApexGuessTask(f.options);assert.equal(commands(f,"apex_guessclaim").length,0);
+});
+test("只读200020冷却后有限重试，最终错误包含赛程和查询步骤", async () => {
+  let time=10000,requests=0;const waits=[],logs=[];
+  const sender=createApexDailySender({
+    now:()=>time,pause:async ms=>{waits.push(ms);time+=ms;},log:text=>logs.push(text),
+    action:async(type,fn)=>fn(),send:async()=>{requests++;throw new Error("服务器错误: 200020");},
+  });
+  await assert.rejects(sender("apex_getguesslist",{scheduleId:124}),/查询赛程124对阵列表失败.*200020/);
+  assert.equal(requests,2);assert.ok(waits.includes(6000));assert.equal(logs.length,1);
+});
+test("写操作200020不自动重发，响应完成后查询也至少间隔1.5秒", async () => {
+  let time=10000;const calls=[],waits=[];
+  const sender=createApexDailySender({
+    now:()=>time,pause:async ms=>{waits.push(ms);time+=ms;},action:async(type,fn)=>fn(),
+    send:async cmd=>{calls.push(cmd);if(cmd==="apex_guess")throw new Error("服务器错误: 200020");return {};},
+  });
+  await assert.rejects(sender("apex_guess",{teamId:"target"}),/预测队伍target失败/);
+  await sender("apex_getroleinfo");assert.deepEqual(calls,["apex_guess","apex_getroleinfo"]);assert.deepEqual(waits,[1500]);
 });
