@@ -191,7 +191,7 @@ const serialize = (task) => {
  * @param {Function} task 实际发送函数，返回 Promise；入参为 queuedMs（排队耗时）
  * @param {object} [opt] 选项
  * @param {number} [opt.maxRetry] 200400 最大自动重试次数
- * @param {Function} [opt.onWait] 等待冷却时的回调，参数为等待毫秒数（用于 UI 倒计时 / 日志）
+ * @param {Function} [opt.onWait] 等待冷却时的回调，参数为等待毫秒数与{reason: interval或rate-limit}（用于 UI 倒计时 / 日志）
  * @param {boolean} [opt.immediate] 用户手动触发：跳过排队与冷却等待，直接发送
  * @returns {Promise<*>} task 的返回值
  * @throws {Error} 重试耗尽或遇到非限流错误时抛出原始异常
@@ -210,7 +210,7 @@ export const runApexAction = async (
       if (!immediate) {
         const wait = apexCooldownLeft(key);
         if (wait > 0) {
-          onWait?.(wait);
+          onWait?.(wait, { reason: attempt > 0 ? "rate-limit" : "interval" });
           await sleep(wait);
         }
       }
@@ -236,7 +236,7 @@ export const runApexAction = async (
         // 手动模式下退避一段时间再试，避免连续硬撞服务器冷却窗口
         if (immediate) {
           const backoff = Math.min(est[key] + EST_MARGIN, EST_CEIL);
-          onWait?.(backoff);
+          onWait?.(backoff, { reason: "rate-limit" });
           await sleep(backoff);
         }
       }

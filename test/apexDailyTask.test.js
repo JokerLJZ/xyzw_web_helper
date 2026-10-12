@@ -180,3 +180,27 @@ test("日常今天已检查时跳过，不发送请求或关闭现有连接", as
     assert.equal(runner.roleSnapshots.get("a").gold,100);
   } finally {globalThis.localStorage=original;}
 });
+
+test("正常短请求间隔静默，较长等待十秒内合并提示", async () => {
+  let time = 0;
+  const logs = [];
+  const waits = [200, 800, 2999, 3200, 5000, 5000];
+  const sender = createApexDailySender({
+    send: async () => ({}), log: text => logs.push(text), now: () => time,
+    action: async (type, fn, options) => { options.onWait(waits.shift(), {reason:"interval"}); return fn(); },
+  });
+  for (let i=0;i<5;i++) await sender("apex_getroleinfo");
+  assert.equal(logs.length,1);
+  assert.match(logs[0],/等待请求间隔/);
+  time=10000;await sender("apex_getroleinfo");assert.equal(logs.length,2);
+});
+
+test("真实服务器限速重试提示不会被正常等待过滤", async () => {
+  const logs=[];
+  const sender=createApexDailySender({
+    send:async()=>({}),log:text=>logs.push(text),now:()=>0,
+    action:async(type,fn,options)=>{options.onWait(800,{reason:"rate-limit"});return fn();},
+  });
+  await sender("apex_getroleinfo");await sender("apex_getroleinfo");
+  assert.equal(logs.length,2);assert.ok(logs.every(text=>text.includes("服务器限速")));
+});

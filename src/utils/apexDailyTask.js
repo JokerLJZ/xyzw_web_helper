@@ -58,7 +58,16 @@ export async function loadApexDailyConfig(send, fetchConfig = globalThis.fetch) 
 }
 
 /** 写请求不在限流器中盲目重发，失败后由账号状态确认是否实际生效。 */
-export function createApexDailySender({ send, stopped = () => false, log = () => {}, action = runApexAction }) {
+export function createApexDailySender({ send, stopped = () => false, log = () => {}, action = runApexAction, now = Date.now }) {
+  let lastWaitLogAt = -Infinity;
+  const reportWait = (ms, context = {}) => {
+    const rateLimited = context.reason === "rate-limit";
+    if (!rateLimited && (ms < 3000 || now() - lastWaitLogAt < 10000)) return;
+    lastWaitLogAt = now();
+    log(rateLimited
+      ? `逐鹿盐山触发服务器限速，等待${Math.ceil(ms / 1000)}秒后重试`
+      : `逐鹿盐山正在等待请求间隔，约${Math.ceil(ms / 1000)}秒`);
+  };
   return (command, params = {}) => action(
     command === "apex_vote" ? ApexAction.VOTE : command === "apex_guess" ? ApexAction.GUESS : ApexAction.READ,
     () => {
@@ -66,7 +75,7 @@ export function createApexDailySender({ send, stopped = () => false, log = () =>
       return send(command, params);
     },
     { maxRetry: ["apex_vote", "apex_guess", "apex_taskclaim"].includes(command) ? 0 : 1,
-      onWait: ms => log(`逐鹿盐山请求冷却，等待${Math.ceil(ms / 1000)}秒`) },
+      onWait: reportWait },
   );
 }
 
