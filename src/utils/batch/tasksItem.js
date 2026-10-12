@@ -1,3 +1,4 @@
+import { createFormationRequestGate } from "./formationRequestGate.js";
 import { extractRolePatch, mergeRoleSnapshot } from "../roleSnapshot.js";
 import { createPetTasks } from "./tasksPet.js";
 import { createWeeklyRewardMap } from "@/utils/weeklyReward.js";
@@ -1692,13 +1693,39 @@ export function createTasksItem(deps) {
   };
 
   const isFormationUpgradeTransientError = (error) =>
-    /20002|200020|200050|200400|操作太快|操作过快|未知错误|重启游戏/.test(
+    /20002|200020|200050|200400|操作太快|操作过快|未知错误|重启游戏|超时|timeout/i.test(
       getErrorMessage(error),
     );
 
   const getNextSmallerUpgradeMaximum = (count) => {
     const currentIndex = LEVEL_UPGRADE_STEPS.indexOf(Number(count));
     return LEVEL_UPGRADE_STEPS[currentIndex + 1] || 1;
+  };
+
+  const gateFormationRequest = createFormationRequestGate({
+    isRateLimitError: isHeroStarRateLimitError,
+  });
+  const queryFormationRole = async (tokenId, tokenName) => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await gateFormationRequest(tokenId, () =>
+          // 禁用 store 内部一秒重试，由此处统一处理限速。
+          tokenStore.sendGetRoleInfo(tokenId, {}, 2),
+        ).then((state) => {
+          if (!state?.role?.heroes) throw new Error("未返回完整武将状态");
+          return state;
+        });
+      } catch (error) {
+        if (!isHeroStarRateLimitError(error) || attempt >= 3) {
+          throw new Error(`状态查询失败：${getErrorMessage(error)}`, { cause: error });
+        }
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 状态查询触发限速，冷却6秒后重试（${attempt + 1}/3）`,
+          type: "warning",
+        });
+      }
+    }
   };
 
   const runFormationUpgradeCommand = async ({
@@ -1712,13 +1739,15 @@ export function createTasksItem(deps) {
   }) =>
     runUpgradeCommandWithReconciliation({
       execute: (context) =>
-        tokenStore.sendMessageWithPromise(
-          tokenId,
-          command,
-          getParams ? getParams(context) : params,
-          HELPER_COMMAND_TIMEOUT_MS,
+        gateFormationRequest(tokenId, () =>
+          tokenStore.sendMessageWithPromise(
+            tokenId,
+            command,
+            getParams ? getParams(context) : params,
+            HELPER_COMMAND_TIMEOUT_MS,
+          ),
         ),
-      queryState: () => tokenStore.sendGetRoleInfo(tokenId),
+      queryState: () => queryFormationRole(tokenId, tokenName),
       hasApplied,
       isTransientError: isFormationUpgradeTransientError,
       maxRetries: 1,
@@ -2394,7 +2423,7 @@ export function createTasksItem(deps) {
   ) => {
     const heroName = HERO_DICT[heroId]?.name || `英雄ID:${heroId}`;
     let roleInfo =
-      initialRoleInfo || (await tokenStore.sendGetRoleInfo(tokenId));
+      initialRoleInfo || (await queryFormationRole(tokenId, tokenName));
     let hero = getHeroFromRoleInfo(roleInfo, heroId);
 
     if (!hero) {
@@ -2582,7 +2611,7 @@ export function createTasksItem(deps) {
     }
 
     if (performedActions > 0 && !shouldStop.value) {
-      const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+      const latestRoleInfo = await queryFormationRole(tokenId, tokenName);
       roleInfo = latestRoleInfo;
       const latestHero = getHeroFromRoleInfo(latestRoleInfo, heroId);
       if (latestHero) {
@@ -2615,8 +2644,8 @@ export function createTasksItem(deps) {
     targetLevel,
     initialRoleInfo = null,
   ) => {
-    const roleInfo =
-      initialRoleInfo || (await tokenStore.sendGetRoleInfo(tokenId));
+    let roleInfo =
+      initialRoleInfo || (await queryFormationRole(tokenId, tokenName));
     let lord = roleInfo?.role?.lord;
     if (!lord) throw new Error("未获取到主公信息");
 
@@ -2743,7 +2772,8 @@ export function createTasksItem(deps) {
     }
 
     if (performedActions > 0 && !shouldStop.value) {
-      const latestRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+      const latestRoleInfo = await queryFormationRole(tokenId, tokenName);
+      roleInfo = latestRoleInfo;
       lord = latestRoleInfo?.role?.lord;
       currentLevel = Number(lord?.level) || currentLevel;
       currentOrder = Number(lord?.order) || currentOrder;
@@ -2761,16 +2791,18 @@ export function createTasksItem(deps) {
       currentLevel,
       currentOrder,
       stopReason,
+      roleInfo,
     };
   };
 
-  const upgradeLordAndLuBu = async (tokenId, tokenName) => {
+  const upgradeLordAndLuBu = async (tokenId, tokenName, initialRoleInfo = null) => {
     const LU_BU_ID = 107;
     const MAX_BALANCE_ROUNDS = 100;
+    let roleInfo = initialRoleInfo || await queryFormationRole(tokenId, tokenName);
+    let stopReason = "";
 
     for (let round = 0; round < MAX_BALANCE_ROUNDS; round += 1) {
       if (shouldStop.value) break;
-      const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
       const lord = roleInfo?.role?.lord;
       const luBu = getHeroFromRoleInfo(roleInfo, LU_BU_ID);
       if (!lord || !luBu) throw new Error("未获取到主公或吕布信息");
@@ -2791,6 +2823,7 @@ export function createTasksItem(deps) {
           const orderCost = getHeroOrderCost(luBuOrder);
           const stones = getItemQuantity(roleInfo, 1003);
           if (!orderCost || stones < orderCost.stones) {
+            stopReason = "吕布进阶石不足";
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${tokenName} 吕布进阶石不足：当前${stones}个，需要${orderCost?.stones ?? "未知"}个，停止主公和吕布升级`,
@@ -2814,6 +2847,7 @@ export function createTasksItem(deps) {
                 getHeroFromRoleInfo(latestRoleInfo, LU_BU_ID)?.order,
               ) > luBuOrder,
           });
+          roleInfo = await queryFormationRole(tokenId, tokenName);
           continue;
         }
         const upgradeResult = await upgradeSingleHero(
@@ -2823,7 +2857,11 @@ export function createTasksItem(deps) {
           lordLevel,
           roleInfo,
         );
-        if (upgradeResult.stopReason) break;
+        roleInfo = upgradeResult.roleInfo;
+        if (upgradeResult.stopReason) {
+          stopReason = upgradeResult.stopReason;
+          break;
+        }
         continue;
       }
 
@@ -2844,49 +2882,20 @@ export function createTasksItem(deps) {
         nextLordLevel,
         roleInfo,
       );
-      if (upgradeResult.stopReason) break;
+      roleInfo = upgradeResult.roleInfo;
+      if (upgradeResult.stopReason) {
+        stopReason = upgradeResult.stopReason;
+        break;
+      }
     }
+    return { roleInfo, stopReason };
   };
 
   const sendFormationPreparationCommand = async (
-    tokenId,
-    tokenName,
-    command,
-    params,
-    operationName,
-  ) => {
-    for (
-      let attempt = 0;
-      attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
-      attempt += 1
-    ) {
-      try {
-        await waitForHeroStarInterval(tokenId);
-        return await tokenStore.sendMessageWithPromise(
-          tokenId,
-          command,
-          params,
-          HELPER_COMMAND_TIMEOUT_MS,
-        );
-      } catch (error) {
-        if (
-          !isHeroStarRateLimitError(error) ||
-          attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
-        ) {
-          throw error;
-        }
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${tokenName} ${operationName}触发200400，等待6秒后进行第${attempt + 1}次重试`,
-          type: "warning",
-        });
-        await new Promise((resolve) =>
-          setTimeout(resolve, HERO_STAR_RATE_LIMIT_DELAY_MS),
-        );
-      }
-    }
-    return null;
-  };
+    tokenId, tokenName, command, params, operationName, hasApplied,
+  ) => runFormationUpgradeCommand({
+    tokenId, tokenName, command, params, operationName, hasApplied,
+  });
 
   /** 培养阵容前先确认武将；碎片不足时仅在万能碎片足够补齐时转换并合成。 */
   const ensureFormationHeroOwned = async (
@@ -2896,7 +2905,7 @@ export function createTasksItem(deps) {
     initialRoleInfo = null,
   ) => {
     let roleInfo =
-      initialRoleInfo || (await tokenStore.sendGetRoleInfo(tokenId));
+      initialRoleInfo || (await queryFormationRole(tokenId, tokenName));
     if (getHeroFromRoleInfo(roleInfo, heroId)) {
       return { owned: true, roleInfo };
     }
@@ -2933,6 +2942,7 @@ export function createTasksItem(deps) {
           index: universal.index,
         },
         `转换${heroName}碎片`,
+        (state) => getItemQuantity(state, heroId) >= fragmentQuantity + missingQuantity,
       );
       addLog({
         time: new Date().toLocaleTimeString(),
@@ -2947,15 +2957,12 @@ export function createTasksItem(deps) {
       "hero_synthetic",
       { itemId: heroId },
       `合成${heroName}`,
+      (state) => Boolean(getHeroFromRoleInfo(state, heroId)),
     );
     await new Promise((resolve) =>
       setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
     );
-    roleInfo = await getRoleInfoWithStarRateLimitRetry(
-      tokenId,
-      tokenName,
-      `确认${heroName}合成结果`,
-    );
+    roleInfo = await queryFormationRole(tokenId, tokenName);
     const owned = Boolean(getHeroFromRoleInfo(roleInfo, heroId));
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -3149,36 +3156,23 @@ export function createTasksItem(deps) {
       );
   };
 
-  const runFormationCommand = async (
-    tokenId,
-    tokenName,
-    command,
-    params,
-    actionName,
-  ) => {
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        return await tokenStore.sendMessageWithPromise(
-          tokenId,
-          command,
-          params,
-          HELPER_COMMAND_TIMEOUT_MS,
-        );
-      } catch (error) {
-        const errorMessage = getErrorMessage(error);
-        const transientError =
-          /200020|200050|200400|操作太快|未知错误|重启游戏/.test(
-            errorMessage,
-          );
-        if (!transientError || attempt >= 3) throw error;
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${tokenName} ${actionName}触发临时错误，等待6秒后进行第${attempt + 1}次重试：${errorMessage}`,
-          type: "warning",
-        });
-        await new Promise((resolve) => setTimeout(resolve, 6000));
+  const runFormationCommand = async (tokenId, tokenName, command, params, actionName) => {
+    if (command === "role_getroleinfo") return queryFormationRole(tokenId, tokenName);
+    const hasApplied = (state) => {
+      const heroes = getRoleTeamHeroes(state);
+      if (command === "hero_gobackbattle") return !heroes.some((hero) => hero.slot === params.slot);
+      if (command === "hero_gointobattle") return heroes.some((hero) => hero.heroId === params.heroId && hero.slot === params.slot);
+      if (command === "hero_exchange") return heroes.some((hero) => hero.heroId === params.targetHeroId) && !heroes.some((hero) => hero.heroId === params.heroId);
+      if (command === "hero_rebirth") {
+        const hero = getHeroFromRoleInfo(state, params.heroId);
+        return hero && Number(hero.level) === 1 && Number(hero.order) === 0;
       }
-    }
+      return false;
+    };
+    const result = await runFormationUpgradeCommand({
+      tokenId, tokenName, command, params, operationName: actionName, hasApplied,
+    });
+    return result.reconciledState || result.result;
   };
 
   const applyTargetFormation = async ({
@@ -3187,8 +3181,9 @@ export function createTasksItem(deps) {
     targetHeroes,
     formationName,
     recycleSlots = new Set(),
+    initialRoleInfo = null,
   }) => {
-    const currentRoleInfo = await runFormationCommand(
+    const currentRoleInfo = initialRoleInfo || await runFormationCommand(
       tokenId,
       tokenName,
       "role_getroleinfo",
@@ -3313,8 +3308,8 @@ export function createTasksItem(deps) {
     });
   };
 
-  const adjustMainLevelFormation = async (tokenId, tokenName) => {
-    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+  const adjustMainLevelFormation = async (tokenId, tokenName, initialRoleInfo = null) => {
+    const roleInfo = initialRoleInfo || await queryFormationRole(tokenId, tokenName);
     const ownedHeroIds = new Set(
       Object.values(roleInfo?.role?.heroes || {}).map((hero) =>
         Number(hero?.heroId ?? hero?.id),
@@ -3332,6 +3327,7 @@ export function createTasksItem(deps) {
       tokenName,
       targetHeroes,
       formationName: "推图默认阵容",
+      initialRoleInfo: roleInfo,
     });
   };
 
@@ -3339,6 +3335,7 @@ export function createTasksItem(deps) {
     tokenId,
     tokenName,
     ownedHeroIds,
+    initialRoleInfo = null,
   ) => {
     const supportHeroId = ownedHeroIds.has(223) ? 223 : 204;
     const targetHeroes = [
@@ -3351,6 +3348,7 @@ export function createTasksItem(deps) {
       tokenName,
       targetHeroes,
       formationName: "前期推图阵容",
+      initialRoleInfo,
       recycleSlots: new Set([1, 4]),
     });
   };
@@ -3378,7 +3376,8 @@ export function createTasksItem(deps) {
           type: "info",
         });
         await ensureConnection(tokenId);
-        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let roleInfo = await queryFormationRole(tokenId, tokenName);
+        let cultivationFailed = false;
         const luBuResult = await ensureFormationHeroOwned(
           tokenId,
           tokenName,
@@ -3431,13 +3430,17 @@ export function createTasksItem(deps) {
           if (shouldStop.value) break;
           if (!heroId || !ownedHeroIds.has(heroId)) continue;
           try {
-            await upgradeSingleHero(tokenId, tokenName, heroId, 750);
+            const result = await upgradeSingleHero(tokenId, tokenName, heroId, 750, roleInfo);
+            roleInfo = result.roleInfo;
+            if (!result.reachedTarget) cultivationFailed = true;
           } catch (error) {
+            cultivationFailed = true;
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${tokenName} ${HERO_DICT[heroId].name}升级至750级停止：${error.message}`,
               type: "warning",
             });
+            roleInfo = await queryFormationRole(tokenId, tokenName);
             // 培养失败后服务器可能仍处于短暂忙碌状态，冷却后再调整阵容。
             await new Promise((resolve) => setTimeout(resolve, 6000));
           }
@@ -3445,13 +3448,17 @@ export function createTasksItem(deps) {
 
         if (!shouldStop.value) {
           try {
-            await upgradeLordAndLuBu(tokenId, tokenName);
+            const result = await upgradeLordAndLuBu(tokenId, tokenName, roleInfo);
+            roleInfo = result.roleInfo;
+            if (result.stopReason) cultivationFailed = true;
           } catch (error) {
+            cultivationFailed = true;
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${tokenName} 主公和吕布升级停止：${error.message || "资源不足或未知错误"}`,
               type: "warning",
             });
+            roleInfo = await queryFormationRole(tokenId, tokenName);
             // 进阶材料不足等失败后先等待服务器状态稳定，再切换阵容。
             await new Promise((resolve) => setTimeout(resolve, 6000));
           }
@@ -3466,9 +3473,15 @@ export function createTasksItem(deps) {
             tokenId,
             tokenName,
             ownedHeroIds,
+            roleInfo,
           );
         }
-        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
+        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : cultivationFailed ? "failed" : "completed";
+        if (cultivationFailed && !shouldStop.value) addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 推图准备部分完成：阵容已调整，部分培养未完成，请查看前面的失败或资源不足日志`,
+          type: "warning",
+        });
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
@@ -3485,7 +3498,7 @@ export function createTasksItem(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("小号前期推图阵容调整完成");
+    message.info("小号前期推图阵容任务结束，请查看各账号结果");
   };
 
   /** 小号推图准备：按拥有情况升级武将并设置默认推图阵容。 */
@@ -3521,7 +3534,8 @@ export function createTasksItem(deps) {
         });
 
         await ensureConnection(tokenId);
-        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        let roleInfo = await queryFormationRole(tokenId, tokenName);
+        let cultivationFailed = false;
 
         for (const group of upgradeGroups) {
           for (const heroId of group.heroIds) {
@@ -3536,18 +3550,23 @@ export function createTasksItem(deps) {
             if (!ownershipResult.owned) continue;
 
             try {
-              await upgradeSingleHero(
+              const result = await upgradeSingleHero(
                 tokenId,
                 tokenName,
                 heroId,
                 group.targetLevel,
+                roleInfo,
               );
+              roleInfo = result.roleInfo;
+              if (!result.reachedTarget) cultivationFailed = true;
             } catch (error) {
+              cultivationFailed = true;
               addLog({
                 time: new Date().toLocaleTimeString(),
                 message: `${tokenName} ${HERO_DICT[heroId].name}升级失败: ${error.message}`,
                 type: "warning",
               });
+              roleInfo = await queryFormationRole(tokenId, tokenName);
             }
           }
         }
@@ -3561,13 +3580,17 @@ export function createTasksItem(deps) {
         roleInfo = luBuResult.roleInfo;
         if (!shouldStop.value && luBuResult.owned) {
           try {
-            await upgradeLordAndLuBu(tokenId, tokenName);
+            const result = await upgradeLordAndLuBu(tokenId, tokenName, roleInfo);
+            roleInfo = result.roleInfo;
+            if (result.stopReason) cultivationFailed = true;
           } catch (error) {
+            cultivationFailed = true;
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${tokenName} 主公和吕布升级停止：${error.message || "资源不足或未知错误"}`,
               type: "warning",
             });
+            roleInfo = await queryFormationRole(tokenId, tokenName);
           }
         }
 
@@ -3576,9 +3599,14 @@ export function createTasksItem(deps) {
           await new Promise((resolve) =>
             setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
           );
-          await adjustMainLevelFormation(tokenId, tokenName);
+          await adjustMainLevelFormation(tokenId, tokenName, roleInfo);
         }
-        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
+        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : cultivationFailed ? "failed" : "completed";
+        if (cultivationFailed && !shouldStop.value) addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 推图准备部分完成：阵容已调整，部分培养未完成，请查看前面的失败或资源不足日志`,
+          type: "warning",
+        });
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
@@ -3595,7 +3623,7 @@ export function createTasksItem(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("小号推图默认阵容调整完成");
+    message.info("小号推图默认阵容任务结束，请查看各账号结果");
   };
 
   /**
