@@ -364,6 +364,8 @@ export class DailyTaskRunner {
       options.sleep ||
       ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.tokenStore = tokenStore;
+    this.now = options.now || Date.now;
+    this.lastResponseAt = new Map();
     this.roleSnapshots = new Map();
     this.delaySettings = delaySettings || {
       commandDelay: 500,
@@ -387,11 +389,25 @@ export class DailyTaskRunner {
    * @param {Function} request Transport call without automatic retries.
    * @returns {Promise<*>} Server response.
    */
-  async sendRequest(tokenId, request) {
+  async sendRequest(tokenId, request, command = "") {
     if (!this.restoringFormation) this.throwIfInterrupted(tokenId);
-    const response = await request();
-    if (!this.restoringFormation) this.throwIfInterrupted(tokenId);
-    return response;
+    if (this.rewardPhase) {
+      const interval = Math.max(1000, Number(this.delaySettings.commandDelay) || 0);
+      const remaining = interval - (this.now() - (this.lastResponseAt.get(tokenId) ?? -Infinity));
+      if (remaining > 0) await this.sleep(remaining);
+      this.throwIfInterrupted(tokenId);
+    }
+    if (this.rewardPhase && command) {
+      const previous = this.lastResponseAt.get(tokenId);
+      this.log(`领奖阶段请求 ${command}，距上次响应 ${previous === undefined ? "首次请求" : `${Math.max(0, this.now() - previous)}ms`}`);
+    }
+    try {
+      const response = await request();
+      if (!this.restoringFormation) this.throwIfInterrupted(tokenId);
+      return response;
+    } finally {
+      this.lastResponseAt.set(tokenId, this.now());
+    }
   }
 
   async executeGameCommand(
@@ -406,6 +422,7 @@ export class DailyTaskRunner {
       this.roleStateDirty = true;
       const result = await this.sendRequest(tokenId, () =>
         this.tokenStore.sendMessageWithPromise(tokenId, cmd, params, timeout),
+        cmd,
       );
       const rolePatch = extractRolePatch(result);
       const snapshot = this.roleSnapshots.get(tokenId);
@@ -419,6 +436,8 @@ export class DailyTaskRunner {
       return result;
     } catch (error) {
       if (this.isRunActive && !this.restoringFormation &&
+        !(this.rewardRecoveryActive && !error.interrupted &&
+          (getServerErrorCode(error) === 200400 || /请求超时/.test(error.message || ""))) &&
         (error.interrupted || !getServerErrorCode(error) ||
           [200400, 12400000].includes(getServerErrorCode(error)))) {
         this.transportFailure = error;
@@ -429,6 +448,46 @@ export class DailyTaskRunner {
         this.log(`[${tokenName}] ${description} - 失败: ${error.message}`, "error");
       }
       throw error;
+    }
+  }
+
+  /** Recover only reward rate limits after checking fresh server state. */
+  async executeRewardClaim(tokenId, cmd, params, description, isClaimable) {
+    this.rewardRecoveryActive = true;
+    try {
+      try {
+        return await this.executeGameCommand(tokenId, cmd, params, description);
+      } catch (error) {
+        const limited = getServerErrorCode(error) === 200400;
+        if (error.interrupted || (!limited && !/请求超时/.test(error.message || ""))) throw error;
+        this.log(`${description}：${limited ? "操作太快，冷却1.5秒后核对" : "响应超时，核对是否已领取"}`, "warning");
+        await this.sleep(1500);
+        await this.refreshServerRole(tokenId);
+        const state = isClaimable();
+        if (state === "claimed") {
+          this.log(`${description}：服务器确认已领取，不重复发送`, "success");
+          return;
+        }
+        // An uncertain write is never replayed merely because a read says unclaimed.
+        if (!limited || state !== "claimable") throw error;
+        this.log(`${description}：服务器确认仍可领取，重试一次`, "info");
+        this.rewardRecoveryActive = false;
+        return await this.executeGameCommand(tokenId, cmd, params, description);
+      }
+    } catch (error) {
+      if (this.roleData?.dailyTask) {
+        for (const weekly of [false, true]) {
+          try {
+            const ids = getClaimablePointRewards(this.roleData.dailyTask,
+              weekly ? this.taskConfig.weeklyRewards : this.taskConfig.dailyRewards, weekly);
+            this.log(`${weekly ? "周" : "日"}活跃奖励待核对档位（最近快照）：${ids.join("、") || "无"}`, "warning");
+          } catch { /* Missing server state must not hide the original failure. */ }
+        }
+      }
+      this.log(`${description} [${cmd}, ${JSON.stringify(params)}]：未确认领取完成，停止自动补领（${error.message}）；重新执行将读取服务器状态`, "warning");
+      throw error;
+    } finally {
+      this.rewardRecoveryActive = false;
     }
   }
 
@@ -1310,6 +1369,7 @@ export class DailyTaskRunner {
       this.throwIfInterrupted(tokenId);
       const response = await this.sendRequest(tokenId, () =>
         this.tokenStore.sendGetRoleInfo(tokenId, {}, 2),
+        "role_getroleinfo",
       );
       await this.sleep(this.delaySettings.commandDelay);
       this.throwIfInterrupted(tokenId);
@@ -1317,10 +1377,11 @@ export class DailyTaskRunner {
       const states = getDailyTaskStates(role, this.taskConfig);
       if (
         this.taskDay !== undefined &&
-        role.dailyTask.dailyTime !== this.taskDay
+        (role.dailyTask.dailyTime !== this.taskDay ||
+          (this.taskWeek !== undefined && role.dailyTask.weekTime !== this.taskWeek))
       ) {
         const error = new Error(
-          "服务器每日任务已重置，请重新开始获取当日任务列表",
+          "服务器每日任务已重置或每周任务已重置，请重新开始获取任务列表",
         );
         error.interrupted = true;
         throw error;
@@ -1388,6 +1449,8 @@ export class DailyTaskRunner {
     } finally {
       activeTokenRuns.delete(tokenId);
       this.isRunActive = false;
+      this.rewardPhase = false;
+      this.rewardRecoveryActive = false;
       this.transportFailure = null;
     }
   }
@@ -1395,7 +1458,9 @@ export class DailyTaskRunner {
   async runTasks(tokenId, callbacks = {}, customSettings = null) {
     this.callbacks = callbacks;
     this.taskDay = undefined;
+    this.taskWeek = undefined;
     this.activeCondition = undefined;
+    this.rewardPhase = false;
     this.originalFormation = undefined;
     this.formationChanged = false;
     this.roleStateDirty = true;
@@ -1416,6 +1481,7 @@ export class DailyTaskRunner {
     );
     const roleData = await this.refreshServerRole(tokenId);
     this.taskDay = roleData.dailyTask.dailyTime;
+    this.taskWeek = roleData.dailyTask.weekTime;
 
     this.log("开始执行每日任务补差");
 
@@ -2004,12 +2070,12 @@ export class DailyTaskRunner {
         name: `领取任务积分${definition.id}`,
         claimCondition: definition.completeCondition,
         execute: () =>
-          this.executeGameCommand(
+          this.executeRewardClaim(
             tokenId,
             "task_claimdailypoint",
             { taskId: definition.id },
             `领取任务积分${definition.id}`,
-            5000,
+            () => this.getTaskState(definition.completeCondition).status,
           ),
       });
     }
@@ -2042,11 +2108,19 @@ export class DailyTaskRunner {
           );
           for (const rewardId of ids) {
             this.throwIfInterrupted(tokenId);
-            await this.executeGameCommand(
+            if (this.roleData.dailyTask[weekly ? "weekReward" : "dailyReward"]?.[rewardId] === true) continue;
+            await this.executeRewardClaim(
               tokenId,
               weekly ? "task_claimweekreward" : "task_claimdailyreward",
               { rewardId },
               `领取${weekly ? "周常" : "日常"}积分奖励${rewardId}`,
+              () => {
+                const daily = this.roleData.dailyTask;
+                const claimed = daily[weekly ? "weekReward" : "dailyReward"];
+                if (claimed?.[rewardId] === true) return "claimed";
+                return getClaimablePointRewards(daily, definitions, weekly).includes(rewardId)
+                  ? "claimable" : "unavailable";
+              },
             );
           }
         },
@@ -2077,6 +2151,7 @@ export class DailyTaskRunner {
         this.activeCondition = task.condition ?? task.claimCondition;
         try {
           if (task.claimCondition !== undefined && !claimsStarted) {
+            this.rewardPhase = true;
             if (this.roleStateDirty) await this.refreshServerRole(tokenId);
             claimsStarted = true;
           }
@@ -2180,6 +2255,14 @@ export class DailyTaskRunner {
         ).length,
       0,
     );
+    for (const weekly of [false, true]) {
+      const remaining = getClaimablePointRewards(
+        this.roleData.dailyTask,
+        weekly ? this.taskConfig.weeklyRewards : this.taskConfig.dailyRewards,
+        weekly,
+      );
+      this.log(`${weekly ? "周" : "日"}活跃奖励服务器核对：${remaining.length ? `仍待领取 ${remaining.join("、")}` : "当前可领取档位均已领取"}`, remaining.length ? "warning" : "success");
+    }
     summary.incomplete =
       summary.remainingTasks +
       summary.unclaimedTasks +

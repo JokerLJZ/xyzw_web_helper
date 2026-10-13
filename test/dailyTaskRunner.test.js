@@ -747,3 +747,136 @@ test("竞技场日常只缺1次时仍固定打3场，完成后重跑不再触发
   await f.runner().run("account-a",{}, {...settings,arenaEnable:true});
   assert.equal(f.calls.filter(x=>x.cmd==="fight_startareaarena").length,3);
 });
+
+function pacedRewardFixture(progress = {}) {
+  const f = fixture(progress);
+  f.role.dailyTask.dailyPoint = 40;
+  f.role.dailyTask.weekPoint = 200;
+  let time = 0;
+  const waits = [];
+  const timestamps = [];
+  const send = f.store.sendMessageWithPromise;
+  const read = f.store.sendGetRoleInfo;
+  f.store.sendMessageWithPromise = async (...args) => {
+    timestamps.push({ cmd: args[1], time });
+    return send(...args);
+  };
+  f.store.sendGetRoleInfo = async (...args) => {
+    timestamps.push({ cmd: "role_getroleinfo", time });
+    return read(...args);
+  };
+  const runner = new DailyTaskRunner(f.store, { commandDelay: 0, taskDelay: 0 }, {
+    loadConfig: async () => config,
+    now: () => time,
+    sleep: async ms => { waits.push(ms); time += ms; },
+  });
+  return { ...f, runner, waits, timestamps };
+}
+
+test("领奖低延迟仍保证1秒间隔，日周共用查询且最终确认", async () => {
+  const f = pacedRewardFixture({ 6: 3 });
+  const result = await f.runner.run("account-a", {}, settings);
+  const firstClaim = f.timestamps.findIndex(c => c.cmd === "task_claimdailypoint");
+  for (let i = firstClaim; i < f.timestamps.length; i++)
+    assert.ok(f.timestamps[i].time - f.timestamps[i - 1].time >= 1000);
+  assert.equal(f.calls.filter(c => c.cmd === "role_getroleinfo").length, 4);
+  assert.equal(result.remainingRewards, 0);
+});
+
+test("领奖遵守用户设置的更长延迟", async () => {
+  const f = pacedRewardFixture();
+  f.runner.delaySettings.commandDelay = 2200;
+  await f.runner.run("account-a", {}, settings);
+  const rewards = f.timestamps.filter(c => /task_claim.*reward/.test(c.cmd));
+  for (let i = 1; i < rewards.length; i++)
+    assert.ok(rewards[i].time - rewards[i - 1].time >= 2200);
+});
+
+for (const cmd of ["task_claimdailypoint", "task_claimdailyreward", "task_claimweekreward"]) {
+  test(`${cmd}首次限流冷却1.5秒，查询后仅重试一次`, async () => {
+    const f = pacedRewardFixture({ 6: 3 });
+    const send = f.store.sendMessageWithPromise;
+    let attempts = 0;
+    f.store.sendMessageWithPromise = async (...args) => {
+      if (args[1] === cmd && ++attempts === 1)
+        throw Object.assign(new Error("服务器错误: 200400 - 操作太快"), { code: 200400 });
+      return send(...args);
+    };
+    const result = await f.runner.run("account-a", {}, settings);
+    assert.equal(attempts, cmd === "task_claimdailypoint" ? 2 : 3);
+    assert.ok(f.waits.includes(1500));
+    assert.equal(f.calls.filter(c => c.cmd === "role_getroleinfo").length, 5);
+    assert.equal(result.incomplete, 0);
+  });
+}
+
+for (const message of ["服务器错误: 200400 - 操作太快", "请求超时: task_claimdailyreward"]) {
+  test(`${message}但查询确认已领，不重复发送`, async () => {
+    const f = pacedRewardFixture();
+    const send = f.store.sendMessageWithPromise;
+    let firstAttempts = 0;
+    f.store.sendMessageWithPromise = async (...args) => {
+      if (args[1] === "task_claimdailyreward" && args[2].rewardId === 1) {
+        firstAttempts++;
+        await send(...args);
+        throw new Error(message);
+      }
+      return send(...args);
+    };
+    const result = await f.runner.run("account-a", {}, settings);
+    assert.equal(firstAttempts, 1);
+    assert.equal(result.remainingRewards, 0);
+  });
+}
+
+test("再次限流停止本轮，后续日周档位不发送", async () => {
+  const f = pacedRewardFixture();
+  const send = f.store.sendMessageWithPromise;
+  let attempts = 0;
+  f.store.sendMessageWithPromise = async (...args) => {
+    if (args[1] === "task_claimdailyreward") {
+      attempts++;
+      throw new Error("服务器错误: 200400 - 操作太快");
+    }
+    return send(...args);
+  };
+  await assert.rejects(f.runner.run("account-a", {}, settings), /200400/);
+  assert.equal(attempts, 2);
+  assert.equal(f.calls.filter(c => c.cmd === "task_claimweekreward").length, 0);
+});
+
+test("领奖超时且查询仍未领取，不盲目重试", async () => {
+  const f = pacedRewardFixture();
+  const send = f.store.sendMessageWithPromise;
+  let attempts = 0;
+  f.store.sendMessageWithPromise = async (...args) => {
+    if (args[1] === "task_claimdailyreward") {
+      attempts++;
+      throw new Error("请求超时: task_claimdailyreward");
+    }
+    return send(...args);
+  };
+  await assert.rejects(f.runner.run("account-a", {}, settings), /请求超时/);
+  assert.equal(attempts, 1);
+});
+
+for (const changed of ["disconnect", "dailyTime", "weekTime", "readFailure"]) {
+  test(`领奖限流后${changed}阻止重发`, async () => {
+    const f = pacedRewardFixture();
+    f.role.dailyTask.weekTime = 1699833600;
+    const send = f.store.sendMessageWithPromise;
+    let attempts = 0;
+    f.store.sendMessageWithPromise = async (...args) => {
+      if (args[1] === "task_claimdailyreward") {
+        attempts++;
+        if (changed === "disconnect") f.disconnect();
+        else if (changed === "readFailure") f.failReads();
+        else f.role.dailyTask[changed]++;
+        throw new Error("服务器错误: 200400 - 操作太快");
+      }
+      return send(...args);
+    };
+    await assert.rejects(f.runner.run("account-a", {}, settings));
+    assert.equal(attempts, 1);
+  });
+}
