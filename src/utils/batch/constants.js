@@ -101,6 +101,7 @@ export const availableTasks = [
   { label: "自动挑战群雄灯神", value: "batchChallengeGroupGenie" },
   { label: "自动挑战魏蜀吴灯神", value: "batchChallengeThreeKingdomsGenie" },
   { label: "主线关卡信息获取", value: "batchPushMainLevelInfo" },
+  { label: "查询咸主并推送", value: "batchCheckSaltMasters" },
   { label: "小号前期推图阵容", value: "batchAdjustEarlyMainLevelFormation" },
   { label: "小号推图默认阵容调整", value: "batchAdjustMainLevelFormation" },
   {

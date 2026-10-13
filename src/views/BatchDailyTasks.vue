@@ -869,6 +869,14 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchCheckSaltMasters"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="查询所选账号是否有咸主，有则通过 WxPusher 汇总推送账号清单"
+                >
+                  查询咸主并推送
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchPushMainLevelInfo"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -3828,6 +3836,7 @@ import {
   createTasksSalt,
   createTasksCamp,
   createTasksMainLevel,
+  createTasksFeudatory,
   createTasksFootball,
   createTasksApex,
   createTasksXuanwuBlessing,
@@ -5048,6 +5057,7 @@ const taskGroupDefinitions = [
       "batchChallengeThreeKingdomsGenie",
       "batchTopUpGoldFish",
       "batchPushMainLevelInfo",
+      "batchCheckSaltMasters",
       "batchSmartBoxWeekly",
       "batchSmartRecruitWeekly",
       "batchSmartBlackMarketWeekly",
@@ -6432,6 +6442,7 @@ const executeScheduledTask = async (task) => {
     const taskLabel = (taskName) =>
       availableTasks.find((t) => t.value === taskName)?.label || taskName;
     const aggregatedMainLevelResults = [];
+    const aggregatedSaltMasterResults = [];
 
     const shouldSkipTaskForActivity = (taskName) => {
       if (
@@ -6483,7 +6494,7 @@ const executeScheduledTask = async (task) => {
         type: "info",
       });
 
-      if (taskName === "batchPushMainLevelInfo") {
+      if (["batchPushMainLevelInfo", "batchCheckSaltMasters"].includes(taskName)) {
         // 按账号执行阶段只采集结果，等所有账号完成后由调度器统一推送一份报告。
         return taskFunction({ deferPush: true });
       }
@@ -6556,7 +6567,7 @@ const executeScheduledTask = async (task) => {
           type: "info",
         });
 
-        await ensureConnection(tokenId);
+        await ensureConnection(tokenId, 2, null, { readOnly: selectedTaskNames.every(name => name === "batchCheckSaltMasters") });
 
         for (const taskName of selectedTaskNames) {
           if (shouldStop.value) break;
@@ -6568,6 +6579,9 @@ const executeScheduledTask = async (task) => {
               Array.isArray(taskResult)
             ) {
               aggregatedMainLevelResults.push(...taskResult);
+            }
+            if (taskName === "batchCheckSaltMasters" && Array.isArray(taskResult)) {
+              aggregatedSaltMasterResults.push(...taskResult);
             }
             if (tokenStatus.value[tokenId] === "failed") {
               accountHasFailure = true;
@@ -6598,6 +6612,14 @@ const executeScheduledTask = async (task) => {
         });
       } finally {
         endScheduledTokenSession(tokenId, tokenName);
+      }
+    }
+
+    if (aggregatedSaltMasterResults.length > 0) {
+      try {
+        await pushSaltMasterInfo(aggregatedSaltMasterResults);
+      } catch (error) {
+        addLog({ time: new Date().toLocaleTimeString(), message: `咸主账号清单推送失败: ${error.message}`, type: "error" });
       }
     }
 
@@ -6643,7 +6665,7 @@ const executeScheduledTask = async (task) => {
       upcomingScheduledTasks,
     );
     await sendNotifications(title, content, {
-      skipWxPusher: selectedTaskNames.includes("batchPushMainLevelInfo"),
+      skipWxPusher: selectedTaskNames.some(name => ["batchPushMainLevelInfo", "batchCheckSaltMasters"].includes(name)),
     });
 
     // 记录执行成功，用于漏执行检测
@@ -7817,7 +7839,7 @@ const releaseConnectionSlot = () => {
   }
 };
 
-const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null) => {
+const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null, options = {}) => {
   const latestToken = tokens.value.find((t) => t.id === tokenId);
   if (!latestToken) {
     throw new Error(`Token not found: ${tokenId}`);
@@ -7895,27 +7917,32 @@ const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null) =>
 
   // Initialize Game Data (Critical for Battle Version and Session)
   let mainLevelResult = null;
+  let initialRoleResult = null;
   try {
     // Fetch Role Info first (Standard flow)
-    await tokenStore.sendMessageWithPromise(
+    initialRoleResult = await tokenStore.sendMessageWithPromise(
       tokenId,
       "role_getroleinfo",
       {},
       5000,
     );
 
-    // Fetch Battle Version
-    const res = await tokenStore.sendMessageWithPromise(
-      tokenId,
-      "fight_startlevel",
-      {},
-      5000,
-    );
-    mainLevelResult = res;
-    if (res?.battleData?.version) {
-      tokenStore.setBattleVersion(res.battleData.version);
+    // Read-only tasks do not start a main-level battle.
+    if (!options.readOnly) {
+      // Fetch Battle Version
+      const res = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "fight_startlevel",
+        {},
+        5000,
+      );
+      mainLevelResult = res;
+      if (res?.battleData?.version) {
+        tokenStore.setBattleVersion(res.battleData.version);
+      }
     }
   } catch (e) {
+    if (options.readOnly) throw e;
     addLog({
       time: new Date().toLocaleTimeString(),
       message: `初始化数据失败: ${e.message}`,
@@ -7925,10 +7952,10 @@ const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null) =>
 
   if (isScheduledTokenSession(tokenId)) {
     scheduledTokenSession.initialized = true;
-    scheduledTokenSession.initResult = mainLevelResult || true;
+    scheduledTokenSession.initResult = options.readOnly ? initialRoleResult : mainLevelResult || true;
   }
 
-  return mainLevelResult || true;
+  return options.readOnly ? initialRoleResult : mainLevelResult || true;
   } catch (error) {
     if (acquiredSlot) {
       try { tokenStore.closeWebSocketConnection(tokenId); }
@@ -8253,6 +8280,7 @@ const handleGoldenCheer = async () => {
   await batchGoldenCheer();
 };
 
+const { batchCheckSaltMasters, pushSaltMasterInfo } = createTasksFeudatory(createTaskDeps());
 const tasksMainLevel = createTasksMainLevel(createTaskDeps());
 const { batchPushMainLevelInfo, pushMainLevelInfo } = tasksMainLevel;
 
@@ -8331,6 +8359,7 @@ const getScheduledTaskFunction = (name) => {
     batchChallengeGroupGenie,
     batchChallengeThreeKingdomsGenie,
     batchPushMainLevelInfo,
+    batchCheckSaltMasters,
     batchAdjustEarlyMainLevelFormation,
     batchAdjustMainLevelFormation,
     batchUpgradeHangUpAndClaimOrderRewards,
@@ -8443,7 +8472,7 @@ const sendNotifications = async (title, content, options = {}) => {
   } else if (options.skipWxPusher) {
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: "已跳过定时任务完成通知的 WxPusher 推送，避免主线关卡信息重复推送",
+      message: "已跳过定时任务完成通知的 WxPusher 推送，避免专项查询清单重复推送",
       type: "info",
     });
   }
