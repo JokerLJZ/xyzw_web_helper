@@ -880,3 +880,83 @@ for (const changed of ["disconnect", "dailyTime", "weekTime", "readFailure"]) {
     assert.equal(attempts, 1);
   });
 }
+
+for (const cmd of ["task_claimdailyreward", "task_claimweekreward"]) {
+  test(`${cmd}返回200020但服务器确认已领取，继续后续档位且不重发`, async () => {
+    const f = pacedRewardFixture();
+    const send = f.store.sendMessageWithPromise;
+    let attempts = 0;
+    f.store.sendMessageWithPromise = async (...args) => {
+      if (args[1] === cmd && args[2].rewardId === 1) {
+        attempts++;
+        await send(...args);
+        throw new Error("服务器错误: 200020 - 出了点小问题");
+      }
+      return send(...args);
+    };
+    const result = await f.runner.run("account-a", {}, settings);
+    assert.equal(attempts, 1);
+    assert.equal(result.remainingRewards, 0);
+    assert.equal(f.calls.filter(c => c.cmd === "role_getroleinfo").length, 4);
+  });
+}
+
+test("200020核对未领取，不重发且待核对日志使用最新状态", async () => {
+  const f = pacedRewardFixture();
+  const send = f.store.sendMessageWithPromise;
+  const logs = [];
+  const callbacks = { onLog: entry => logs.push(entry.message) };
+  let attempts = 0;
+  f.store.sendMessageWithPromise = async (...args) => {
+    if (args[1] === "task_claimdailyreward" && args[2].rewardId === 2) {
+      attempts++;
+      throw new Error("服务器错误: 200020 - 出了点小问题");
+    }
+    return send(...args);
+  };
+  const result = await f.runner.run("account-a", callbacks, settings);
+  assert.equal(attempts, 1);
+  assert.equal(result.remainingRewards, 1);
+  assert.ok(logs.includes("日活跃奖励待核对档位（最近快照）：2"));
+  assert.ok(logs.some(x => x.includes("领取日常积分奖励1 - 请求成功，待服务器确认任务状态")));
+});
+
+for (const changed of ["disconnect", "dailyTime", "weekTime", "readFailure"]) {
+  test(`200020核对时${changed}停止且不重发`, async () => {
+    const f = pacedRewardFixture();
+    f.role.dailyTask.weekTime = 1699833600;
+    const send = f.store.sendMessageWithPromise;
+    let attempts = 0;
+    f.store.sendMessageWithPromise = async (...args) => {
+      if (args[1] === "task_claimdailyreward") {
+        attempts++;
+        if (changed === "disconnect") f.disconnect();
+        else if (changed === "readFailure") f.failReads();
+        else f.role.dailyTask[changed]++;
+        throw new Error("服务器错误: 200020 - 出了点小问题");
+      }
+      return send(...args);
+    };
+    await assert.rejects(f.runner.run("account-a", {}, settings));
+    assert.equal(attempts, 1);
+  });
+}
+
+test("领奖角色增量同步到执行状态，保留未返回的其他字段", async () => {
+  const f = pacedRewardFixture();
+  const send = f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise = async (...args) => {
+    const result = await send(...args);
+    if (args[1] === "task_claimdailyreward" && args[2].rewardId === 1) {
+      // Simulate an authoritative update that also marks the next tier claimed.
+      f.role.dailyTask.dailyReward[2] = true;
+      return { role: { dailyTask: { dailyReward: { 1: true, 2: true } } } };
+    }
+    return result;
+  };
+  const result = await f.runner.run("account-a", {}, settings);
+  assert.deepEqual(f.calls.filter(c => c.cmd === "task_claimdailyreward").map(c => c.params.rewardId), [1]);
+  assert.equal(result.remainingRewards, 0);
+  assert.equal(f.runner.roleData.dailyTask.dailyPoint, 40);
+  assert.equal(f.calls.filter(c => c.cmd === "role_getroleinfo").length, 3);
+});

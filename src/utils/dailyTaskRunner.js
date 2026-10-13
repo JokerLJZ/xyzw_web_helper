@@ -430,8 +430,8 @@ export class DailyTaskRunner {
       await this.sleep(this.delaySettings.commandDelay);
       if (description)
         this.log(
-          `${description} - ${this.activeCondition !== undefined ? "请求成功，待服务器确认任务状态" : "成功"}`,
-          this.activeCondition !== undefined ? "info" : "success",
+          `${description} - ${this.activeCondition !== undefined || /^task_claim(?:daily|week)reward$/.test(cmd) ? "请求成功，待服务器确认任务状态" : "成功"}`,
+          this.activeCondition !== undefined || /^task_claim(?:daily|week)reward$/.test(cmd) ? "info" : "success",
         );
       return result;
     } catch (error) {
@@ -451,7 +451,7 @@ export class DailyTaskRunner {
     }
   }
 
-  /** Recover only reward rate limits after checking fresh server state. */
+  /** Reconcile uncertain rewards; replay only explicit rate-limit rejections. */
   async executeRewardClaim(tokenId, cmd, params, description, isClaimable) {
     this.rewardRecoveryActive = true;
     try {
@@ -459,8 +459,9 @@ export class DailyTaskRunner {
         return await this.executeGameCommand(tokenId, cmd, params, description);
       } catch (error) {
         const limited = getServerErrorCode(error) === 200400;
-        if (error.interrupted || (!limited && !/请求超时/.test(error.message || ""))) throw error;
-        this.log(`${description}：${limited ? "操作太快，冷却1.5秒后核对" : "响应超时，核对是否已领取"}`, "warning");
+        const rejected = getServerErrorCode(error) === 200020;
+        if (error.interrupted || (!limited && !rejected && !/请求超时/.test(error.message || ""))) throw error;
+        this.log(`${description}：${limited ? "操作太快，冷却1.5秒后核对" : rejected ? "服务器返回200020，核对是否已领取（不自动重发）" : "响应超时，核对是否已领取"}`, "warning");
         await this.sleep(1500);
         await this.refreshServerRole(tokenId);
         const state = isClaimable();
@@ -1387,7 +1388,7 @@ export class DailyTaskRunner {
         throw error;
       }
       this.roleSnapshots.set(tokenId, structuredClone(role));
-      this.roleData = role;
+      this.roleData = this.roleSnapshots.get(tokenId);
       this.roleStateDirty = false;
       for (const state of states) {
         const signature = `${state.status}:${state.progress}/${state.required}`;
