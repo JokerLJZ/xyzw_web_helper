@@ -93,20 +93,33 @@ export const compareBlackMarketPurchaseLists = (
   return left === right;
 };
 
-// 抓包：黑市/store_getpurchase.txt、store_setpurchase.txt。
+// 当前官方 Store_GetPurchaseResp 默认 purchaseCnt=0、purchaseItemList=[]。
+// 本项目拿到 BON 原始对象，需补回客户端模型的默认值，但不接受显式坏值。
+const readPurchaseConfig = (response) => {
+  if (!response || typeof response !== "object" || Array.isArray(response) ||
+      Object.keys(response).some(key => !["purchaseCnt", "purchaseItemList", "_originalCmd"].includes(key))) {
+    throw new Error("游戏返回的黑市采购配置无法识别，未下发修改");
+  }
+  const purchaseCnt = Object.hasOwn(response, "purchaseCnt") ? response.purchaseCnt : 0;
+  const purchaseItemList = Object.hasOwn(response, "purchaseItemList") ? response.purchaseItemList : [];
+  if (!Number.isSafeInteger(purchaseCnt) || purchaseCnt < 0 || !Array.isArray(purchaseItemList) ||
+      purchaseItemList.some(item => !item || !Number.isSafeInteger(item.itemId) || item.itemId <= 0 ||
+        !Number.isInteger(item.discount) || item.discount < 1 || item.discount > 10)) {
+    throw new Error("游戏返回的黑市采购配置字段无效，未下发修改");
+  }
+  return { purchaseCnt, purchaseItemList };
+};
+
 export async function syncBlackMarketPurchaseConfig({ send, list, shouldStop = () => false }) {
   const purchaseItemList = toStorePurchaseItemList(list);
   if (!purchaseItemList.length) throw new Error("请先配置黑市采购清单");
-  const current = await send("store_getpurchase", {});
-  const purchaseCnt = Number(current?.purchaseCnt);
-  if (!Number.isSafeInteger(purchaseCnt) || purchaseCnt < 0 || !Array.isArray(current?.purchaseItemList)) {
-    throw new Error("黑市采购配置不完整，未下发修改");
-  }
+  const current = readPurchaseConfig(await send("store_getpurchase", {}));
+  const purchaseCnt = current.purchaseCnt;
   if (shouldStop()) return "stopped";
   if (compareBlackMarketPurchaseLists(current.purchaseItemList, purchaseItemList)) return "unchanged";
   await send("store_setpurchase", { purchaseCnt, purchaseItemList });
-  const verified = await send("store_getpurchase", {});
-  if (Number(verified?.purchaseCnt) !== purchaseCnt || !Array.isArray(verified?.purchaseItemList) ||
+  const verified = readPurchaseConfig(await send("store_getpurchase", {}));
+  if (verified.purchaseCnt !== purchaseCnt ||
       !compareBlackMarketPurchaseLists(verified.purchaseItemList, purchaseItemList)) {
     throw new Error("黑市采购清单写回后校验失败");
   }
