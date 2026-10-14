@@ -1,7 +1,8 @@
-import { createTasksSignupCheer } from "./tasksSignupCheer.js";
-/** 营地挑战：低战力据点优先，连续 3 次未获胜后改打一次宠物。 */
+import { createTasksSignupCheer, loadSignupCheerConfig } from "./tasksSignupCheer.js";
+import { campField, getCampRules, campEligibility, campDifficulty, campTaskState,
+  campBattleWon, campRecords, campRecordKey } from "./campChallengeState.js";
+/** 营地挑战：据点连续三败后，宠物补齐共享的当日三次成功目标。 */
 export const CAMP_TARGET_WINS = 3;
-export const CAMP_MAX_ATTACKS = 12;
 export const CAMP_MAX_CONSECUTIVE_FAILURES = 3;
 
 export function getCampDay(now = new Date()) {
@@ -20,10 +21,11 @@ export function getCampProgress(info, dateKey) {
   if (!info?.club || !info?.siege || !info.siege.attackMap) {
     throw new Error("营地数据不完整，无法确认今日次数");
   }
-  const record = info.siege.attackMap[dateKey] || {};
+  const record = campField(info.siege.attackMap, dateKey) ?? {};
+  if (typeof record !== "object" || Array.isArray(record)) throw new Error("营地挑战次数异常");
   const attacks = Number(record.attackCnt ?? 0);
   const wins = Number(record.aSuccessCnt ?? 0);
-  if (![attacks, wins].every((n) => Number.isInteger(n) && n >= 0) || wins > attacks) {
+  if ([record.attackCnt, record.aSuccessCnt].some(value => value === "" || typeof value === "boolean") || ![attacks, wins].every((n) => Number.isInteger(n) && n >= 0)) {
     throw new Error("营地挑战次数异常");
   }
   return { attacks, wins };
@@ -45,142 +47,181 @@ export function buildCampTeam(role) {
   };
 }
 
-/** 仅用服务端个人次数确认结果；增量攻击响应不能替代完整状态。 */
+/** 每场对账当日共享成功次数；超时仅在新战报唯一确认结果后继续。 */
 export async function runCampChallenge({
   send, stopped = () => false, log = () => {},
-  now = () => new Date(), pause = async () => {},
+  now = () => new Date(), pause = async () => {}, loadConfig = loadSignupCheerConfig,
 }) {
-  const day = getCampDay(now());
-  if (![2, 3, 4].includes(day.weekday)) return { status: "skipped", reason: "仅周二、周三、周四开放" };
-  const check = () => {
+  if (stopped()) throw new Error("任务已停止");
+  let day;
+  let rules;
+  const check = (attack = false) => {
     if (stopped()) throw new Error("任务已停止");
-    if (getCampDay(now()).key !== day.key) throw new Error("日期已变化，请下次重新执行");
+    if (day && getCampDay(now()).key !== day.key) throw new Error("日期已变化，请下次重新执行");
+    if (attack && rules && (+now() < rules.start || +now() >= rules.end)) throw new Error("已不在营地挑战时段，停止挑战");
   };
   const request = async (cmd, params = {}) => {
-    check();
+    check(cmd === "club_attack" || cmd === "club_attackmonster");
     const result = await send(cmd, params);
     await pause();
     check();
     return result;
   };
-  let info = await request("club_getinfo");
-  let progress = getCampProgress(info, day.key);
-  if (progress.wins >= CAMP_TARGET_WINS) return { status: "completed", ...progress };
-  if (!info.club.oppoMap?.[day.weekday]) {
-    return { status: "skipped", reason: "今日没有营地对阵" };
-  }
+  const config = await loadConfig(request);
+  day = getCampDay(now());
+  if (![2, 3, 4].includes(day.weekday)) return { status: "skipped", reason: "仅周二、周三、周四开放" };
   const { role } = await request("role_getroleinfo");
-  const teamSetParams = buildCampTeam(role);
+  rules = getCampRules(config, role, now());
+  if (!rules.inSeason) return { status: "skipped", reason: "当前不在营地赛季" };
+  if (+now() < rules.start || +now() >= rules.end) return { status: "skipped", reason: "当前不在营地挑战开放时段" };
+  let info;
+  let progress;
+  const refresh = async () => {
+    const snapshot = await request("club_getinfo");
+    if (!snapshot?.club || !snapshot?.siege) throw new Error("营地数据不完整，无法确认今日次数");
+    // getInfo是完整查询；协议省略的默认Map归一化为空，不能沿用旧任务领奖标记。
+    info = { ...snapshot, siege: { attackMap: {}, taskProgress: {}, taskClaimedMap: {}, ...snapshot.siege } };
+    progress = getCampProgress(info, day.key);
+    rules = getCampRules(config, role, now());
+    return info;
+  };
+  await refresh();
+  const eligibility = () => campEligibility(info, role, now());
+  const reason = eligibility();
+  if (reason) return { status: "skipped", reason };
+  if (!campField(info.club.oppoMap, day.weekday)) return { status: "skipped", reason: "今日没有营地对阵" };
+  const teamSetParams = progress.wins < rules.targetWins ? buildCampTeam(role) : null;
+  let records = progress.wins < rules.targetWins
+    ? campRecords(await request("club_getattackrecord"), now()) : [];
+  let monsterWins = records.filter(record => Number(record.roleId) <= 0 && Number(record.monsterId) > 0 && record.isWin === true).length;
+  log(`今日共享成功 ${progress.wins}/${rules.targetWins}，据点出手 ${progress.attacks}/${rules.attacks}，已返回战报中宠物胜利 ${monsterWins} 次`);
   const powers = new Map();
   const failedTargets = new Set();
-  let normalAttempts = 0;
   let consecutiveFailures = 0;
-
-  const attack = async (cmd, params) => {
-    const before = progress;
-    let attackError;
-    try {
-      await request(cmd, { ...params, useItem: false, teamSetParams });
-    } catch (error) {
-      check();
-      attackError = error;
-    }
-    // 包括请求超时：先核对服务端状态，禁止直接重复发送攻击。
-    info = await request("club_getinfo");
-    progress = getCampProgress(info, day.key);
-    if (progress.attacks <= before.attacks || progress.wins < before.wins) {
-      throw new Error(attackError
-        ? `攻击结果未确认，停止重试：${attackError.message}`
-        : "攻击后次数未增加，停止以避免重复挑战");
-    }
-    const won = progress.wins > before.wins;
-    log(`${cmd === "club_attackmonster" ? "宠物目标" : "据点挑战"}${won ? "成功" : "未获胜"}，今日 ${progress.wins}/3 胜，出手 ${progress.attacks} 次`);
-    return won;
+  let refreshRetries = 0;
+  const keyFor = (slot, target) => {
+    if (target.mirror !== undefined && typeof target.mirror !== "boolean") throw new Error("目标镜像标记异常");
+    return `${slot}:${target.roleId}:${target.mirror === true}:${campDifficulty(target, config)}`;
   };
 
-  while (
-    progress.wins < CAMP_TARGET_WINS
-    && progress.attacks < CAMP_MAX_ATTACKS
-    && normalAttempts < CAMP_MAX_ATTACKS
-    && consecutiveFailures < CAMP_MAX_CONSECUTIVE_FAILURES
-  ) {
-    check();
-    const defenders = info.club.oppoMap?.[day.weekday]?.defenders;
+  const attack = async (cmd, params) => {
+    check(true);
+    const before = { ...progress };
+    const priorKeys = new Set(records.map(campRecordKey).filter(Boolean));
+    let response;
+    let error;
+    try { response = await request(cmd, { ...params, useItem: false, teamSetParams }); }
+    catch (caught) { check(); error = caught; }
+    await refresh();
+    const afterRecords = campRecords(await request("club_getattackrecord"), now());
+    const fresh = afterRecords.filter(record => campRecordKey(record) && !priorKeys.has(campRecordKey(record)));
+    records = afterRecords;
+    if (progress.wins < before.wins || progress.attacks < before.attacks) throw new Error("攻击后当日次数回退，停止挑战");
+    const winDelta = progress.wins - before.wins;
+    const attackDelta = progress.attacks - before.attacks;
+    if (error && /(?:^|\D)13000070(?:\D|$)/.test(String(error.code || error.message)) && !winDelta && !attackDelta && !fresh.length) {
+      // 官方明确目标版本冲突：查询状态和目标阵容后重新选人，不重复发送旧请求。
+      if (++refreshRetries > 3) throw new Error("目标连续变化，停止自动重选");
+      powers.clear();
+      if (params.targetId) await request("club_gettargetteam", { targetId: params.targetId });
+      log("目标状态已变化，刷新后重新选择据点");
+      return null;
+    }
+    let won;
+    if (error) {
+      const matching = fresh.filter(record => cmd === "club_attackmonster"
+        ? Number(record.roleId) <= 0 && Number(record.monsterId) > 0
+        : Number(record.roleId) === Number(params.targetId) && Number(record.nodeId) === params.nodeId && (record.mirror ?? false) === params.targetIsMirror);
+      if (fresh.length !== 1 || matching.length !== 1 || typeof matching[0].isWin !== "boolean" || (cmd === "club_attack" && attackDelta !== 1) || winDelta !== (matching[0].isWin ? 1 : 0)) {
+        throw new Error(`攻击结果未确认，停止重试：${error.message}`);
+      }
+      won = matching[0].isWin;
+      log("请求异常，已通过新增战报及当日次数确认结果");
+    } else {
+      won = campBattleWon(response);
+      if (winDelta !== (won ? 1 : 0) || (cmd === "club_attack" && attackDelta !== 1)) throw new Error("战斗胜负与当日次数不一致，停止以避免重复挑战");
+    }
+    refreshRetries = 0;
+    if (cmd === "club_attackmonster" && won) monsterWins++;
+    log(`${cmd === "club_attackmonster" ? "宠物挑战" : "据点挑战"}${won ? "胜利" : "未获胜"}，今日共享成功 ${progress.wins}/${rules.targetWins}，出手 ${progress.attacks} 次`);
+    return won;
+  };
+  while (progress.wins < rules.targetWins && progress.attacks < rules.attacks && consecutiveFailures < CAMP_MAX_CONSECUTIVE_FAILURES) {
+    check(true);
+    const reason = eligibility();
+    if (reason) throw new Error(reason);
+    const defenders = campField(info.club.oppoMap, day.weekday)?.defenders;
     if (!defenders) throw new Error("今日对阵已变化，停止挑战");
     const candidates = [];
     for (const [slot, target] of Object.entries(defenders)) {
       if (target.defeated || !target.roleId || !/^[1-9]\d*$/.test(slot)) continue;
-      const key = `${slot}:${target.roleId}`;
+      const key = keyFor(slot, target);
       if (!powers.has(key)) {
         const team = await request("club_gettargetteam", { targetId: target.roleId });
-        const power = Number(team?.roleBattleTeam?.role?.power ?? team?.teamInfo?.power);
-        // 不把未知战力视作 0 战力目标。
-        if (!Number.isFinite(power) || power < 0) throw new Error("无法读取目标战力，停止自动选人");
+        const raw = team?.roleBattleTeam?.role?.power ?? team?.teamInfo?.power;
+        const power = Number(raw);
+        if (raw == null || !Number.isFinite(power) || power < 0) throw new Error("无法读取目标战力，停止自动选人");
         powers.set(key, power);
       }
-      candidates.push({ key, nodeId: Number(slot), ...target, power: powers.get(key) });
+      candidates.push({ ...target, key, nodeId: Number(slot), difficulty: campDifficulty(target, config), power: powers.get(key) });
     }
-    candidates.sort((a, b) => a.power - b.power || a.nodeId - b.nodeId);
-    if (!candidates.length) {
-      log("无可挑战据点，转为宠物目标补齐");
-      break;
+    candidates.sort((a, b) => a.power - b.power || a.difficulty - b.difficulty || a.nodeId - b.nodeId);
+    if (!candidates.length) { log("无可挑战据点，转为宠物补齐共享成功次数"); break; }
+    const target = candidates.find(item => !failedTargets.has(item.key)) || candidates[0];
+    await refresh();
+    if (eligibility()) throw new Error(eligibility());
+    if (progress.wins >= rules.targetWins || progress.attacks >= rules.attacks) break;
+    const fresh = campField(info.club.oppoMap, day.weekday)?.defenders?.[target.nodeId];
+    if (!fresh || fresh.defeated || keyFor(target.nodeId, fresh) !== target.key) {
+      if (++refreshRetries > 3) throw new Error("目标连续变化，停止自动重选");
+      log("据点已变化，重新选择目标");
+      continue;
     }
-    let target = candidates.find((item) => !failedTargets.has(item.key));
-    if (!target) { failedTargets.clear(); target = candidates[0]; }
-    // 排序期间其他账号可能已出手，攻击前重新读取目标计数。
-    info = await request("club_getinfo");
-    progress = getCampProgress(info, day.key);
-    if (progress.wins >= CAMP_TARGET_WINS || progress.attacks >= CAMP_MAX_ATTACKS) break;
-    const fresh = info.club.oppoMap?.[day.weekday]?.defenders?.[target.nodeId];
-    if (!fresh || fresh.defeated || fresh.roleId !== target.roleId) {
-      throw new Error("目标据点已变化，请重新执行");
-    }
-    const challengeCnt = Number(fresh.challengeCnt);
-    const failCnt = Number(fresh.failCnt);
-    if (![challengeCnt, failCnt].every((n) => Number.isInteger(n) && n >= 0)) {
-      throw new Error("目标据点次数不完整");
-    }
-    log(`选择 #${target.nodeId} ${target.name || ""}，战力 ${target.power}`);
-    normalAttempts++;
+    log(`选择 #${target.nodeId} ${target.name || ""}，战力 ${target.power}，难度 ${target.difficulty}`);
     const won = await attack("club_attack", {
-      nodeId: target.nodeId, targetId: target.roleId, challengeCnt, failCnt,
+      nodeId: target.nodeId, targetId: target.roleId, targetIsMirror: fresh.mirror ?? false,
+      challengeCnt: Number(fresh.challengeCnt ?? 0), failCnt: Number(fresh.failCnt ?? 0),
     });
-    if (won) {
-      consecutiveFailures = 0;
-    } else {
-      consecutiveFailures++;
-      failedTargets.add(target.key);
-      if (consecutiveFailures >= CAMP_MAX_CONSECUTIVE_FAILURES) {
-        log(`普通据点连续 ${CAMP_MAX_CONSECUTIVE_FAILURES} 次未获胜，转为挑战宠物`);
-      }
-    }
+    if (won == null) continue;
+    if (won) consecutiveFailures = 0;
+    else { consecutiveFailures++; failedTargets.add(target.key); }
   }
-  if (progress.wins < CAMP_TARGET_WINS) {
-    // 宠物战不计入据点 attackCnt/aSuccessCnt，必须直接读取战斗响应判定，且只挑战一次。
-    const monsterResult = await request("club_attackmonster", {
-      useItem: false,
-      teamSetParams,
-    });
-    const monsterHp = Number(monsterResult?.battleData?.result?.accept?.ext?.curHP);
-    if (!Number.isFinite(monsterHp)) {
-      throw new Error("宠物挑战结果无法确认，已停止以避免重复挑战");
-    }
-    const monsterWon = monsterHp === 0;
-    const rewardCount = Array.isArray(monsterResult?.reward) ? monsterResult.reward.length : 0;
-    log(`宠物挑战${monsterWon ? "胜利" : "失败"}${rewardCount ? `，获得 ${rewardCount} 个奖励` : ""}`);
-    return {
-      status: "completed",
-      reason: `已挑战宠物（${monsterWon ? "胜利" : "失败"}）`,
-      monsterWon,
-      ...progress,
-    };
+  if (consecutiveFailures >= CAMP_MAX_CONSECUTIVE_FAILURES) log("据点连续三次未获胜，转为宠物补齐共享成功次数");
+  while (progress.wins < rules.targetWins) {
+    check(true);
+    if (eligibility()) throw new Error(eligibility());
+    if (progress.wins >= rules.winLimit) break;
+    const won = await attack("club_attackmonster", {});
+    if (!won) throw new Error(`宠物挑战未获胜，今日共享成功 ${progress.wins}/${rules.targetWins}，奖励目标未完成`);
   }
-  return { status: "completed", ...progress };
+  // 已达到成功目标也必须核对可领取任务，重跑只补领奖。
+  await refresh();
+  let rewardsClaimed = 0;
+  const tried = new Set();
+  while (true) {
+    check();
+    if (eligibility()) throw new Error(eligibility());
+    const state = campTaskState(info, config, now());
+    const task = state.ready.find(row => !tried.has(row.id));
+    if (!task) break;
+    tried.add(task.id);
+    let error;
+    try { await request("club_taskclaim", { confId: task.id }); }
+    catch (caught) { check(); error = caught; }
+    await refresh();
+    if (!campTaskState(info, config, now()).claimed(task)) throw new Error(`营地任务${task.id}领奖未确认${error ? `：${error.message}` : ""}，停止且不重发`);
+    rewardsClaimed++;
+    log(`营地任务${task.id}奖励已确认领取`);
+  }
+  const finalTasks = campTaskState(info, config, now());
+  log(`营地任务核对结束：本轮领取 ${rewardsClaimed} 项奖励，未达标任务 ${finalTasks.visible.filter(row => !finalTasks.claimed(row)).length} 项`);
+  return { status: "completed", ...progress, monsterWins, rewardsClaimed,
+    reason: `今日共享成功 ${progress.wins}/${rules.targetWins}，本轮确认领取 ${rewardsClaimed} 项任务奖励` };
 }
 
 export function createTasksCamp(deps, {
   now = () => new Date(),
-  loadConfig,
+  loadConfig = loadSignupCheerConfig,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
   const { batchCampSignup } = createTasksSignupCheer(deps, { now, sleep, loadConfig });
@@ -206,15 +247,11 @@ export function createTasksCamp(deps, {
         let connected = false;
         const ownedSlot = tokenStore.getWebSocketStatus(id) !== "connected";
         try {
-          if (![2, 3, 4].includes(getCampDay(now()).weekday)) {
-            log(`${name}：营地挑战仅周二至周四执行，已跳过`);
-            tokenStatus.value[id] = "completed";
-            continue;
-          }
           await ensureConnection(id);
           connected = true;
           const result = await runCampChallenge({
-            now,
+            now: () => new Date(tokenStore.getWebSocketClient?.(id)?.getServerTime?.() ?? +now()),
+            loadConfig,
             send: (cmd, params) => tokenStore.sendMessageWithPromise(id, cmd, params, 10000),
             stopped: () => shouldStop.value,
             log: (text) => log(`${name}：${text}`),

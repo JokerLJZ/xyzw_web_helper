@@ -239,6 +239,7 @@ export function registerDefaultCommands(reg) {
     .register("saltroad_outcheer", { legionId: 0 })
     .register("club_attack", { useItem: false })
     .register("club_attackmonster", { useItem: false })
+    .register("club_taskclaim")
     .register("club_gettargetteam", { targetId: 0 })
     .register("club_getattackrecord")
     .register("club_getdefenserecord", { targetId: 0, targetIsMirror: false })
@@ -1112,8 +1113,18 @@ export class XyzwWebSocketClient {
     }, 50);
   }
 
+  /** 以本连接最近服务端报文时间加本地经过时间估算当前服务端时间。 */
+  getServerTime() {
+    if (!this.serverClock) return null;
+    return this.serverClock.time + (performance.now() - this.serverClock.receivedAt);
+  }
+
   /** 处理 Promise 响应 */
   _handlePromiseResponse(packet) {
+    const serverTime = packet?._raw?.time ?? packet?.time;
+    if (typeof serverTime === "number" && Number.isFinite(serverTime) && serverTime > 0) {
+      this.serverClock = { time: serverTime, receivedAt: performance.now() };
+    }
     // 优先使用resp字段进行响应匹配（新的正确方式）
     if (packet.resp !== undefined && this.promises[packet.resp]) {
       const promiseData = this.promises[packet.resp];
@@ -1242,6 +1253,7 @@ export class XyzwWebSocketClient {
       saltroad_getseasonoutrankresp: "saltroad_getseasonoutrank",
       club_attackresp: "club_attack",
       club_attackmonsterresp: "club_attackmonster",
+      club_taskclaimresp: "club_taskclaim",
       club_gettargetteamresp: "club_gettargetteam",
       club_getattackrecordresp: "club_getattackrecord",
       club_getdefenserecordresp: "club_getdefenserecord",

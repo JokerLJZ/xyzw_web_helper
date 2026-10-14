@@ -887,6 +887,11 @@ export class GameCommands {
     };
   }
 
+  /** 领取当前官方配置指定的营地任务奖励。 */
+  club_taskclaim(ack = 0, seq = 0, params = {}) {
+    return { ack, body: this.g_utils.bon.encode(params), cmd: "club_taskclaim", seq, time: Date.now() };
+  }
+
   /** 挑战营地宠物目标，补充个人成功次数。 */
   club_attackmonster(ack = 0, seq = 0, params = {}) {
     return {
