@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
+import { connectWithTokenRefresh } from "../src/utils/batch/connectWithTokenRefresh.js";
 
 const component = await readFile(
   new URL("../src/views/BatchDailyTasks.vue", import.meta.url),
@@ -43,6 +44,7 @@ function fixture({
   const logs = [];
   const state = { runs: 0, closed: 0, connected };
   const context = {
+    connectWithTokenRefresh,
     selectedTokens: { value: ["account-a"] },
     scheduledTaskExecutionActive: false,
     isScheduledTokenSession: () => false,

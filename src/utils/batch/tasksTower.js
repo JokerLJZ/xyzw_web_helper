@@ -3,9 +3,10 @@ import { claimPendingEvoTowerRewards, normalizeWeirdTowerClimbCount } from "@/ut
  * 爬塔类任务
  * 包含: climbTower, batchWeirdTower, climbWeirdTower, batchClaimFreeEnergy
  */
-import { getTowerActId } from "../towerActId.js";
+import { loadRechargeConfig } from "../rechargeActivity.js";
+import { runSkinChallenge, SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES } from "../skinChallengeRunner.js";
+export { SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES };
 
-export const SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES = 5;
 
 const parseActivityId = (value) => {
   if (typeof value === "number" && Number.isInteger(value) && value > 0) {
@@ -715,185 +716,24 @@ export function createTasksTower(deps) {
 
         await ensureConnection(tokenId);
 
-        // 获取活动信息
-        const fallbackActId = getTowerActId();
-        let res = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "towers_getinfo",
-          { actId: fallbackActId },
-          5000
-        );
-        
-        let towerData = (res?.actId ? res : (res?.towerData?.actId ? res.towerData : res)) || {};
-        const challengeActId = towerData.actId || fallbackActId;
-
-        // 检查活动是否有效
-        if (!challengeActId) {
-           addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 换皮闯关活动信息获取失败`,
-            type: "warning",
-          });
-          tokenStatus.value[tokenId] = "failed";
+        const send = async (cmd, params = {}) => {
+          if (shouldStop.value) { const error = new Error("任务已停止"); error.stopped = true; throw error; }
+          const result = await tokenStore.sendMessageWithPromise(tokenId, cmd, params, 10000);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          return result;
+        };
+        const now = () => tokenStore.getWebSocketClient?.(tokenId)?.getServerTime?.() ?? Date.now();
+        const config = await loadRechargeConfig(send);
+        const activity = Object.values(config.ActFestivalConf || {}).filter(row => row.actType === 19 && Number(row.actGroup || 0) === 0 && row.start * 1000 <= now() && now() < row.end * 1000).sort((a, b) => b.start - a.start)[0];
+        if (!activity) {
+          addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} 当前没有开放的换皮闯关活动`, type: "info" });
+          tokenStatus.value[tokenId] = "skipped";
           return;
         }
-
-        const actId = String(challengeActId);
-        if (actId.length >= 6) {
-           const year = "20" + actId.substring(0, 2);
-           const month = actId.substring(2, 4);
-           const day = actId.substring(4, 6);
-           const startDate = new Date(`${year}-${month}-${day}T00:00:00`);
-           const endDate = new Date(startDate);
-           endDate.setDate(startDate.getDate() + 7);
-           const now = new Date();
-           if (now < startDate || now >= endDate) {
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 换皮闯关活动已结束`,
-                type: "warning",
-              });
-              tokenStatus.value[tokenId] = "completed";
-              return;
-           }
-        }
-
-        let levelRewardMap = towerData.levelRewardMap || {};
-        
-        // 计算今日开放的BOSS
-        const todayWeekDay = new Date().getDay(); // 0-6 (Sun-Sat)
-        const openTowerMap = {
-          5: [1], // Friday
-          6: [2], // Saturday
-          0: [3], // Sunday
-          1: [4], // Monday
-          2: [5], // Tuesday
-          3: [6], // Wednesday
-          4: [1, 2, 3, 4, 5, 6] // Thursday (All open)
-        };
-        const todayOpenTowers = openTowerMap[todayWeekDay] || [];
-
-        // 辅助函数：判断是否已通关
-        const isTowerCleared = (type, map) => {
-          const key1 = `${type}008`;
-          const key2 = Number(key1);
-          return !!(map[key1] || map[key2]);
-        };
-        
-        // 辅助函数：获取当前层数
-        const getTowerLevel = (type, map) => {
-           for (let i = 8; i >= 1; i--) {
-            const key1 = `${type}00${i}`;
-            const key2 = Number(key1);
-            if (map[key1] || map[key2]) {
-                if (i === 8) return 8;
-                return i + 1;
-            }
-          }
-          return 1;
-        };
-
-        // 筛选未通关的BOSS
-        const targetTowers = todayOpenTowers.filter(type => !isTowerCleared(type, levelRewardMap));
-
-        if (todayWeekDay === 4) {
-             addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 周四全开放，检测到需补打BOSS: ${targetTowers.length > 0 ? targetTowers.join(', ') : '无'}`,
-                type: "info",
-             });
-        } else if (targetTowers.length === 0 && todayOpenTowers.length > 0) {
-             addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 今日BOSS ${todayOpenTowers[0]} 已通关`,
-                type: "info",
-             });
-        }
-
-        if (targetTowers.length === 0) {
-             tokenStatus.value[tokenId] = "completed";
-             addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `=== ${token.name} 换皮闯关结束 (无需挑战) ===`,
-                type: "success",
-             });
-             return;
-        }
-
-        for (const type of targetTowers) {
-            if (shouldStop.value) break;
-
-            addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 开始挑战 BOSS ${type}`,
-                type: "info",
-            });
-
-            let needStart = true;
-            let loop = true;
-            let failCount = 0;
-
-            while (loop && !shouldStop.value) {
-                if (needStart) {
-                    await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { actId: challengeActId, towerType: type }, 5000);
-                    // 稍微等待一下
-                    await new Promise(r => setTimeout(r, 500));
-                }
-
-                const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { actId: challengeActId, towerType: type }, 5000);
-                const battleData = fightRes?.battleData;
-                const curHP = battleData?.result?.accept?.ext?.curHP;
-                
-                const currentLevel = getTowerLevel(type, levelRewardMap);
-
-                if (curHP === 0) {
-                     addLog({
-                        time: new Date().toLocaleTimeString(),
-                        message: `${token.name} BOSS ${type} 第 ${currentLevel} 层挑战成功`,
-                        type: "success",
-                     });
-
-                     needStart = false;
-                     failCount = 0;
-
-                     // 刷新数据
-                     res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: challengeActId }, 5000);
-                     towerData = (res?.actId ? res : (res?.towerData?.actId ? res.towerData : res)) || {};
-                     levelRewardMap = towerData.levelRewardMap || {};
-
-                     if (isTowerCleared(type, levelRewardMap)) {
-                        loop = false;
-                        addLog({
-                            time: new Date().toLocaleTimeString(),
-                            message: `${token.name} BOSS ${type} 全部通关`,
-                            type: "success",
-                        });
-                     } else {
-                        await new Promise(r => setTimeout(r, 1000));
-                     }
-                } else {
-                     addLog({
-                        time: new Date().toLocaleTimeString(),
-                        message: `${token.name} BOSS ${type} 第 ${currentLevel} 层挑战失败`,
-                        type: "warning",
-                     });
-
-                     needStart = true;
-                     failCount++;
-
-                     if (failCount >= SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES) {
-                         addLog({
-                            time: new Date().toLocaleTimeString(),
-                            message: `${token.name} BOSS ${type} 连续失败${SKIN_CHALLENGE_MAX_CONSECUTIVE_FAILURES}次，跳过`,
-                            type: "error",
-                         });
-                         loop = false;
-                     } else {
-                        await new Promise(r => setTimeout(r, 1000));
-                     }
-                }
-            }
-        }
+        const challengeActId = activity.id;
+        await runSkinChallenge({ send, config, activity, now, stopped: () => shouldStop.value,
+          log: text => addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} ${text}`, type: "info" }),
+        });
 
         // 闯关结束后循环领取奖励
         addLog({

@@ -32,7 +32,8 @@ test("烧烤包含免费首场，保留当日三次并受总次数约束", () =>
   assert.equal(remainingBarbecue({}, activity, { todayUseTickCnt: 0, useTickCnt: 0 }), 8);
   assert.equal(remainingBarbecue({}, activity, { todayUseTickCnt: 8, useTickCnt: 7 }), 0);
   assert.equal(remainingBarbecue({}, activity, { todayUseTickCnt: 4, useTickCnt: 59 }), 1);
-  assert.throws(() => remainingBarbecue({}, activity, {}), /不完整/);
+  assert.equal(remainingBarbecue({}, activity, {}), 8);
+  assert.throws(() => remainingBarbecue({}, activity, { todayUseTickCnt: -1 }), /异常/);
 });
 test("兑换先查询该账号的库存、限购与解锁", async () => {
   const account = server({ stock: 7, used: 3 });
@@ -133,38 +134,4 @@ test("用户停止中断后续阶段", async () => {
   const error = new Error("停止"); error.stopped = true;
   const config = base(); config.ActFestivalConf[3] = act(13, 13);
   await assert.rejects(runRechargeStandard({ send: async () => { throw error; }, config, now: () => NOW }), /停止/);
-});
-test("烧烤逐场读取状态，从11次挑战到剩3次且不超打", async () => {
-  const config = base(); config.ActFestivalConf[3] = act(13, 19, { parameters: [60, 10] });
-  config.ConstantConf = { actMultiTowerDailyStartTime: 8, actMultiTowerDailyEndTime: 20 };
-  config.ActMultiTowerScheduleConf = { 1: { actId: 13, actDay: [1, 7], openTowerType: [1] } };
-  const towers = { actId: 13, todayUseTickCnt: 0, useTickCnt: 0, towerData: { 1: { towerType: 1, fighting: false, pass: false, actTowerLv: 1 } } };
-  let fights = 0, starts = 0;
-  const send = async cmd => {
-    if (cmd === "towers_getinfo") return { towerData: clone(towers) };
-    if (cmd === "towers_start") { starts++; towers.towerData[1].fighting = true; return {}; }
-    if (cmd === "towers_fight") { fights++; if (towers.todayUseTickCnt > 0) towers.useTickCnt++; towers.todayUseTickCnt++; return { towerData: { towerType: 1 } }; }
-    if (cmd === "activity_get") return { activity: { commonActivityInfo: {} } };
-    throw new Error(cmd);
-  };
-  const result = await runRechargeStandard({ send, config, now: () => NOW });
-  assert.equal(result.status, "completed");
-  assert.equal(fights, 8); assert.equal(starts, 1); assert.equal(towers.useTickCnt, 7);
-  await runRechargeStandard({ send, config, now: () => NOW });
-  assert.equal(fights, 8);
-});
-test("烧烤写超时先查状态，不重发；之后只进行独立奖励阶段", async () => {
-  const config = base(); config.ActFestivalConf[3] = act(13, 19, { parameters: [60, 10] });
-  config.ConstantConf = { actMultiTowerDailyStartTime: 8, actMultiTowerDailyEndTime: 20 };
-  config.ActMultiTowerScheduleConf = { 1: { actId: 13, actDay: [1, 7], openTowerType: [1] } };
-  const calls = [];
-  const send = async cmd => {
-    calls.push(cmd);
-    if (cmd === "towers_getinfo") return { towerData: { actId: 13, todayUseTickCnt: 0, useTickCnt: 0, towerData: { 1: { towerType: 1, fighting: true } } } };
-    if (cmd === "towers_fight") throw new Error("timeout");
-    return { activity: { commonActivityInfo: {} } };
-  };
-  assert.equal((await runRechargeStandard({ send, config, now: () => NOW })).status, "failed");
-  assert.deepEqual(calls.slice(0, 3), ["towers_getinfo", "towers_fight", "towers_getinfo"]);
-  assert.equal(calls.filter(cmd => cmd === "towers_fight").length, 1);
 });

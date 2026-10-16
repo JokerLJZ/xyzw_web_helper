@@ -696,7 +696,6 @@ import {
 import { NIcon, NAlert, useDialog, useMessage } from "naive-ui";
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { transformToken, scheduleAuthUserRequest } from "@/utils/token";
 import { prepareMultiGameLaunch } from "@/utils/gameLauncher";
 import {
   pruneTokenSelection,
@@ -711,7 +710,7 @@ import {
 import { $emit } from "@/stores/events/index.ts";
 import useIndexedDB from "@/hooks/useIndexedDB";
 import { persistGameBin } from "@/utils/gameBin";
-const { getArrayBuffer, storeArrayBuffer, deleteArrayBuffer, clearAll } =
+const { getArrayBuffer, clearAll } =
   useIndexedDB();
 // 接收路由参数
 const props = defineProps({
@@ -945,81 +944,9 @@ const refreshToken = async (token) => {
   refreshingTokens.value.add(token.id);
 
   try {
-    if (token.importMethod === "url") {
-      // 有源URL的token - 从URL重新获取（使用限流）
-      const data = await scheduleAuthUserRequest(async () => {
-        let response;
-
-        const isLocalUrl =
-          token.sourceUrl.startsWith(window.location.origin) ||
-          token.sourceUrl.startsWith("/") ||
-          token.sourceUrl.startsWith("http://localhost") ||
-          token.sourceUrl.startsWith("http://127.0.0.1");
-
-        if (isLocalUrl) {
-          response = await fetch(token.sourceUrl);
-        } else {
-          try {
-            response = await fetch(token.sourceUrl, {
-              method: "GET",
-              headers: {
-                Accept: "application/json",
-              },
-              mode: "cors",
-            });
-          } catch (corsError) {
-            throw new Error(
-              `跨域请求被阻止。请确保目标服务器支持CORS。错误详情: ${corsError.message}`,
-            );
-          }
-        }
-
-        if (!response.ok) {
-          throw new Error(
-            `请求失败: ${response.status} ${response.statusText}`,
-          );
-        }
-
-        const result = await response.json();
-
-        if (!result.token) {
-          throw new Error("返回数据中未找到token字段");
-        }
-
-        return result;
-      });
-
-      // 更新token信息
-      tokenStore.updateToken(token.id, {
-        token: data.token,
-        server: data.server || token.server,
-        lastRefreshed: Date.now(),
-      });
-
+    if (["url", "wxQrcode", "bin"].includes(token.importMethod)) {
+      await tokenStore.refreshTokenCredentials(token.id);
       message.success("Token刷新成功");
-    } else if (
-      token.importMethod === "wxQrcode" ||
-      token.importMethod === "bin"
-    ) {
-      let userToken = await getArrayBuffer(token.id);
-      let usedOldKey = false;
-      if (!userToken) {
-        userToken = await getArrayBuffer(token.name);
-        usedOldKey = true;
-      }
-      if (userToken) {
-        const newToken = await transformToken(userToken);
-        tokenStore.updateToken(token.id, {
-          token: newToken,
-          lastRefreshed: Date.now(),
-        });
-        if (usedOldKey) {
-          await storeArrayBuffer(token.id, userToken);
-          await deleteArrayBuffer(token.name);
-          console.log("已迁移IndexedDB数据:", token.name, "->", token.id);
-        }
-        message.success("Token刷新成功");
-      }
     } else {
       dialog.info({
         title: "重新获取Token",

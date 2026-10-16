@@ -467,6 +467,8 @@ export function registerDefaultCommands(reg) {
     .register("discount_getdiscountinfo")
 
     // 换皮闯关相关
+    .register("team_getallteam")
+    .register("team_setteam")
     .register("towers_getinfo")
     .register("towers_start")
     .register("towers_fight")
@@ -1318,6 +1320,7 @@ export class XyzwWebSocketClient {
       saltcup26_placebetresp: "saltcup26_placebet",
       activity_takeegamerewardresp: "activity_startactegame",
       // 换皮闯关相关响应映射
+      syncteamresp: ["team_getallteam", "team_setteam"],
       towers_getinforesp: "towers_getinfo",
       towers_startresp: "towers_start",
       towers_fightresp: "towers_fight",

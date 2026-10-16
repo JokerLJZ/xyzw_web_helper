@@ -1,4 +1,5 @@
 import { extractRolePatch } from "./roleSnapshot.js";
+import { getSkinChallengeBudget, runSkinChallenge } from "./skinChallengeRunner.js";
 
 export const activityBody = response => response?._raw?.body || response?.body || response?.data || response;
 export const mapGet = (map, key) => map instanceof Map ? (map.get(key) ?? map.get(String(key))) : map?.[key];
@@ -58,12 +59,33 @@ function commonInfo(response) {
 const recordsFor = (info, id) => mapGet(info, id)?.record || {};
 
 export function remainingBarbecue(config, activity, towers) {
-  const used = validNumber(towers?.todayUseTickCnt, "今日挑战次数");
-  const totalUsed = validNumber(towers?.useTickCnt, "累计挑战次数");
-  const daily = validNumber(activity.parameters?.[1], "每日挑战上限") + 1;
-  const total = validNumber(activity.parameters?.[0], "总挑战上限");
-  // 客户端每日首场免费，其余消耗活动总次数；用户要求当日剩余三次。
-  return Math.max(0, Math.min(daily - used - 3, total - totalUsed + (used === 0 ? 1 : 0)));
+  return getSkinChallengeBudget(activity, towers, 3);
+}
+
+/** Celebrate_GetCelebrateInfoResp 继承 CelebrateInfo；原始 BON 可能省略默认实例和空 Map。 */
+export function normalizeCelebrationInfo(response) {
+  let source = activityBody(response);
+  if (source?.celebrateInfoResp !== undefined) source = source.celebrateInfoResp;
+  if (!source || typeof source !== "object" || Array.isArray(source)) throw new Error("生日祝福响应格式异常");
+  const allowed = ["signCelebrate", "fullServerSignCnt", "_originalCmd"];
+  if (!Object.keys(source).every(key => allowed.includes(key))) throw new Error("生日祝福响应包含未知结构，停止操作");
+  const sign = source.signCelebrate ?? {};
+  if (typeof sign !== "object" || Array.isArray(sign) || source.signCelebrate === null) throw new Error("生日祝福记录格式异常");
+  const normalizeMap = (map, name) => {
+    if (map === undefined) return {};
+    if (!map || typeof map !== "object" || Array.isArray(map)) throw new Error(`生日祝福${name}格式异常`);
+    return Object.fromEntries(mapEntries(map));
+  };
+  const personal = normalizeMap(sign.personalClaimMap, "个人任务");
+  for (const [key, row] of Object.entries(personal)) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("生日任务状态格式异常");
+    personal[key] = { claimCnt: 0, canClaimCnt: 0, signState: 0, shareTime: 0, shareClaimTime: 0, ...row };
+  }
+  return { fullServerSignCnt: validNumber(source.fullServerSignCnt ?? 0, "全服祝福次数"), signCelebrate: {
+    personalSignMap: normalizeMap(sign.personalSignMap, "签到记录"),
+    personalClaimMap: personal,
+    fullServerClaimMap: normalizeMap(sign.fullServerClaimMap, "全服领奖记录"),
+  } };
 }
 
 export async function queryRechargeExchange(send, config, now = Date.now()) {
@@ -114,7 +136,7 @@ export async function runRechargeStandard({ send, config, now = Date.now, log = 
   send = async (cmd, params) => {
     try { return await transport(cmd, params); }
     catch (error) {
-      if (!error.stopped && !/get|role_getroleinfo/.test(cmd)) {
+      if (!error.stopped && !cmd.startsWith("towers_") && cmd !== "team_setteam" && !/get|role_getroleinfo/.test(cmd)) {
         const query = cmd.startsWith("celebrate_") ? ["celebrate_getcelebrateinfo", {}]
           : cmd.startsWith("towers_") ? ["towers_getinfo", { actId: params.actId }]
           : cmd === "activity_maydaylottery" ? ["role_getroleinfo", {}] : ["activity_get", {}];
@@ -138,12 +160,13 @@ export async function runRechargeStandard({ send, config, now = Date.now, log = 
   if (celebration) await stage("生日祝福与任务奖励（邀请最多2次）", async () => {
     active(celebration);
     const query = async () => {
-      const body = activityBody(await send("celebrate_getcelebrateinfo", {}));
-      if (!body?.signCelebrate) throw new Error("未取得生日祝福状态");
-      return body;
+      return normalizeCelebrationInfo(await send("celebrate_getcelebrateinfo", {}));
     };
     let info = await query();
-    const signedToday = () => values(info.signCelebrate.personalSignMap).some(time => dayStart(Number(time) < 1e12 ? Number(time) * 1000 : Number(time)) === dayStart(now()));
+    const signedToday = () => {
+      const key = new Date(now() + 8 * 3600000).toISOString().slice(2, 10).replaceAll("-", "");
+      return mapGet(info.signCelebrate.personalSignMap, key) !== undefined || values(info.signCelebrate.personalSignMap).some(time => dayStart(Number(time) < 1e12 ? Number(time) * 1000 : Number(time)) === dayStart(now()));
+    };
     if (!signedToday()) {
       await send("celebrate_sign", {});
       info = await query();
@@ -188,37 +211,7 @@ export async function runRechargeStandard({ send, config, now = Date.now, log = 
   const barbecue = event.byType(19);
   if (barbecue) await stage("周年烧烤（保留当日3次）", async () => {
     active(barbecue);
-    const startHour = validNumber(config.ConstantConf?.actMultiTowerDailyStartTime, "烧烤开放时间");
-    const endHour = validNumber(config.ConstantConf?.actMultiTowerDailyEndTime, "烧烤结束时间");
-    if (startHour >= endHour || endHour > 24) throw new Error("烧烤时段配置不完整");
-    const hour = (now() - dayStart(now())) / 3600000;
-    if (hour < startHour || hour > endHour) { log("当前不在烧烤挑战时段，跳过"); return; }
-    const query = async () => {
-      const towers = activityBody(await send("towers_getinfo", { actId: barbecue.id }))?.towerData;
-      if (!towers || Number(towers.actId) !== barbecue.id) throw new Error("烧烤活动状态不完整");
-      return towers;
-    };
-    const challengeDay = dayStart(now());
-    for (let count = 0; count < 100; count++) {
-      const currentHour = (now() - dayStart(now())) / 3600000;
-      if (dayStart(now()) !== challengeDay || currentHour < startHour || currentHour > endHour) break;
-      active(barbecue);
-      let towers = await query();
-      if (remainingBarbecue(config, barbecue, towers) <= 0) break;
-      const day = Math.floor((dayStart(now()) - dayStart(barbecue.start * 1000)) / DAY) + 1;
-      const schedule = values(config.ActMultiTowerScheduleConf).find(row => row.actId === barbecue.id && row.actDay[0] <= day && day <= row.actDay[1]);
-      const unlocked = schedule?.openTowerType || [];
-      const towerList = values(towers.towerData);
-      const target = towerList.find(row => row.fighting && unlocked.includes(row.towerType) && !row.pass) || towerList.filter(row => unlocked.includes(row.towerType) && !row.pass).sort((a, b) => b.actTowerLv - a.actTowerLv)[0];
-      if (!target) { log("当日烧烤已通关或没有可挑战目标"); break; }
-      if (!target.fighting) { await send("towers_start", { actId: barbecue.id, towerType: target.towerType }); towers = await query(); }
-      if (remainingBarbecue(config, barbecue, towers) <= 0) break;
-      const started = mapGet(towers.towerData, target.towerType);
-      if (!started?.fighting) throw new Error("烧烤战斗开始状态未确认");
-      await send("towers_fight", { actId: barbecue.id, towerType: target.towerType });
-      const after = await query();
-      if (Number(after.todayUseTickCnt) !== Number(towers.todayUseTickCnt) + 1) throw new Error("挑战次数变化未确认，停止挑战");
-    }
+    await runSkinChallenge({ send, config, activity: barbecue, now, log, reserveChallenges: 3, copyMainlineFormation: true });
   });
   const lottery = event.byType(24);
   if (lottery) await stage("周年狂欢（仅活动道具）", async () => {

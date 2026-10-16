@@ -3755,6 +3755,7 @@
 </template>
 
 <script setup>
+import { connectWithTokenRefresh } from "@/utils/batch/connectWithTokenRefresh.js";
 import RechargeExchangeDialog from "@/components/RechargeExchangeDialog.vue";
 import { createTasksRecharge } from "@/utils/batch/tasksRecharge.js";
 import { DEFAULT_WEIRD_TOWER_CLIMB_COUNT, normalizeWeirdTowerClimbCount } from "@/utils/evoTowerRewards.js";
@@ -7763,7 +7764,13 @@ const waitForConnection = async (
   const start = Date.now();
   while (Date.now() - start < timeout) {
     const status = tokenStore.getWebSocketStatus(tokenId);
+    if (shouldStop.value) {
+      const error = new Error("批量任务已停止，取消等待连接");
+      error.interrupted = true;
+      throw error;
+    }
     if (status === "connected") return true;
+    if (status === "error" || status === "disconnected") return false;
     await new Promise((r) => setTimeout(r, 500));
   }
   return false;
@@ -7883,42 +7890,16 @@ const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null, op
       type: "info",
     });
 
-    tokenStore.createWebSocketConnection(
+    connected = await connectWithTokenRefresh({
       tokenId,
-      latestToken.token,
-      latestToken.wsUrl,
-    );
-    connected = await waitForConnection(tokenId);
-
-    if (!connected && maxRetries > 0) {
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `连接超时，尝试重连...`,
-        type: "warning",
-      });
-
-      tokenStore.closeWebSocketConnection(tokenId);
-      await new Promise((r) => setTimeout(r, batchSettings.reconnectDelay));
-
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `正在重连...`,
-        type: "info",
-      });
-
-      const refreshedToken = tokens.value.find((t) => t.id === tokenId);
-      tokenStore.createWebSocketConnection(
-        tokenId,
-        refreshedToken.token,
-        refreshedToken.wsUrl,
-      );
-
-      connected = await waitForConnection(tokenId);
-    }
-
-    if (!connected) {
-      throw new Error("连接失败 (重试后仍超时)");
-    }
+      getToken: (id) => tokens.value.find((token) => token.id === id),
+      tokenStore,
+      waitForConnection,
+      maxRetries,
+      reconnectDelay: batchSettings.reconnectDelay,
+      shouldStop: () => shouldStop.value,
+      log: (text, type) => addLog({ time: new Date().toLocaleTimeString(), message: text, type }),
+    });
   }
 
   // 连接成功，槽位保持占用，直到任务完成后手动释放
@@ -7966,7 +7947,10 @@ const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null, op
   return options.readOnly ? initialRoleResult : mainLevelResult || true;
   } catch (error) {
     if (acquiredSlot) {
-      try { tokenStore.closeWebSocketConnection(tokenId); }
+      try {
+        if (tokenStore.closeWebSocketConnectionAsync) await tokenStore.closeWebSocketConnectionAsync(tokenId);
+        else tokenStore.closeWebSocketConnection(tokenId);
+      }
       finally {
         releaseConnectionSlot();
         onSlotChange?.(false);
