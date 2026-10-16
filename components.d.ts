@@ -59,6 +59,7 @@ declare module 'vue' {
     PeachInfo: typeof import('./src/components/Club/PeachInfo.vue')['default']
     PeachInfoV2: typeof import('./src/components/Club/PeachInfoV2.vue')['default']
     Rank: typeof import('./src/components/Club/Rank.vue')['default']
+    RechargeExchangeDialog: typeof import('./src/components/RechargeExchangeDialog.vue')['default']
     RecruitHelperCard: typeof import('./src/components/cards/RecruitHelperCard.vue')['default']
     RefineHelperCard: typeof import('./src/components/cards/RefineHelperCard.vue')['default']
     RoleProfileCard: typeof import('./src/components/Setting/RoleProfileCard.vue')['default']

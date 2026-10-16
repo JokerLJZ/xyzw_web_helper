@@ -433,6 +433,10 @@
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="dungeon" tab="副本">
+              <n-space style="margin-bottom: 12px">
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchRechargeStandard">充值活动标准任务</n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryRechargeExchangeItems">查询充值活动兑换物品</n-button>
+              </n-space>
               <n-space>
                 <n-button
                   size="small"
@@ -985,6 +989,7 @@
     </div>
 
     <!-- Settings Modal -->
+    <RechargeExchangeDialog v-model:show="rechargeExchangeOpen" :previews="rechargeExchangePreviews" @execute="batchRechargeExchange" />
     <n-modal
       v-model:show="showSettingsModal"
       preset="card"
@@ -3750,6 +3755,8 @@
 </template>
 
 <script setup>
+import RechargeExchangeDialog from "@/components/RechargeExchangeDialog.vue";
+import { createTasksRecharge } from "@/utils/batch/tasksRecharge.js";
 import { DEFAULT_WEIRD_TOWER_CLIMB_COUNT, normalizeWeirdTowerClimbCount } from "@/utils/evoTowerRewards.js";
 import {
   blackMarketItemCatalog, createBlackMarketPurchaseEntry,
@@ -4991,6 +4998,7 @@ const taskGroupDefinitions = [
       "batchClaimPeachTasks",
       "batchXuanwuBlessing",
       "batchClaimConsumptionRewards",
+      "batchRechargeStandard",
     ],
   },
   {
@@ -8210,6 +8218,7 @@ const confirmUpgradeLordTo6000 = () => {
   });
 };
 
+const { batchRechargeStandard, queryRechargeExchangeItems, batchRechargeExchange, rechargeExchangeOpen, rechargeExchangePreviews } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession });
 const tasksDungeon = createTasksDungeon(createTaskDeps());
 const {
   batchmengjing,
@@ -8365,6 +8374,7 @@ const getScheduledTaskFunction = (name) => {
     batchUpgradeHangUpAndClaimOrderRewards,
     batchXuanwuBlessing,
     batchClaimConsumptionRewards,
+    batchRechargeStandard,
     batchUseConsumptionActivityItems,
     batchExchangeXuanwuPetCookies,
     climbWeirdTower,

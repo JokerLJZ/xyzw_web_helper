@@ -396,6 +396,14 @@ export function registerDefaultCommands(reg) {
       activityId: 0,
       missionId: 0,
     })
+    .register("celebrate_getcelebrateinfo")
+    .register("celebrate_sign")
+    .register("celebrate_claimpersonal")
+    .register("celebrate_claimfullserver")
+    .register("celebrate_share")
+    .register("activity_maydaylottery")
+    .register("common_claimcardreward")
+    .register("common_claimtotalreward")
     .register("activity_commonbuygoods")
     .register("autumn_useitem", { itemNum: 1 })
     .register("legion_getpayloadtask")
@@ -1288,8 +1296,12 @@ export class XyzwWebSocketClient {
       activity_getlotteryinforesp: "activity_getlotteryinfo",
       activity_lotteryresp: "activity_lottery",
       activity_claimlotterycumulativeresp: "activity_claimlotterycumulative",
-      common_rewardresp: "activity_exchange",
+      celebrate_getcelebrateinforesp: ["celebrate_getcelebrateinfo", "celebrate_sign"],
+      celebrate_claimresp: ["celebrate_claimpersonal", "celebrate_claimfullserver", "celebrate_share"],
+      activity_maydaylotteryresp: "activity_maydaylottery",
+      common_rewardresp: ["activity_exchange", "common_claimcardreward", "common_claimtotalreward"],
       activity_rewardresp: [
+        "activity_exchange",
         "activity_claimtaskreward",
         "activity_claimsignreward",
       ],

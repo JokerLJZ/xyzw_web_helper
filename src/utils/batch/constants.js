@@ -108,6 +108,7 @@ export const availableTasks = [
     label: "挂机升级并领整数关卡奖励",
     value: "batchUpgradeHangUpAndClaimOrderRewards",
   },
+  { label: "充值活动标准任务", value: "batchRechargeStandard" },
   { label: "一键玄武赐福", value: "batchXuanwuBlessing" },
   {
     label: "领取消耗活动奖励",
