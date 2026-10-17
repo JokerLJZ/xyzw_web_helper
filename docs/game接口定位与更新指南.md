@@ -2,6 +2,20 @@
 
 本文基于 2026-10-11 对本仓库的检查。后续涉及游戏接口的功能，先从 `public/game/` 查询，不再默认先查询旧 GitHub API 采集库。该规则已写入仓库 `AGENTS.md`。
 
+## 2026-10-17：根据0.36.0安装包更新资源入口
+
+用户提供的 `20260924172834-android_0.36.0_Release_1278ee41.apk` 中，`assets/jsb-adapter/game-defines.js` 声明 `GAME_VERSION=0.36.0-android`，`assets/main.js` 以该版本调用manifest。原本地入口固定使用0.32.0，只能获取2.48.2；新参数实际返回2.50.3，已包含闲来入镜模块。
+
+现在 `public/game/game-defines.a175e.js` 单独维护 `REMOTE_MANIFEST_VERSION=0.36.0-android`；`main.2a00e.js` 从该参数和SERVER构造manifest URL，每次启动重新请求清单，按服务端哈希加载远程完整业务文件。未固定本次game哈希，也无需把十余MB解密代码复制进公共目录。
+
+本次清单：`COMMIT_ID=54a70b93`、`game=b72ac`、`launcher=91d6a`、`TEST_REMOTE_MODULE=c5e7c`、`codeVersion=2.50.3`，数据配置`0c3a7d906d`。浏览器控制台 `window.remoteGameResourceInfo` 可查看本次加载的清单版本、提交及三个业务哈希。
+
+保留h5web平台、现有浏览器SDK、引擎、本地internal资源、多账号桥接和H5兼容处理。安卓包的 `HSDK.app`、JSB适配和native settings不可直接覆盖网页文件；浏览器原有GAME_VERSION/CODE_VERSION不改为安卓平台标识。新增参数专用于启动时的远程资源选择。
+
+同时修复资源地址转换：输入已经是`.jsc`时不再重复追加`c`；普通miniGameScripts仍保持`.js`。清单缺少或包含无效launcher/game/协议哈希时停止启动，避免混用旧版本。新增加载器回归覆盖新版参数、动态清单、平台保留、响应包装格式、资源扩展名和失败不覆盖。
+
+后续更新应再次从最新官方客户端核对基础版本与加载方式；即使游戏配置版本相同，不同基础包版本也可能拿到不同业务资源。下文旧哈希为2026-10-11的历史分析示例，不能用来代替当前manifest。
+
 ## 1. game 文件夹里有什么
 
 仓库中的 game 文件夹是 `public/game/`。它不是完整的离线游戏源码，而是本地启动文件加远程资源加载器。

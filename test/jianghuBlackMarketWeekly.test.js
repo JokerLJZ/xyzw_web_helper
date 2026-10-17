@@ -141,7 +141,7 @@ test("忽略非法商品序号，次数归一化且限制最多四次", async ()
 test("黑市周按独立大奖配置领取", async () => {
   const scenario = createScenario({ progress: 100000, taskConfig: { purchases: {}, rewardChoice: 2 } });
   await scenario.run();
-  assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 12, selectRewardsMap: new Map([[0, 2]]) });
+  assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 12, selectRewardsMap: new Map([[1, 1]]) });
 });
 
 

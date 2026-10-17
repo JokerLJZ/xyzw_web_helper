@@ -12,6 +12,9 @@ gt.GAME_NAME = '咸鱼之王'
 gt.GAME_ID = 'xyzw_mix'
 gt.GAME_VERSION = '1.89.8-wx'
 gt.CODE_VERSION = '1.89.8'
+// 来自官方0.36.0安装包的assets/jsb-adapter/game-defines.js。
+// 仅用于获取远程资源清单，保持本页h5web平台和浏览器SDK配置。
+gt.REMOTE_MANIFEST_VERSION = '0.36.0-android'
 gt.COMMIT_ID = ''
 gt.CONFIG_COMMIT_ID = ''
 gt.RESOURCES_COMMIT_ID = ''

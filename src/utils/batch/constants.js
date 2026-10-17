@@ -109,6 +109,7 @@ export const availableTasks = [
     value: "batchUpgradeHangUpAndClaimOrderRewards",
   },
   { label: "充值活动标准任务", value: "batchRechargeStandard" },
+  { label: "闲来入镜任务", value: "batchPhotoStandard" },
   { label: "一键玄武赐福", value: "batchXuanwuBlessing" },
   {
     label: "领取消耗活动奖励",

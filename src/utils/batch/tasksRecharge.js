@@ -65,7 +65,7 @@ export function createTasksRecharge(deps, options = {}) {
     else if (failed) message.warning(`${label}处理结束，${failed}个账号未全部完成，请查看日志`);
     else message.success(`${label}处理结束`);
   }
-  const batchRechargeStandard = () => batch(context => runRechargeStandard(context));
+  const batchRechargeStandard = () => batch(context => (options.runStandard || runRechargeStandard)(context));
   const queryRechargeExchangeItems = async () => {
     rechargeExchangePreviews.value = [];
     await batch(async context => {

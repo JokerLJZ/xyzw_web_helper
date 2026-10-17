@@ -382,6 +382,8 @@ export function registerDefaultCommands(reg) {
     // 玄武赐福活动
     .register("activity_warorderget")
     .register("activity_warordertaskclaim")
+    .register("activity_photo")
+    .register("activity_claimphotoreward")
     .register("activity_warorderrewardclaim")
     .register("activity_getlotteryinfo")
     .register("activity_lottery")
@@ -1290,6 +1292,7 @@ export class XyzwWebSocketClient {
       role_gettargetteamresp: "role_gettargetteam",
       // 玄武赐福活动响应映射
       activity_warordergetresp: "activity_warorderget",
+      activity_photoresp: "activity_photo",
       activity_warorderclaimresp: [
         "activity_warorderrewardclaim",
         "activity_warordertaskclaim",
@@ -1304,6 +1307,7 @@ export class XyzwWebSocketClient {
       common_rewardresp: ["activity_exchange", "common_claimcardreward", "common_claimtotalreward"],
       activity_rewardresp: [
         "activity_exchange",
+        "activity_claimphotoreward",
         "activity_claimtaskreward",
         "activity_claimsignreward",
       ],

@@ -20,6 +20,9 @@ test("庆典各协议注册并匹配客户端声明的响应", async () => {
     ["celebrate_claimfullserver", "celebrate_claimresp"],
     ["activity_maydaylottery", "activity_maydaylotteryresp"],
     ["activity_exchange", "activity_rewardresp"],
+    ["activity_photo", "activity_photoresp"],
+    ["activity_claimphotoreward", "activity_rewardresp"],
+    ["activity_warordertaskclaim", "activity_warorderclaimresp"],
     ["common_claimcardreward", "common_rewardresp"],
     ["common_claimtotalreward", "common_rewardresp"],
   ]) {

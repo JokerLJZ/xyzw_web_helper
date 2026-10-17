@@ -319,7 +319,7 @@ window.convertAssets = function (url) {
   let newUrl = 'https://xxz-xyzw-res.hortorgames.com/remote/' + url.slice(7)
   if (url.startsWith('assets/game') || url.startsWith('assets/launcher') || url.startsWith('assets/TEST_REMOTE_MODULE')) {
     if (url.endsWith('.js') || url.endsWith('.jsc')) {
-      newUrl += 'c'
+      if (newUrl.endsWith('.js')) newUrl += 'c'
     }
   }
   return newUrl
@@ -360,11 +360,20 @@ window.parseRemoteBundleVers = function (settingsObj) {
     throw new Error('invalid remote bundleVers')
   }
 
+  for (const name of ['launcher', 'game', 'TEST_REMOTE_MODULE']) {
+    if (typeof bundleVers[name] !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(bundleVers[name])) {
+      throw new Error('remote bundleVers missing or invalid: ' + name)
+    }
+  }
+
   return bundleVers
 }
 
 window.loadRemoteBundleVers = async function () {
-  const manifestUrl = `https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=0.32.0-android`
+  if (typeof window.REMOTE_MANIFEST_VERSION !== 'string' || !window.REMOTE_MANIFEST_VERSION) {
+    throw new Error('remote manifest client version missing')
+  }
+  const manifestUrl = `${window.SERVER}/login/manifest?platform=hortor&version=${encodeURIComponent(window.REMOTE_MANIFEST_VERSION)}`
   console.log('[remoteAssets] POST manifest', manifestUrl)
 
   const settingsRes = await fetch(
@@ -394,6 +403,14 @@ window.loadRemoteBundleVers = async function () {
 
   const bundleVers = window.parseRemoteBundleVers(settingsObj)
   Object.assign(window._CCSettings.bundleVers, bundleVers)
+  window.remoteGameResourceInfo = {
+    manifestVersion: window.REMOTE_MANIFEST_VERSION,
+    codeVersion: bundleVers.codeVersion,
+    commit: bundleVers.COMMIT_ID,
+    launcher: bundleVers.launcher,
+    game: bundleVers.game,
+    protocol: bundleVers.TEST_REMOTE_MODULE
+  }
   console.log('[remoteAssets] 远程版本已拉取', {
     launcher: bundleVers.launcher,
     game: bundleVers.game,

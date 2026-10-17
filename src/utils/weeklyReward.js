@@ -1,5 +1,5 @@
-// API采集/养号/活动周奖励.txt、黑市周万能.txt：选择映射与 typ 分开传递。
-// 按游戏自选大奖顺序排列，接口选项编号从1开始。
+// 客户端 ActivityTimeRoundRewardDialog._onCommit: Map<奖励数组下标, 领取份数>。
+// 界面选择值保留1～6；招募周奖励数组首项为额外奖励，六项通用奖励后移一位。
 export const WEEKLY_REWARD_OPTIONS = [
   { value: 1, label: "150万能红碎片" },
   { value: 2, label: "7500晶石" },
@@ -15,4 +15,4 @@ export const normalizeWeeklyRewardChoice = (value) => {
   return WEEKLY_REWARD_OPTIONS.some((option) => option.value === choice) ? choice : 1;
 };
 export const createWeeklyRewardMap = (typ, choice) =>
-  new Map([[typ === 1 ? 1 : 0, normalizeWeeklyRewardChoice(choice)]]);
+  new Map([[normalizeWeeklyRewardChoice(choice) - (typ === 1 ? 0 : 1), 1]]);
