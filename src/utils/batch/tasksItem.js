@@ -6014,25 +6014,7 @@ export function createTasksItem(deps) {
     };
 
     const boxWeekClaimStatisticKey = "week:act:cr:cnt:2";
-    const chinaTimezoneOffsetMs = 8 * 60 * 60 * 1000;
-    const weekDurationMs = 7 * 24 * 60 * 60 * 1000;
-    const getCurrentBoxWeekCycleStart = (now = Date.now()) => {
-      // 游戏活动按北京时间周五12点刷新。将北京时间平移为UTC字段计算，
-      // 避免运行设备所在时区影响周期判断。
-      const chinaNow = new Date(now + chinaTimezoneOffsetMs);
-      const daysSinceFriday = (chinaNow.getUTCDay() - 5 + 7) % 7;
-      let cycleStart =
-        Date.UTC(
-          chinaNow.getUTCFullYear(),
-          chinaNow.getUTCMonth(),
-          chinaNow.getUTCDate() - daysSinceFriday,
-          12,
-        ) - chinaTimezoneOffsetMs;
-      if (cycleStart > now) cycleStart -= weekDurationMs;
-      return Math.floor(cycleStart / 1000);
-    };
-
-    const getBoxWeekClaimStats = (roleResult) => {
+    const getBoxWeekClaimStats = (roleResult, activityResult) => {
       const role =
         roleResult?.role ||
         roleResult?.data?.role ||
@@ -6056,11 +6038,20 @@ export function createTasksItem(deps) {
         statisticsTime > 1e12
           ? Math.floor(statisticsTime / 1000)
           : statisticsTime;
-      const cycleStart = getCurrentBoxWeekCycleStart();
+      const activity = activityResult?.activity || activityResult?.data?.activity || activityResult?.body?.activity;
+      const boxActivity = activity?.activity?.find((item) => Number(item?.id) === 2);
+      // 与客户端 getWeekActRoundInfo 一致，按该账号活动起止时间核对。
+      // 缺少活动时间时保留服务端计数，不能凭本机周五时间制造漏领奖励。
+      const openTime = Number(boxActivity?.openTime);
+      const endTime = Number(boxActivity?.endTime);
+      const hasActivityWindow = Number.isFinite(openTime) && openTime > 0 &&
+        Number.isFinite(endTime) && endTime >= openTime;
       const isStale =
         claimedRounds > 0 &&
         hasStatisticsTime &&
-        normalizedStatisticsTime < cycleStart;
+        hasActivityWindow &&
+        (normalizedStatisticsTime < Math.floor(openTime / 1000) ||
+          normalizedStatisticsTime > Math.floor(endTime / 1000));
 
       return {
         claimedRounds: isStale ? 0 : claimedRounds,
@@ -6069,8 +6060,8 @@ export function createTasksItem(deps) {
       };
     };
 
-    const getBoxWeekClaimedRounds = (roleResult) =>
-      getBoxWeekClaimStats(roleResult).claimedRounds;
+    const getBoxWeekClaimedRounds = (roleResult, activityResult) =>
+      getBoxWeekClaimStats(roleResult, activityResult).claimedRounds;
 
     const getBoxWeekState = (activityResult, claimedRoundsOverride = null) => {
       const activity =
@@ -6353,8 +6344,8 @@ export function createTasksItem(deps) {
           attempt === 1 && responseClaimedRounds > claimedBefore
             ? claimResult
             : await fetchRoleInfo(tokenId, token.name);
-        const claimedRounds = getBoxWeekClaimedRounds(roleInfo);
         activityResult = await fetchBoxActivity(tokenId, token.name);
+        const claimedRounds = getBoxWeekClaimedRounds(roleInfo, activityResult);
         boxWeekState = getBoxWeekState(activityResult, claimedRounds);
         if (boxWeekState.completedRounds > claimedBefore) {
           return { activityResult, boxWeekState };
@@ -6397,7 +6388,7 @@ export function createTasksItem(deps) {
 
         let activityResult = await fetchBoxActivity(tokenId, token.name);
         const initialRoleInfo = await fetchRoleInfo(tokenId, token.name, true);
-        const initialClaimStats = getBoxWeekClaimStats(initialRoleInfo);
+        const initialClaimStats = getBoxWeekClaimStats(initialRoleInfo, activityResult);
         if (initialClaimStats.isStale) {
           addLog({
             time: new Date().toLocaleTimeString(),

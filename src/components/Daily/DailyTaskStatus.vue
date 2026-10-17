@@ -588,8 +588,6 @@ const runDailyFix = async () => {
   logList.value = [];
 
   try {
-    log("=== 开始执行一键补差任务 ===");
-
     // 使用 DailyTaskRunner 执行任务
     const runner = new DailyTaskRunner(tokenStore, {
       commandDelay: settings.commandDelay,
@@ -600,19 +598,14 @@ const runDailyFix = async () => {
       tokenStore.selectedToken.id,
       {
         onLog: (logItem) => log(logItem.message, logItem.type),
-        onProgress: (progress) => {
-          log(`服务器每日任务完成并领奖: ${progress}%`);
-        },
       },
       settings,
     ); // 传入当前组件的响应式 settings
 
     const incomplete = result.incomplete;
     if (incomplete) {
-      log(`=== 本轮结束，${incomplete} 个步骤待继续 ===`, "warning");
       message.warning("仍有未完成步骤，再次补差将重新读取服务器任务状态");
     } else {
-      log("=== 任务执行完成 ===", "success");
       message.success("每日任务补差执行完成");
     }
   } catch (error) {

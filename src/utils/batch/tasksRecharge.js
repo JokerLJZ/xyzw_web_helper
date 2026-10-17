@@ -1,7 +1,9 @@
 import { ref } from "vue";
 import { loadRechargeConfig, queryRechargeExchange, exchangeRechargeItems, runRechargeStandard } from "../rechargeActivity.js";
 
-export function createTasksRecharge(deps) {
+export function createTasksRecharge(deps, options = {}) {
+  const label = options.label || "充值活动";
+  const queryExchange = options.queryExchange || queryRechargeExchange;
   const { selectedTokens, tokens, tokenStatus, isRunning, shouldStop, currentRunningTokenId, tokenStore, ensureConnection, releaseConnectionSlot, addLog, message } = deps;
   const rechargeExchangeOpen = ref(false);
   const rechargeExchangePreviews = ref([]);
@@ -59,15 +61,15 @@ export function createTasksRecharge(deps) {
       }
     }
     if (scheduled) return;
-    if (shouldStop.value) message.info("充值活动任务已停止");
-    else if (failed) message.warning(`充值活动处理结束，${failed}个账号未全部完成，请查看日志`);
-    else message.success("充值活动处理结束");
+    if (shouldStop.value) message.info(`${label}任务已停止`);
+    else if (failed) message.warning(`${label}处理结束，${failed}个账号未全部完成，请查看日志`);
+    else message.success(`${label}处理结束`);
   }
   const batchRechargeStandard = () => batch(context => runRechargeStandard(context));
   const queryRechargeExchangeItems = async () => {
     rechargeExchangePreviews.value = [];
     await batch(async context => {
-      const snapshot = await queryRechargeExchange(context.send, context.config, context.now());
+      const snapshot = await queryExchange(context.send, context.config, context.now());
       rechargeExchangePreviews.value.push({ ...snapshot, tokenId: context.id, tokenName: context.name });
     });
     if (rechargeExchangePreviews.value.length && !shouldStop.value) rechargeExchangeOpen.value = true;
@@ -83,7 +85,7 @@ export function createTasksRecharge(deps) {
     await batch(async context => {
       const preview = previews.find(row => row.tokenId === context.id);
       if (context.config.version !== preview.configVersion) throw new Error("活动配置已更新，请重新查询并选择兑换物品");
-      await exchangeRechargeItems({ ...context, selection, expectedActivityId: preview.activityId });
+      await (options.exchangeItems || exchangeRechargeItems)({ ...context, selection, preview, expectedActivityId: preview.activityId });
     });
     rechargeExchangePreviews.value = [];
   };

@@ -436,6 +436,8 @@
               <n-space style="margin-bottom: 12px">
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchRechargeStandard">充值活动标准任务</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryRechargeExchangeItems">查询充值活动兑换物品</n-button>
+                <n-button size="small" disabled title="当前官方客户端资源未包含闲来入镜协议，领取胶卷、放入胶卷与领奖暂待适配">闲来入镜任务（待适配）</n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryPhotoExchangeItems">闲来入镜商店兑换</n-button>
               </n-space>
               <n-space>
                 <n-button
@@ -990,6 +992,7 @@
 
     <!-- Settings Modal -->
     <RechargeExchangeDialog v-model:show="rechargeExchangeOpen" :previews="rechargeExchangePreviews" @execute="batchRechargeExchange" />
+    <RechargeExchangeDialog v-model:show="photoExchangeOpen" title="闲来入镜商店兑换" :previews="photoExchangePreviews" @execute="batchPhotoExchange" />
     <n-modal
       v-model:show="showSettingsModal"
       preset="card"
@@ -3758,6 +3761,7 @@
 import { connectWithTokenRefresh } from "@/utils/batch/connectWithTokenRefresh.js";
 import RechargeExchangeDialog from "@/components/RechargeExchangeDialog.vue";
 import { createTasksRecharge } from "@/utils/batch/tasksRecharge.js";
+import { queryPhotoExchange, exchangePhotoItems } from "@/utils/photoActivity.js";
 import { DEFAULT_WEIRD_TOWER_CLIMB_COUNT, normalizeWeirdTowerClimbCount } from "@/utils/evoTowerRewards.js";
 import {
   blackMarketItemCatalog, createBlackMarketPurchaseEntry,
@@ -8010,15 +8014,13 @@ const taskReleaseConnectionSlot = () => {
 };
 
 const taskAddLog = (log) => {
+  // The scheduler logs connection cleanup once after the account finishes.
   if (
     scheduledTokenSession.active &&
+    !["warning", "error"].includes(log?.type) &&
     typeof log?.message === "string" &&
-    log.message.includes("连接已关闭")
+    (log.message.includes("连接已关闭") || log.message.includes("断开连接"))
   ) {
-    addLog({
-      ...log,
-      message: log.message.replace("连接已关闭", "当前任务完成，保持连接"),
-    });
     return;
   }
   addLog(log);
@@ -8203,6 +8205,7 @@ const confirmUpgradeLordTo6000 = () => {
 };
 
 const { batchRechargeStandard, queryRechargeExchangeItems, batchRechargeExchange, rechargeExchangeOpen, rechargeExchangePreviews } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession });
+const { queryRechargeExchangeItems: queryPhotoExchangeItems, batchRechargeExchange: batchPhotoExchange, rechargeExchangeOpen: photoExchangeOpen, rechargeExchangePreviews: photoExchangePreviews } = createTasksRecharge(createTaskDeps(), { label: "闲来入镜", queryExchange: queryPhotoExchange, exchangeItems: exchangePhotoItems });
 const tasksDungeon = createTasksDungeon(createTaskDeps());
 const {
   batchmengjing,
@@ -8415,10 +8418,8 @@ const startBatch = async () => {
       const result = await runner.run(tokenId, {
         shouldStop: () => shouldStop.value,
         onLog: (log) => addLog({ ...log, message: `${token.name}: ${log.message}` }),
-        onProgress: (progress) => addLog({ time: new Date().toLocaleTimeString(), message: `${token.name}: 服务器每日任务完成并领奖 ${progress}%`, type: "info" }),
       });
       tokenStatus.value[tokenId] = result.incomplete ? "pending" : "completed";
-      addLog({ time: new Date().toLocaleTimeString(), message: result.incomplete ? `=== ${token.name} 本轮结束，${result.incomplete} 个步骤待继续 ===` : `=== ${token.name} 执行完成 ===`, type: result.incomplete ? "warning" : "success" });
     } catch (error) {
       tokenStatus.value[tokenId] = error.interrupted ? "stopped" : "failed";
       addLog({ time: new Date().toLocaleTimeString(), message: `${token.name}: ${error.message}`, type: error.interrupted ? "warning" : "error" });

@@ -103,13 +103,14 @@ function fixture(progress = {}) {
       return {};
     },
   };
-  const runner = () =>
+  const runner = (options = {}) =>
     new DailyTaskRunner(
       store,
       { commandDelay: 0, taskDelay: 0 },
       {
         loadConfig: async () => config,
         sleep: async () => {},
+        ...options,
       },
     );
   return {
@@ -588,7 +589,7 @@ test("logs update execution immediately and only confirm completion from server 
     return send(...args);
   };
   await f
-    .runner()
+    .runner({ verboseLogs: true })
     .run("account-a", { onLog: (log) => logs.push(log.message) }, settings);
   const initial = logs.findIndex((log) => log.includes("点金: 2/3 · 未完成"));
   const claimable = logs.findIndex((log) =>
@@ -607,7 +608,7 @@ test("already completed actions omitted from the plan still appear as skipped in
   const f = fixture();
   const logs = [];
   await f
-    .runner()
+    .runner({ verboseLogs: true })
     .run("account-a", { onLog: (log) => logs.push(log.message) }, settings);
   assert.equal(
     logs.filter((log) => log === "点金: 3/3 · 已完成并领奖，跳过").length,
@@ -903,6 +904,7 @@ for (const cmd of ["task_claimdailyreward", "task_claimweekreward"]) {
 
 test("200020核对未领取，不重发且待核对日志使用最新状态", async () => {
   const f = pacedRewardFixture();
+  f.runner.verboseLogs = true;
   const send = f.store.sendMessageWithPromise;
   const logs = [];
   const callbacks = { onLog: entry => logs.push(entry.message) };
@@ -959,4 +961,38 @@ test("领奖角色增量同步到执行状态，保留未返回的其他字段",
   assert.equal(result.remainingRewards, 0);
   assert.equal(f.runner.roleData.dailyTask.dailyPoint, 40);
   assert.equal(f.calls.filter(c => c.cmd === "role_getroleinfo").length, 3);
+});
+
+test("精简日志减少一半以上输出，并保留相同请求、进度回调及核对结果", async () => {
+  const execute = async verboseLogs => {
+    const f = fixture({ 6: 2 });
+    const logs = [], progress = [];
+    const result = await f.runner({ verboseLogs }).run("account-a", {
+      onLog: entry => logs.push(entry), onProgress: value => progress.push(value),
+    }, settings);
+    return { logs, progress, result, calls: f.calls };
+  };
+  const concise = await execute(false), verbose = await execute(true);
+  assert.deepEqual(concise.calls, verbose.calls);
+  assert.deepEqual(concise.result, verbose.result);
+  assert.deepEqual(concise.progress, verbose.progress);
+  assert.ok(concise.logs.length < verbose.logs.length / 2, `${concise.logs.length}/${verbose.logs.length}`);
+  assert.ok(concise.logs.some(entry => /免费点金.*已执行/.test(entry.message)));
+  assert.ok(concise.logs.some(entry => entry.message.includes("日常结束：")));
+  assert.ok(!concise.logs.some(entry => /领奖阶段请求|本轮步骤处理进度|请求成功，待服务器确认/.test(entry.message)));
+});
+
+test("精简模式保留错误、未完成原因与奖励核对，不把请求成功误报任务完成", async () => {
+  const f = fixture({ 6: 2 });
+  const originalSend = f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise = async (...args) => {
+    if (args[1] === "system_buygold") throw new Error("服务器错误: 400010 - 物品不足");
+    return originalSend(...args);
+  };
+  const logs = [];
+  const result = await f.runner().run("account-a", { onLog: entry => logs.push(entry) }, settings);
+  assert.ok(result.incomplete > 0);
+  assert.ok(logs.some(entry => entry.type === "error" && entry.message.includes("物品不足")));
+  assert.ok(logs.some(entry => entry.type === "warning" && entry.message.includes("未确认完成")));
+  assert.ok(logs.some(entry => entry.message.includes("活跃奖励服务器核对")));
 });

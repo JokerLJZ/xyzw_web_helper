@@ -359,6 +359,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class DailyTaskRunner {
   constructor(tokenStore, delaySettings = null, options = {}) {
+    this.verboseLogs = options.verboseLogs === true;
     this.loadConfig = options.loadConfig || loadDailyTaskConfig;
     this.sleep =
       options.sleep ||
@@ -383,6 +384,11 @@ export class DailyTaskRunner {
     }
   }
 
+  // Detailed transport/state diagnostics are opt-in; results remain visible.
+  logDetail(message, type = "info") {
+    if (this.verboseLogs) this.log(message, type);
+  }
+
   /**
    * Send once; uncertain results stop this run and require a fresh server snapshot.
    * @param {string} tokenId Account identity.
@@ -399,7 +405,7 @@ export class DailyTaskRunner {
     }
     if (this.rewardPhase && command) {
       const previous = this.lastResponseAt.get(tokenId);
-      this.log(`领奖阶段请求 ${command}，距上次响应 ${previous === undefined ? "首次请求" : `${Math.max(0, this.now() - previous)}ms`}`);
+      this.logDetail(`领奖阶段请求 ${command}，距上次响应 ${previous === undefined ? "首次请求" : `${Math.max(0, this.now() - previous)}ms`}`);
     }
     try {
       const response = await request();
@@ -418,7 +424,7 @@ export class DailyTaskRunner {
     timeout = 8000,
   ) {
     try {
-      if (description) this.log(`执行: ${description}`);
+      if (description) this.logDetail(`执行: ${description}`);
       this.roleStateDirty = true;
       const result = await this.sendRequest(tokenId, () =>
         this.tokenStore.sendMessageWithPromise(tokenId, cmd, params, timeout),
@@ -429,7 +435,7 @@ export class DailyTaskRunner {
       if (snapshot && rolePatch) mergeRoleSnapshot(snapshot, rolePatch);
       await this.sleep(this.delaySettings.commandDelay);
       if (description)
-        this.log(
+        this.logDetail(
           `${description} - ${this.activeCondition !== undefined || /^task_claim(?:daily|week)reward$/.test(cmd) ? "请求成功，待服务器确认任务状态" : "成功"}`,
           this.activeCondition !== undefined || /^task_claim(?:daily|week)reward$/.test(cmd) ? "info" : "success",
         );
@@ -829,7 +835,7 @@ export class DailyTaskRunner {
     );
     const role = extractRolePatch(roleInfoRes) || {};
     this.roleSnapshots.set(tokenId, role);
-    this.log(`${description}：已建立角色快照`);
+    this.logDetail(`${description}：已建立角色快照`);
     return role;
   }
 
@@ -1401,7 +1407,7 @@ export class DailyTaskRunner {
             : state.status === "claimable"
               ? "已完成，待领奖，跳过重复操作"
               : `未完成，剩余 ${state.remaining}`;
-        this.log(
+        this.logDetail(
           `${label}: ${state.progress}/${state.required} · ${status}`,
           state.status === "pending" ? "info" : "success",
         );
@@ -1470,7 +1476,7 @@ export class DailyTaskRunner {
     this.throwIfInterrupted(tokenId);
     const settings = customSettings || this.loadSettings(tokenId);
     if (!settings) throw new Error("每日任务设置无法读取");
-    this.log("读取服务器任务配置与当前任务列表...");
+    this.logDetail("读取服务器任务配置与当前任务列表...");
     this.taskConfig = await this.loadConfig(
       {
         sendMessageWithPromise: (id, cmd, params, timeout) =>
@@ -1484,7 +1490,7 @@ export class DailyTaskRunner {
     this.taskDay = roleData.dailyTask.dailyTime;
     this.taskWeek = roleData.dailyTask.weekTime;
 
-    this.log("开始执行每日任务补差");
+    this.logDetail("开始执行每日任务补差");
 
     // A reached target is completed even when its points are not yet claimed.
     const isTaskCompleted = (condition) =>
@@ -1887,7 +1893,7 @@ export class DailyTaskRunner {
           execute: () => this.runHolyBeastFragmentPurchase(tokenId),
         });
       } else {
-        this.log("四圣碎片购买跳过：仅周一执行", "info");
+        this.logDetail("四圣碎片购买跳过：仅周一执行", "info");
       }
     }
 
@@ -1898,7 +1904,7 @@ export class DailyTaskRunner {
           execute: () => this.runWhiteJadePurchase(tokenId),
         });
       } else {
-        this.log("白玉购买跳过：仅周一执行", "info");
+        this.logDetail("白玉购买跳过：仅周一执行", "info");
       }
     }
 
@@ -1911,7 +1917,7 @@ export class DailyTaskRunner {
       if (isChinaMonday()) {
         taskList.push({ name: "周一采购万能红碎片及成长脆饼", execute: () => this.runMondayResourcePurchase(tokenId) });
       } else {
-        this.log("万能红碎片及成长脆饼采购跳过：仅北京时间周一执行", "info");
+        this.logDetail("万能红碎片及成长脆饼采购跳过：仅北京时间周一执行", "info");
       }
     }
 
@@ -1942,7 +1948,7 @@ export class DailyTaskRunner {
       && !isFreeGachaOpenDay()
       && isTodayAvailable(statistics["gacha:free"])
     ) {
-      this.log("免费扭蛋跳过：仅周二、周四、周六执行", "info");
+      this.logDetail("免费扭蛋跳过：仅周二、周四、周六执行", "info");
     }
 
     // 5. 免费活动
@@ -2143,7 +2149,7 @@ export class DailyTaskRunner {
     const attemptedConditions = new Set();
     const attemptedClaims = new Set();
     const totalTasks = taskList.length;
-    this.log(`共有 ${totalTasks} 个步骤；每日任务按本轮服务器详情补差`);
+    this.log(`开始日常任务，共${totalTasks}个步骤`);
     let claimsStarted = false;
     try {
       for (let i = 0; i < taskList.length; i++) {
@@ -2163,7 +2169,7 @@ export class DailyTaskRunner {
                 ? previous.status !== "claimable"
                 : previous.status !== "pending"
             ) {
-              this.log(`跳过 ${task.name}: 服务器任务列表确认无需执行`);
+              this.logDetail(`跳过 ${task.name}: 服务器任务列表确认无需执行`);
               summary.skipped++;
               continue;
             }
@@ -2172,7 +2178,7 @@ export class DailyTaskRunner {
             attemptedConditions.add(task.condition);
           if (task.claimCondition !== undefined)
             attemptedClaims.add(task.claimCondition);
-          this.log(`执行中: ${task.name}`);
+          this.logDetail(`执行中: ${task.name}`);
           const result = await task.execute();
           if (
             result === false &&
@@ -2183,7 +2189,7 @@ export class DailyTaskRunner {
             supplementalIncomplete++;
           } else summary.completed++;
           this.log(
-            `${task.name}: ${result === false && !task.checkOnly ? "待继续" : task.condition !== undefined || task.claimCondition !== undefined ? "已执行，等待集中核对服务器状态" : "已处理"}`,
+            `${task.name}: ${result === false && !task.checkOnly ? "待继续" : task.condition !== undefined || task.claimCondition !== undefined ? "已执行" : "已处理"}`,
             "info",
           );
           await this.sleep(this.delaySettings.taskDelay);
@@ -2204,7 +2210,7 @@ export class DailyTaskRunner {
           throw error;
         } finally {
           this.activeCondition = undefined;
-          this.log(
+          this.logDetail(
             `本轮步骤处理进度: ${i + 1}/${totalTasks}（${Math.floor(((i + 1) / totalTasks) * 100)}%），跳过 ${summary.skipped} 项，失败 ${summary.failed} 项`,
           );
         }
@@ -2272,7 +2278,7 @@ export class DailyTaskRunner {
     this.log(
       summary.incomplete
         ? `本轮结束，${summary.incomplete} 个步骤未确认完成；下次重新读取服务器任务列表`
-        : "本轮服务器任务补差结束",
+        : `日常结束：处理${summary.completed}步，跳过${summary.skipped}步，失败${summary.failed}步，服务器任务已核对`,
       summary.incomplete ? "warning" : "success",
     );
     return summary;

@@ -15,6 +15,8 @@ const createSmartBoxScenario = ({
   currentRound = completedRounds + 1,
   finalRewardClaimCount = completedRounds,
   claimStatisticsTime = Math.floor(Date.now() / 1000),
+  activityOpenTime = Date.now() - 7 * 86400000,
+  activityEndTime = Date.now() + 7 * 86400000,
   claimAdvancesRound = true,
   autoAdvanceRoundAt8000 = false,
   rejectSmallOpenWhenStockAtLeast10 = false,
@@ -96,7 +98,7 @@ const createSmartBoxScenario = ({
                 complete: { 4: boxWeekEarnedRoundCount },
               },
             },
-            activity: [{ id: 2, data: { rewards: Array(5).fill({}) } }],
+            activity: [{ id: 2, openTime: activityOpenTime, endTime: activityEndTime, data: { rewards: Array(5).fill({}) } }],
           },
         };
       }
@@ -665,3 +667,29 @@ test("宝箱周领取所选大奖并保持数字映射键", async () => {
   await scenario.run();
   assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params, { typ: 2, selectRewardsMap: new Map([[0, 2]]) });
 });
+
+for (const missingWindow of [false, true]) {
+  test(`珍珠大奖已领四轮：${missingWindow ? "缺少活动时间" : "仍在活动期内"}不按周五清零`, async () => {
+    const scenario = createSmartBoxScenario({
+      inventory: { 2004: 160 }, rewardChoice: 6, groupCount: 1,
+      completedRounds: 4, currentRound: 2, earnedRounds: 1,
+      finalRewardClaimCount: 4,
+      claimStatisticsTime: Math.floor(Date.now() / 1000) - 6 * 86400,
+      ...(missingWindow ? { activityOpenTime: null, activityEndTime: null } : {}),
+    });
+    await scenario.run();
+    assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 0);
+    assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
+    assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+  });
+}
+
+for (const rewardChoice of [1, 2, 3, 4, 5, 6]) {
+  test(`宝箱周选项${rewardChoice}正确发送自选映射`, async () => {
+    const scenario = createSmartBoxScenario({ inventory: {}, currentProgress: 8000, rewardChoice });
+    await scenario.run();
+    assert.deepEqual(scenario.commands.find(({ cmd }) => cmd === "activity_claimweekactreward").params,
+      { typ: 2, selectRewardsMap: new Map([[0, rewardChoice]]) });
+    assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+  });
+}

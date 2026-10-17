@@ -92,6 +92,10 @@ export async function queryRechargeExchange(send, config, now = Date.now()) {
   const event = findRechargeActivity(config, now);
   const activity = event?.byType(2);
   if (!activity) throw new Error("当前没有可识别的充值兑换活动");
+  return queryActivityExchange(send, config, event, activity);
+}
+
+export async function queryActivityExchange(send, config, event, activity) {
   const info = commonInfo(await send("activity_get", {}));
   const roleResponse = await send("role_getroleinfo", {});
   const role = extractRolePatch(roleResponse) || activityBody(roleResponse)?.role;
@@ -105,26 +109,28 @@ export async function queryRechargeExchange(send, config, now = Date.now()) {
     const cost = validNumber(row.consumeNum, "兑换价格");
     const remaining = row.limitNum > 0 ? Math.max(0, row.limitNum - used) : Infinity;
     const locked = spent < Number(row.unlockNeed || 0);
-    return { ...row, name: rewardText(config, row.resourceType, row.rewardId), used, remaining, locked, max: locked || cost <= 0 ? 0 : Math.min(remaining, Math.floor(stock / cost)) };
+    const skin = Number(row.resourceType) === 11 ? mapGet(config.SkinConf, row.rewardId) : null;
+    const owned = !!skin && mapGet(mapGet(role.heroes, skin.heroId)?.skin, row.rewardId) !== undefined;
+    return { ...row, name: rewardText(config, row.resourceType, row.rewardId), used, remaining, locked, owned, max: locked || owned || cost <= 0 ? 0 : Math.min(remaining, Math.floor(stock / cost)) };
   });
   return { eventCode: event.code, eventName: event.name, activityId: activity.id, end: activity.end, itemId: activity.itemId, itemName: rewardText(config, 3, activity.itemId), stock, spent, rows, configVersion: config.version };
 }
 
 /** 每项按用户选择顺序执行；每次重新查询库存和限购，不在写超时后重发。 */
-export async function exchangeRechargeItems({ send, config, selection, expectedActivityId, now = Date.now, log = () => {} }) {
+export async function exchangeRechargeItems({ send, config, selection, expectedActivityId, now = Date.now, log = () => {}, query = queryRechargeExchange }) {
   for (const choice of selection) {
     if (!Number.isSafeInteger(choice.quantity) || choice.quantity <= 0) throw new Error("兑换数量必须为正整数");
-    const snapshot = await queryRechargeExchange(send, config, now());
+    const snapshot = await query(send, config, now());
     if (snapshot.activityId !== expectedActivityId) throw new Error("活动已切期，请重新查询并选择商品");
     const row = snapshot.rows.find(row => row.id === choice.goodsId);
     if (!row || row.max < choice.quantity) throw new Error(`${row?.name || choice.goodsId} 库存、解锁条件或限购不足，停止该账号兑换`);
     try {
       await send("activity_exchange", { activityId: snapshot.activityId, goodsId: row.id, quantity: choice.quantity });
     } catch (error) {
-      await queryRechargeExchange(send, config, now()).catch(() => {});
+      await query(send, config, now()).catch(() => {});
       throw new Error(`兑换结果待核实，已停止且不自动重试：${error.message}`);
     }
-    const after = await queryRechargeExchange(send, config, now());
+    const after = await query(send, config, now());
     const updated = after.rows.find(item => item.id === row.id);
     if (after.activityId !== snapshot.activityId || updated?.used !== row.used + choice.quantity) throw new Error("兑换记录未确认，已停止且不自动重试");
     log(`已兑换 ${row.name} ×${row.rewardNum * choice.quantity}，消耗${choice.quantity * row.consumeNum}个${snapshot.itemName}`);
