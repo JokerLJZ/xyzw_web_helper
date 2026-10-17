@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findRechargeActivity, remainingBarbecue, queryRechargeExchange, exchangeRechargeItems, runRechargeStandard, rewardText } from "../src/utils/rechargeActivity.js";
+import { loadRechargeExchangeCatalog, findRechargeActivity, remainingBarbecue, queryRechargeExchange, exchangeRechargeItems, runRechargeStandard, rewardText } from "../src/utils/rechargeActivity.js";
 const NOW = Date.parse("2026-10-16T13:00:00+08:00");
 const root = { id: 20261016, name: "周年", start: NOW / 1000 - 3600, end: NOW / 1000 + 86400 };
 const act = (id, actType, extra = {}) => ({ id, actType, start: root.start, end: root.end, actGroup: 0, ...extra });
@@ -134,4 +134,48 @@ test("用户停止中断后续阶段", async () => {
   const error = new Error("停止"); error.stopped = true;
   const config = base(); config.ActFestivalConf[3] = act(13, 13);
   await assert.rejects(runRechargeStandard({ send: async () => { throw error; }, config, now: () => NOW }), /停止/);
+});
+
+test("预设兑换跳过库存不足项，继续兑换后续可用物品，各账号独立核对", async () => {
+  for (const stock of [0, 2]) {
+    const account = server({ stock });
+    const logs = [];
+    await exchangeRechargeItems({ ...account, config: base(), expectedActivityId: 11, now: () => NOW, skipUnavailable: true,
+      selection: [{ goodsId: 101, quantity: 5 }, { goodsId: 101, quantity: 1 }], log: text => logs.push(text) });
+    assert.equal(account.calls.filter(([cmd]) => cmd === "activity_exchange").length, stock ? 1 : 0);
+    assert.ok(logs[0].startsWith("跳过"));
+  }
+});
+test("预设兑换遇到明确拒绝继续下一项，超时仍停止且不重发", async () => {
+  for (const rejected of [true, false]) {
+    const account = server(); let writes = 0;
+    const send = async (cmd, params) => {
+      if (cmd === "activity_exchange" && ++writes === 1) {
+        const error = new Error(rejected ? "服务器拒绝" : "timeout"); error.serverRejected = rejected; throw error;
+      }
+      return account.send(cmd, params);
+    };
+    const task = exchangeRechargeItems({ send, config: base(), expectedActivityId: 11, now: () => NOW, skipUnavailable: true,
+      selection: [{ goodsId: 101, quantity: 1 }, { goodsId: 101, quantity: 1 }] });
+    if (rejected) { await task; assert.equal(writes, 2); }
+    else { await assert.rejects(task, /不自动重试/); assert.equal(writes, 1); }
+  }
+});
+
+test("公共预设清单按当前manifest配置生成中文物品、成本和顺序，不查询账号", async () => {
+  const config = base(); const calls = [];
+  const fetcher = async (url, options) => {
+    calls.push([url, options]);
+    return { ok: true, json: async () => url.includes("/manifest?") ? { body: JSON.stringify({ dataBundleVer: "catalog-test-v1" }) }
+      : url.endsWith("config.json") ? config : { LanguageConf: { names: { 奖励: { chinese: "测试奖励" } } } } };
+  };
+  const catalog = await loadRechargeExchangeCatalog(fetcher, NOW);
+  assert.equal(catalog.rows[0].name, "测试奖励");
+  assert.equal(catalog.rows[0].consumeNum, 2);
+  assert.equal(catalog.activityId, 11);
+  assert.equal(catalog.configVersion, "catalog-test-v1");
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0][1].method, "POST");
+  assert.equal(calls[0][1].cache, "no-store");
+  assert.equal(catalog.stock, undefined);
 });

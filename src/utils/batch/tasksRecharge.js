@@ -1,9 +1,8 @@
 import { ref } from "vue";
-import { loadRechargeConfig, queryRechargeExchange, exchangeRechargeItems, runRechargeStandard } from "../rechargeActivity.js";
+import { loadRechargeConfig, loadRechargeExchangeCatalog, exchangeRechargeItems, runRechargeStandard } from "../rechargeActivity.js";
 
 export function createTasksRecharge(deps, options = {}) {
   const label = options.label || "充值活动";
-  const queryExchange = options.queryExchange || queryRechargeExchange;
   const { selectedTokens, tokens, tokenStatus, isRunning, shouldStop, currentRunningTokenId, tokenStore, ensureConnection, releaseConnectionSlot, addLog, message } = deps;
   const rechargeExchangeOpen = ref(false);
   const rechargeExchangePreviews = ref([]);
@@ -30,11 +29,17 @@ export function createTasksRecharge(deps, options = {}) {
           let serverOffset = 0;
           const send = async (cmd, params = {}) => {
             if (shouldStop.value) { const error = new Error("任务已停止"); error.stopped = true; throw error; }
-            const result = await tokenStore.sendMessageWithPromise(id, cmd, params, 15000);
+            let result;
+            try { result = await tokenStore.sendMessageWithPromise(id, cmd, params, 15000); }
+            catch (error) {
+              // WebSocket 客户端将带明确错误码的响应转为此格式的拒绝。
+              if (/^服务器错误: \d+ - /.test(error.message)) error.serverRejected = true;
+              throw error;
+            }
             const timestamp = Number(result?._raw?.time);
             if (timestamp > 1e12) serverOffset = timestamp - Date.now();
             const code = result?._raw?.code ?? result?.code;
-            if (code) throw new Error(`服务器返回错误${code}`);
+            if (code) { const error = new Error(`服务器返回错误${code}`); error.serverRejected = true; throw error; }
             await new Promise(resolve => setTimeout(resolve, 500));
             return result;
           };
@@ -67,25 +72,38 @@ export function createTasksRecharge(deps, options = {}) {
   }
   const batchRechargeStandard = () => batch(context => (options.runStandard || runRechargeStandard)(context));
   const queryRechargeExchangeItems = async () => {
+    if (isRunning.value) return;
     rechargeExchangePreviews.value = [];
-    await batch(async context => {
-      const snapshot = await queryExchange(context.send, context.config, context.now());
-      rechargeExchangePreviews.value.push({ ...snapshot, tokenId: context.id, tokenName: context.name });
-    });
-    if (rechargeExchangePreviews.value.length && !shouldStop.value) rechargeExchangeOpen.value = true;
+    if (options.queryExchange) {
+      await batch(async context => {
+        const snapshot = await options.queryExchange(context.send, context.config, context.now());
+        rechargeExchangePreviews.value.push({ ...snapshot, tokenId: context.id, tokenName: context.name });
+      });
+      if (rechargeExchangePreviews.value.length && !shouldStop.value) rechargeExchangeOpen.value = true;
+      return;
+    }
+    isRunning.value = true;
+    try {
+      const catalog = await (options.loadCatalog || loadRechargeExchangeCatalog)();
+      rechargeExchangePreviews.value = [catalog];
+      rechargeExchangeOpen.value = true;
+    } catch (error) {
+      message.warning(`兑换物品清单加载失败：${error.message}`);
+    } finally { isRunning.value = false; }
   };
   const batchRechargeExchange = async selection => {
-    if (!selection.length) return;
+    if (!selection.length || isRunning.value) return;
     const previews = rechargeExchangePreviews.value;
-    if (selectedTokens.value.some(id => !previews.some(row => row.tokenId === id))) {
-      message.warning("账号选择已变化或查询失败，请重新查询兑换物品");
-      return;
+    const catalog = previews[0];
+    if (!catalog) return;
+    if (options.queryExchange && selectedTokens.value.some(id => !previews.some(row => row.tokenId === id))) {
+      message.warning("账号选择已变化或查询失败，请重新查询兑换物品"); return;
     }
     rechargeExchangeOpen.value = false;
     await batch(async context => {
-      const preview = previews.find(row => row.tokenId === context.id);
-      if (context.config.version !== preview.configVersion) throw new Error("活动配置已更新，请重新查询并选择兑换物品");
-      await (options.exchangeItems || exchangeRechargeItems)({ ...context, selection, preview, expectedActivityId: preview.activityId });
+      const preview = options.queryExchange ? previews.find(row => row.tokenId === context.id) : catalog;
+      if (context.config.version !== preview.configVersion) throw new Error("活动配置已更新，请重新打开物品清单");
+      await (options.exchangeItems || exchangeRechargeItems)({ ...context, selection, preview, skipUnavailable: !options.queryExchange, expectedActivityId: preview.activityId });
     });
     rechargeExchangePreviews.value = [];
   };

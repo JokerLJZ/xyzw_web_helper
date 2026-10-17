@@ -1,3 +1,4 @@
+import { normalizeTaskResultStatus } from "./scheduledTaskResult.js";
 /**
  * WxPusher / PushPlus 推送工具
  * WxPusher 文档: https://wxpusher.zjiecode.com/docs
@@ -194,6 +195,7 @@ export function formatRedFeatherCatchNotification(results) {
  * @returns {{title: string, content: string}}
  */
 export function formatScheduledTaskNotification(taskName, tokenResults, startTime, upcomingTasks = null) {
+  tokenResults = tokenResults.map(result => ({ ...result, status: normalizeTaskResultStatus(result.status) }));
   const total = tokenResults.length;
   const completed = tokenResults.filter((r) => r.status === "completed").length;
   const failed = tokenResults.filter((r) => r.status === "failed").length;
@@ -207,8 +209,8 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
   const durationStr = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
   const endTime = new Date().toLocaleTimeString();
 
-  const statusIcon = failed === 0 && pending === 0 && stopped === 0 ? "✅" : "⚠️";
-  const title = `${statusIcon} 定时任务${pending || stopped ? "执行结束" : "完成"}: ${taskName} (${completed}/${total})`;
+  const statusIcon = total > 0 && completed === total ? "✅" : "⚠️";
+  const title = `${statusIcon} 定时任务${completed === total ? "完成" : "执行结束"}: ${taskName} (${completed}/${total})`;
 
   const lines = [
     `## ${statusIcon} 定时任务执行完毕`,
@@ -286,6 +288,7 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
  * @returns {{title: string, content: string}}
  */
 export function formatBatchTaskNotification(tokenResults, startTime) {
+  tokenResults = tokenResults.map(result => ({ ...result, status: normalizeTaskResultStatus(result.status) }));
   const total = tokenResults.length;
   const completed = tokenResults.filter((r) => r.status === "completed").length;
   const failed = tokenResults.filter((r) => r.status === "failed").length;
@@ -298,8 +301,8 @@ export function formatBatchTaskNotification(tokenResults, startTime) {
   const durationStr = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
   const endTime = new Date().toLocaleTimeString();
 
-  const statusIcon = failed === 0 && pending === 0 && stopped === 0 ? "✅" : "⚠️";
-  const title = `${statusIcon} 批量日常任务${pending || stopped ? "执行结束" : "完成"} (${completed}/${total})`;
+  const statusIcon = total > 0 && completed === total ? "✅" : "⚠️";
+  const title = `${statusIcon} 批量日常任务${completed === total ? "完成" : "执行结束"} (${completed}/${total})`;
 
   const lines = [
     `## ${statusIcon} 批量日常任务执行完毕`,

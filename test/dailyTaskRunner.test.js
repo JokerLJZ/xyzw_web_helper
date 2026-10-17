@@ -1,3 +1,4 @@
+import { summarizeScheduledAccount } from "../src/utils/scheduledTaskResult.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DailyTaskRunner } from "../src/utils/dailyTaskRunner.js";
@@ -631,6 +632,7 @@ test("a reward acknowledgement without a server claim remains pending in the fin
   const result = await f.runner().run("account-a", {}, settings);
   assert.equal(result.remainingRewards, 3);
   assert.equal(result.incomplete, 3);
+  assert.equal(summarizeScheduledAccount([result.incomplete ? "pending" : "completed", "completed"]), "pending");
 });
 
 test("pending counts include distinct supplemental failures without counting a failed daily goal twice", async () => {

@@ -436,7 +436,7 @@
             <n-tab-pane name="dungeon" tab="副本">
               <n-space style="margin-bottom: 12px">
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchRechargeStandard">充值活动标准任务</n-button>
-                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryRechargeExchangeItems">查询充值活动兑换物品</n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryRechargeExchangeItems">充值活动兑换物品</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoStandard">闲来入镜任务</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryPhotoExchangeItems">闲来入镜商店兑换</n-button>
               </n-space>
@@ -992,7 +992,7 @@
     </div>
 
     <!-- Settings Modal -->
-    <RechargeExchangeDialog v-model:show="rechargeExchangeOpen" :previews="rechargeExchangePreviews" @execute="batchRechargeExchange" />
+    <RechargeExchangeDialog v-model:show="rechargeExchangeOpen" :preset="true" :previews="rechargeExchangePreviews" @execute="batchRechargeExchange" />
     <RechargeExchangeDialog v-model:show="photoExchangeOpen" title="闲来入镜商店兑换" :previews="photoExchangePreviews" @execute="batchPhotoExchange" />
     <n-modal
       v-model:show="showSettingsModal"
@@ -3802,6 +3802,7 @@ import {
 } from "vue";
 import { useTokenStore, gameTokens, tokenGroups } from "@/stores/tokenStore";
 import { $emit } from "@/stores/events/index.ts";
+import { normalizeTaskResultStatus, summarizeScheduledAccount } from "@/utils/scheduledTaskResult.js";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import {
   buildSnapshotWithIndexedDB,
@@ -6412,6 +6413,8 @@ const executeScheduledTask = async (task) => {
     // Always use the latest selectedTokens from the task that exist in current tokens.value
     selectedTokens.value = [...availableTokens];
 
+    availableTokens.forEach(tokenId => { tokenStatus.value[tokenId] = "waiting"; });
+
     const selectedTaskNames = task.selectedTasks.filter((taskName) => {
       if (integratedDailyTaskNames.includes(taskName)) return false;
       if (
@@ -6517,6 +6520,7 @@ const executeScheduledTask = async (task) => {
           message: `跳过任务: ${taskLabel(taskName)} (${activitySkipReason})`,
           type: "warning",
         });
+        tokenStatus.value[tokenId] = "skipped";
         return;
       }
 
@@ -6543,6 +6547,7 @@ const executeScheduledTask = async (task) => {
             message: `跳过任务: ${taskLabel(taskName)} (该账号已排除功法任务)`,
             type: "info",
           });
+          tokenStatus.value[tokenId] = "skipped";
           return;
         }
 
@@ -6596,7 +6601,7 @@ const executeScheduledTask = async (task) => {
       tokenStatus.value[tokenId] = "running";
       beginScheduledTokenSession(tokenId);
 
-      let accountHasFailure = false;
+      const accountTaskStatuses = [];
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -6610,7 +6615,12 @@ const executeScheduledTask = async (task) => {
           if (shouldStop.value) break;
 
           try {
+            tokenStatus.value[tokenId] = "running";
             const taskResult = await executeTaskForToken(taskName, tokenId);
+            // Legacy tasks may resolve without writing a row status; daily tasks must
+            // explicitly report their server-verified result.
+            const status = tokenStatus.value[tokenId];
+            accountTaskStatuses.push(status === "running" && taskName !== "startBatch" ? "completed" : normalizeTaskResultStatus(status));
             if (
               taskName === "batchPushMainLevelInfo" &&
               Array.isArray(taskResult)
@@ -6620,12 +6630,9 @@ const executeScheduledTask = async (task) => {
             if (taskName === "batchCheckSaltMasters" && Array.isArray(taskResult)) {
               aggregatedSaltMasterResults.push(...taskResult);
             }
-            if (tokenStatus.value[tokenId] === "failed") {
-              accountHasFailure = true;
-            }
           } catch (error) {
-            accountHasFailure = true;
-            tokenStatus.value[tokenId] = "failed";
+            accountTaskStatuses.push(error.interrupted ? "stopped" : "failed");
+            tokenStatus.value[tokenId] = error.interrupted ? "stopped" : "failed";
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${tokenName} 任务 ${taskLabel(taskName)} 失败: ${error.message}`,
@@ -6634,11 +6641,12 @@ const executeScheduledTask = async (task) => {
           }
         }
 
-        tokenStatus.value[tokenId] = accountHasFailure ? "failed" : "completed";
+        const accountStatus = summarizeScheduledAccount(accountTaskStatuses, shouldStop.value);
+        tokenStatus.value[tokenId] = accountStatus;
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${tokenName} 全部选中任务执行${accountHasFailure ? "结束（存在失败）" : "完成"} ===`,
-          type: accountHasFailure ? "warning" : "success",
+          message: `=== ${tokenName} 全部选中任务执行${accountStatus === "completed" ? "完成" : accountStatus === "pending" ? "结束（仍有未完成任务或奖励未领）" : accountStatus === "stopped" ? "已停止" : "结束（存在失败或跳过）"} ===`,
+          type: accountStatus === "completed" ? "success" : "warning",
         });
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";
@@ -6683,16 +6691,20 @@ const executeScheduledTask = async (task) => {
 
     selectedTokens.value = [...previousSelectedTokens];
 
+    for (const tokenId of availableTokens) {
+      if (["waiting", "running"].includes(tokenStatus.value[tokenId]))
+        tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "pending";
+    }
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `=== 定时任务执行完成: ${task.name} ===`,
-      type: "success",
+      message: `=== 定时任务执行结束: ${task.name} ===`,
+      type: availableTokens.every(id => tokenStatus.value[id] === "completed") ? "success" : "warning",
     });
 
     // 发送定时任务完成推送通知
     const scheduledTokenResults = availableTokens.map((tokenId) => {
       const token = tokens.value.find((t) => t.id === tokenId);
-      return { name: token?.name || tokenId, status: tokenStatus.value[tokenId] || "completed" };
+      return { name: token?.name || tokenId, status: normalizeTaskResultStatus(tokenStatus.value[tokenId]) };
     });
     const upcomingScheduledTasks = getUpcomingScheduledTaskRuns(2);
     const { title, content } = formatScheduledTaskNotification(

@@ -28,6 +28,26 @@ export async function loadRechargeConfig(send, fetcher = globalThis.fetch) {
   return configs.get(version);
 }
 
+/** 公共配置清单，不查询或连接任何账号。 */
+export async function loadRechargeExchangeCatalog(fetcher = globalThis.fetch, now = Date.now()) {
+  const response = await fetcher("https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=0.36.0-android", {
+    method: "POST", headers: { "Content-Type": "application/json;charset=UTF-8", Accept: "application/json,text/plain,*/*" },
+    body: "", cache: "no-store", signal: AbortSignal.timeout(30000),
+  });
+  if (!response.ok) throw new Error("活动配置版本加载失败");
+  const manifest = await response.json();
+  const body = typeof manifest.body === "string" ? JSON.parse(manifest.body) : manifest.body;
+  const config = await loadRechargeConfig(async () => ({ dataBundleVer: body?.dataBundleVer }), fetcher);
+  const event = findRechargeActivity(config, now);
+  const activity = event?.byType(2);
+  if (!activity) throw new Error("当前没有可识别的充值兑换活动");
+  return { eventName: event.name, activityId: activity.id, configVersion: config.version,
+    itemName: rewardText(config, 3, activity.itemId),
+    rows: values(config.ExchangeActConf).filter(row => row.actId === activity.id).sort((a, b) => a.rank - b.rank)
+      .map(row => ({ ...row, name: rewardText(config, row.resourceType, row.rewardId) })),
+  };
+}
+
 export function activityText(config, key) {
   for (const table of values(config.LanguageConf)) {
     const row = mapGet(table, key);
@@ -117,17 +137,23 @@ export async function queryActivityExchange(send, config, event, activity) {
 }
 
 /** 每项按用户选择顺序执行；每次重新查询库存和限购，不在写超时后重发。 */
-export async function exchangeRechargeItems({ send, config, selection, expectedActivityId, now = Date.now, log = () => {}, query = queryRechargeExchange }) {
+export async function exchangeRechargeItems({ send, config, selection, expectedActivityId, now = Date.now, log = () => {}, query = queryRechargeExchange, skipUnavailable = false }) {
   for (const choice of selection) {
     if (!Number.isSafeInteger(choice.quantity) || choice.quantity <= 0) throw new Error("兑换数量必须为正整数");
     const snapshot = await query(send, config, now());
     if (snapshot.activityId !== expectedActivityId) throw new Error("活动已切期，请重新查询并选择商品");
     const row = snapshot.rows.find(row => row.id === choice.goodsId);
-    if (!row || row.max < choice.quantity) throw new Error(`${row?.name || choice.goodsId} 库存、解锁条件或限购不足，停止该账号兑换`);
+    if (!row || row.max < choice.quantity) {
+      const reason = `${row?.name || choice.goodsId} 库存、解锁条件、已拥有或限购不足`;
+      if (skipUnavailable) { log(`跳过 ${reason}`); continue; }
+      throw new Error(`${reason}，停止该账号兑换`);
+    }
     try {
       await send("activity_exchange", { activityId: snapshot.activityId, goodsId: row.id, quantity: choice.quantity });
     } catch (error) {
+      if (error.stopped) throw error;
       await query(send, config, now()).catch(() => {});
+      if (skipUnavailable && error.serverRejected) { log(`跳过 ${row.name}：${error.message}`); continue; }
       throw new Error(`兑换结果待核实，已停止且不自动重试：${error.message}`);
     }
     const after = await query(send, config, now());
