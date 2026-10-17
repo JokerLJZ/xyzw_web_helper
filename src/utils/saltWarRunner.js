@@ -107,16 +107,31 @@ export async function runSaltBattle({ accountId, session, info, config, role, se
     if (now() >= Number(info.endTime) * 1000 || session.battlefield.state === "ended") throw new Error("本场盐场已结束");
   };
   const refresh = async () => { check(); await session.refresh(); assertSaltSolo(session, now()); check(); };
-  const waitFor = async predicate => {
-    while (true) { check(); await session.pending; const value = predicate(); if (value) return value; await sleep(1000); await refresh(); }
+  const waitFor = async (predicate, { poll = true } = {}) => {
+    let lastQueryAt = now();
+    while (true) {
+      check(); await session.pending;
+      const value = predicate(); if (value) return value;
+      await sleep(1000);
+      check(); await session.pending;
+      const pushed = predicate(); if (pushed) return pushed;
+      if (poll && now() - lastQueryAt >= 5000) { await refresh(); lastQueryAt = now(); }
+    }
   };
   const write = async (command, params, stage) => {
     check();
     save({ stage });
     try { return await session.send(command, params); }
-    catch (error) { await session.refresh().catch(() => {}); throw new Error(`${error.message}；结果待核实，已停止且不自动重发`); }
+    catch (error) {
+      const code = Number(error.code ?? error.errorCode ?? String(error.message).match(/服务器错误:\s*(\d+)/)?.[1]) || null;
+      await session.refresh().catch(() => {});
+      save({ lastError: { stage, command, code, uncertain: !code, playerState: session.self()?.state || "unknown" } });
+      throw new Error(`盐场${stage === "saveFormation" ? "保存布阵" : stage === "deploy" ? "提交出战" : stage}失败 [${command}]：${error.message}；${code ? "服务器明确拒绝，下次执行将先核对状态" : "结果待核实，已停止且不自动重发"}`);
+    }
   };
-  await refresh();
+  // enter() has just supplied the initial snapshot. Do not fetch it again
+  // before any action; notifications and write responses keep it current.
+  check(); await session.pending;
   const self = assertSaltSolo(session, now());
   if (record.stage === "attack" || record.battleId) {
     const ended = session.ends.get(String(record.battleId));
@@ -124,30 +139,73 @@ export async function runSaltBattle({ accountId, session, info, config, role, se
     return { status: "pending", reason: "本场已有一次攻击请求，结果待核实，不追加攻击" };
   }
   if (["die", "resurrect", "over", "teaming", "observing"].includes(self.state)) return { status: "skipped", reason: "盐场角色当前不能参战，不自动复活或修改队伍" };
-  while (session.battlefield.state !== "started") { check(); await sleep(1000); await refresh(); }
+  await waitFor(() => session.battlefield.state === "started");
   const map = await loadMap(info, config);
   check();
+  let formationChecked = false;
+  const readFormation = async () => {
+    const response = await session.send("war_getteaminfo", { roleCodeId: session.selfCodeId });
+    if (!response || typeof response !== "object" || Array.isArray(response)) throw new Error("盐场阵容查询响应异常");
+    return response.teamInfo ?? {}; // War_GetTeamInfoResp defaults this map to empty.
+  };
+  const readWanted = () => {
+    if (!record.formation?.team) throw new Error("上次出战阵容记录不完整，停止恢复");
+    return { ...record.formation, battleTeam: new Map(record.formation.team) };
+  };
+  const rememberFormation = formation => save({ formation: { team: [...formation.battleTeam], lordWeaponId: formation.lordWeaponId, petUId: formation.petUId } });
+  const verifyFormation = async formation => {
+    const team = await readFormation();
+    if (!formationMatches({ ...session.self(), battleTeam: team }, formation)) {
+      save({ lastError: { stage: record.stage, command: "war_getteaminfo", playerState: session.self()?.state || "unknown", heroCount: entries(team).length, uncertain: true } });
+      throw new Error(`盐场阵容、玩具或宠物未确认（状态${session.self()?.state || "未知"}，服务器阵容${entries(team).length}人），停止移动和消耗金砖`);
+    }
+    formationChecked = true;
+    save({ stage: "deployed", lastError: null });
+  };
   if (["saveFormation", "deploy"].includes(record.stage) && session.self().state === "idle") {
-    if (!record.formation) return { status: "pending", reason: "上次出战阵容未保存，结果待核实" };
-    const wanted = { ...record.formation, battleTeam: new Map(record.formation.team) };
-    const current = await session.send("war_getteaminfo", { roleCodeId: session.selfCodeId });
-    if (!formationMatches({ ...session.self(), battleTeam: current?.teamInfo }, wanted)) return { status: "pending", reason: "上次出战阵容未确认，不继续移动" };
-    save({ stage: "deployed" });
+    await verifyFormation(readWanted());
   }
   if (session.self().state === "watching") {
-    if (["saveFormation", "deploy"].includes(record.stage)) return { status: "pending", reason: "上次盐场布阵结果待核实，不重复提交" };
-    const formation = saltFormation(role);
-    save({ formation: { team: [...formation.battleTeam], lordWeaponId: formation.lordWeaponId, petUId: formation.petUId } });
-    await write("war_teamsetbattleteam", formation, "saveFormation");
+    const unresolved = ["saveFormation", "deploy"].includes(record.stage);
+    const rejected = unresolved && record.lastError?.code && record.lastError.uncertain === false;
+    if (record.stage === "deploy" && !rejected) return { status: "pending", reason: "上次提交出战结果待核实，不重复出战" };
+    let formation;
+    if (["saveFormation", "formationSaved"].includes(record.stage) && !rejected) {
+      formation = readWanted();
+      if (record.stage !== "formationSaved") {
+        const team = await readFormation();
+        if (!formationMatches({ ...session.self(), battleTeam: team }, formation))
+          return { status: "pending", reason: "上次保存布阵结果尚未确认，不重复保存；请保留本场记录核查" };
+      }
+      log("已核对上次保存的阵容，继续尚未发送的出战步骤");
+    } else {
+      formation = saltFormation(role);
+      rememberFormation(formation);
+      log(`准备盐场布阵：复制主线${formation.battleTeam.size}名武将、玩具和宠物（当前状态watching）`);
+      await write("war_teamsetbattleteam", formation, "saveFormation");
+      save({ stage: "formationSaved", lastError: null });
+    }
     await write("war_setbattleteam", formation, "deploy");
     await waitFor(() => session.self()?.state === "idle");
-    const deployed = await session.send("war_getteaminfo", { roleCodeId: session.selfCodeId });
-    if (!formationMatches({ ...session.self(), battleTeam: deployed?.teamInfo }, formation)) throw new Error("盐场阵容、玩具或宠物未确认，停止后续操作");
-    save({ stage: "deployed" });
+    await verifyFormation(formation);
     log("已复制主线武将、玩具和宠物并确认盐场出战");
   } else if (session.self().state === "combat") return { status: "pending", reason: "当前已有战斗，跳过追加攻击" };
   const availableEnergy = Number(session.self().energy);
   if (!Number.isFinite(availableEnergy) || availableEnergy < saltConstant(session, config, "legionWarStrengthWall")) return { status: "skipped", reason: "盐场体力不足，不行军或消耗金砖" };
+  if (session.self().state === "idle" && !formationChecked) {
+    const existing = await readFormation();
+    if (!entries(existing).length) {
+      const formation = saltFormation(role);
+      rememberFormation(formation);
+      log("盐场显示已出战但阵容为空，先恢复主线阵容，确认后才允许移动");
+      await write("war_teamsetbattleteam", formation, "saveFormation");
+      await verifyFormation(formation);
+    } else {
+      const heroes = entries(existing).map(([, hero]) => Number(typeof hero === "object" ? hero?.heroId : hero));
+      if (heroes.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error("盐场已有阵容数据异常，停止移动，不覆盖有效出战阵容");
+      log(`已核对盐场现有${heroes.length}名武将，保持原阵容`);
+    }
+  }
   let target;
   let march = ownMarch(session);
   if (record.stage === "march" && !march) return { status: "pending", reason: "上次行军结果待核实，不重复发起" };
@@ -185,7 +243,8 @@ export async function runSaltBattle({ accountId, session, info, config, role, se
         // Reserve budget even if the request times out; never spend it twice.
         save({ speedUps: (record.speedUps || 0) + 1, spent: (record.spent || 0) + cost });
         await write("war_speedup", { marchId: id }, "speed");
-        await refresh();
+        // The response and arrival notifications update marches; only the
+        // bounded fallback poll queries again when notifications do not arrive.
         save({ stage: "moving" });
         log(`已执行一次行军加速，预留本场金砖支出${record.spent}/${options.maxDiamondCost}`);
       } else log("金砖不足，等待自然到达");
@@ -212,7 +271,7 @@ export async function runSaltBattle({ accountId, session, info, config, role, se
     if (!ended || String(ended.roleCodeId) !== String(session.selfCodeId) || ended.buildingId !== target.id) return false;
     if (!(Number(ended.hP) >= 0)) throw new Error("本次地块攻击被取消，不追加攻击");
     return ended;
-  });
+  }, { poll: false });
   save({ status: "completed" });
   return { status: "completed", reason: `地块 ${target.id} 一次攻击已结算，本场累计预留加速支出${record.spent || 0}金砖` };
 }

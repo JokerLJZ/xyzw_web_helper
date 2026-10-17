@@ -234,7 +234,8 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
     tokenResults
       .filter((r) => r.status === "failed")
       .forEach((r) => {
-        lines.push(`- **${r.name}**${r.error ? `：${r.error}` : ""}`);
+        lines.push(`- **${r.name}**${!r.reasons?.length && r.error ? `：${r.error}` : ""}`);
+        (r.reasons || []).forEach(reason => lines.push(`  - ${reason}`));
       });
   }
 
@@ -251,7 +252,11 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
     const accounts = tokenResults.filter((result) => result.status === status);
     if (accounts.length) {
       lines.push(``, `### ${label}账号`);
-      accounts.forEach((result) => lines.push(`- ${result.name}`));
+      accounts.forEach((result) => {
+        lines.push(`- ${result.name}`);
+        const reasons = result.reasons?.length ? result.reasons : result.error ? [result.error] : [status === "stopped" ? "任务已停止" : "未取得明确完成结果，请重新执行核对"];
+        reasons.forEach(reason => lines.push(`  - ${reason}`));
+      });
     }
   }
 
@@ -262,6 +267,15 @@ export function formatScheduledTaskNotification(taskName, tokenResults, startTim
       .forEach((r) => {
         lines.push(`- ${r.name}`);
       });
+  }
+
+  const warnings = tokenResults.filter(result => result.warnings?.length);
+  if (warnings.length) {
+    lines.push("", "### 附加任务提示");
+    warnings.forEach(result => {
+      lines.push(`- **${result.name}**`);
+      result.warnings.forEach(warning => lines.push(`  - ${warning}`));
+    });
   }
 
   if (Array.isArray(upcomingTasks)) {
@@ -323,7 +337,8 @@ export function formatBatchTaskNotification(tokenResults, startTime) {
     tokenResults
       .filter((r) => r.status === "failed")
       .forEach((r) => {
-        lines.push(`- **${r.name}**${r.error ? `：${r.error}` : ""}`);
+        lines.push(`- **${r.name}**${!r.reasons?.length && r.error ? `：${r.error}` : ""}`);
+        (r.reasons || []).forEach(reason => lines.push(`  - ${reason}`));
       });
   }
 
@@ -331,7 +346,11 @@ export function formatBatchTaskNotification(tokenResults, startTime) {
     const accounts = tokenResults.filter((result) => result.status === status);
     if (accounts.length) {
       lines.push(``, `### ${label}账号`);
-      accounts.forEach((result) => lines.push(`- ${result.name}`));
+      accounts.forEach((result) => {
+        lines.push(`- ${result.name}`);
+        const reasons = result.reasons?.length ? result.reasons : result.error ? [result.error] : [status === "stopped" ? "任务已停止" : "未取得明确完成结果，请重新执行核对"];
+        reasons.forEach(reason => lines.push(`  - ${reason}`));
+      });
     }
   }
 
@@ -344,6 +363,11 @@ export function formatBatchTaskNotification(tokenResults, startTime) {
       });
   }
 
+  const warnings = tokenResults.filter(result => result.warnings?.length);
+  if (warnings.length) {
+    lines.push("", "### 附加任务提示");
+    warnings.forEach(result => { lines.push(`- **${result.name}**`); result.warnings.forEach(warning => lines.push(`  - ${warning}`)); });
+  }
   return { title, content: lines.join("\n") };
 }
 

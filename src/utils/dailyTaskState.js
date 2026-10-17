@@ -30,7 +30,9 @@ export async function loadDailyTaskConfig(
       );
       if (!response.ok) throw new Error("官方任务配置读取失败");
       const config = await response.json();
-      return validateDailyTaskConfig(config);
+      const extra = await fetchConfig(`https://xxz-xyzw-res.hortorgames.com/data/${version}/config_ap.json`, { signal: AbortSignal.timeout(30000) });
+      if (!extra.ok) throw new Error("官方日常BOSS配置读取失败");
+      return validateDailyTaskConfig({ ...config, ...await extra.json() });
     })();
     configsByVersion.set(version, loading);
     loading.catch(() => {
@@ -83,7 +85,8 @@ export function validateDailyTaskConfig(config) {
     )
   )
     throw new Error("官方每日任务配置无效，停止执行");
-  return { tasks, dailyRewards, weeklyRewards };
+  return { tasks, dailyRewards, weeklyRewards, constants: config.ConstantConf,
+    bossLoop: config.BossLoopConfig, bossRewards: config.BossRewardsConfig };
 }
 
 /**

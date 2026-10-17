@@ -176,6 +176,8 @@ export function registerDefaultCommands(reg) {
     .register("system_custom", { key: "", value: 0 })
 
     // 任务相关
+    .register("task_checkdailytask")
+    .register("boss_getstate", { bossId: 0 })
     .register("task_claimdailypoint", { taskId: 1 })
     .register("task_claimdailyreward", { rewardId: 0 })
     .register("task_claimweekreward", { rewardId: 0 })
@@ -1365,6 +1367,8 @@ export class XyzwWebSocketClient {
       towers_startresp: "towers_start",
       towers_fightresp: "towers_fight",
       // 特殊响应映射 - 有些命令有独立响应，有些用同步响应
+      boss_getstateresp: "boss_getstate",
+      task_checkdailytaskresp: "task_checkdailytask",
       task_claimdailyrewardresp: "task_claimdailyreward",
       task_claimweekrewardresp: "task_claimweekreward",
       task_claimachievementresp: "task_claimachievement",
@@ -1377,6 +1381,7 @@ export class XyzwWebSocketClient {
       syncresp: [
         "system_mysharecallback",
         "task_claimdailypoint",
+        "task_checkdailytask",
         "role_commitpassword",
         "hero_synthetic",
         "hero_skillawake",

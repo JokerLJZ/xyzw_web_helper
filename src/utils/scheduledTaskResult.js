@@ -13,3 +13,10 @@ export function summarizeScheduledAccount(statuses, stopped = false) {
   if (!results.length || results.includes("pending")) return "pending";
   return results.every(status => status === "skipped") ? "skipped" : "completed";
 }
+
+/** Supplemental activities cannot turn verified daily rewards into a daily failure. */
+export function getDailyRunStatus(result) {
+  if (result?.planFailed > 0) return "failed";
+  const remaining = result?.planIncomplete ?? result?.dailyIncomplete ?? result?.incomplete;
+  return Number.isFinite(remaining) && remaining === 0 ? "completed" : "pending";
+}

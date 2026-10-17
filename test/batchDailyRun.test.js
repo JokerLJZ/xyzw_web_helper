@@ -1,3 +1,6 @@
+import { formatBatchTaskNotification } from "../src/utils/wxpusher.js";
+import { normalizeTaskResultStatus } from "../src/utils/scheduledTaskResult.js";
+import { getDailyRunStatus } from "../src/utils/scheduledTaskResult.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -40,11 +43,20 @@ function fixture({
   connectionSucceeds = true,
   runError = null,
   incomplete = 0,
+  dailyIncomplete,
+  supplementalWarnings = [],
+  reasons = [],
+  planFailed,
+  planIncomplete,
 } = {}) {
   const logs = [];
   const state = { runs: 0, closed: 0, connected };
   const context = {
     connectWithTokenRefresh,
+    getDailyRunStatus, normalizeTaskResultStatus, formatBatchTaskNotification,
+    sendNotifications: async (title, content) => { state.notification = { title, content }; },
+    tokenTaskWarnings: { value: {} },
+    tokenTaskReasons: { value: {} },
     selectedTokens: { value: ["account-a"] },
     scheduledTaskExecutionActive: false,
     isScheduledTokenSession: () => false,
@@ -86,7 +98,7 @@ function fixture({
       async run() {
         state.runs++;
         if (runError) throw runError;
-        return { incomplete };
+        return { incomplete, dailyIncomplete, supplementalWarnings, reasons, planFailed, planIncomplete };
       }
     },
   };
@@ -157,4 +169,33 @@ test("定时任务保持账号会话的连接与槽位直到外层结束", async
   assert.equal(f.context.connectionQueue.active,2);
   assert.equal(f.context.scheduledTokenSession.slotAcquired,true);
   assert.equal(f.context.isRunning.value,true);
+});
+
+
+test("实际批量入口：日常完成但附加竞猜异常仍成功，并保留推送提示", async () => {
+  const f = fixture({ incomplete: 1, dailyIncomplete: 0, supplementalWarnings: ["逐鹿盐山竞猜奖励未确认"] });
+  await f.startBatch();
+  assert.equal(f.context.tokenStatus.value["account-a"], "completed");
+  assert.deepEqual(f.context.tokenTaskWarnings.value["account-a"], ["逐鹿盐山竞猜奖励未确认"]);
+});
+
+test("实际批量入口：日常奖励未领继续保持待继续", async () => {
+  const f = fixture({ incomplete: 3, dailyIncomplete: 2, supplementalWarnings: ["附加任务未完成"] });
+  await f.startBatch();
+  assert.equal(f.context.tokenStatus.value["account-a"], "pending");
+});
+
+
+test("实际批量通知将日常失败和未领原因传递到推送正文", async () => {
+  const f = fixture({ dailyIncomplete: 0, planFailed: 1, planIncomplete: 1, reasons: ["领取每日礼包：服务器错误200020"] });
+  await f.startBatch();
+  assert.equal(f.context.tokenStatus.value["account-a"], "failed");
+  assert.match(f.state.notification.content, /领取每日礼包：服务器错误200020/);
+});
+
+test("实际批量入口发生超时，推送仍保留失败步骤而非只有账号名", async () => {
+  const error = new Error("请求超时"); error.dailyReasons = ["同步日常状态：请求超时"];
+  const f = fixture({ runError: error });
+  await f.startBatch();
+  assert.match(f.state.notification.content, /同步日常状态：请求超时/);
 });

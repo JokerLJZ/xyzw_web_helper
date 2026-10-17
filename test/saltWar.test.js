@@ -18,7 +18,13 @@ function scenario(options = {}) {
   const config = { ConstantConf: {}, LegionWarMapTypeMappingConf: { 1: { legionWarMapType: 1, mapId: 1 } }, LegionWarBuildingConf: { 1: { legionWarType: 1, legionWarMapType: 1, buildingId: 1, protectTime: 0, closeTime: 0 } } };
   const commands = [], logs = [], records = {};
   const journal = { read: (_a, key) => structuredClone(records[key] || {}), write: (_a, key, value) => { records[key] = structuredClone(value); } };
-  let listener, formation, ticks = 0;
+  let listener, ticks = 0;
+  let formation = options.state === 'idle' || options.savedFormation ? { ...saltFormation(role), battleTeam: options.emptyFormation ? new Map() : saltFormation(role).battleTeam } : null;
+  const snapshot = () => {
+    const data = structuredClone(field);
+    if (options.omitWatching && data.roles[11]?.state === 'watching') delete data.roles[11].state;
+    return data;
+  };
   const client = {
     connected: true, url: 'wss://game.test/agent?p=secret&e=x',
     subscribePackets(fn) { listener = fn; return () => { listener = null; }; },
@@ -27,11 +33,11 @@ function scenario(options = {}) {
       commands.push([cmd, params]);
       if (options.stopOn === cmd) options.stop = true;
       if (options.errorOn === cmd) throw new Error('请求超时');
-      if (cmd === 'war_enterbattlefield') return { battlefieldId: info.battlefieldId, roleCodeId: 11, roleMap: { 100: { cId: 11 } }, battlefield: structuredClone(field), battleList: {} };
-      if (cmd === 'war_getbattlefieldinfo') return { battlefieldId: info.battlefieldId, battlefield: structuredClone(field) };
+      if (cmd === 'war_enterbattlefield') return { battlefieldId: info.battlefieldId, roleCodeId: 11, roleMap: { 100: { cId: 11 } }, battlefield: snapshot(), battleList: {} };
+      if (cmd === 'war_getbattlefieldinfo') return { battlefieldId: info.battlefieldId, battlefield: snapshot() };
       if (cmd === 'war_teamsetbattleteam') { formation = params; return {}; }
       if (cmd === 'war_setbattleteam') { field.roles[11].state = 'idle'; return { battlefield: { roles: { 11: structuredClone(field.roles[11]) } } }; }
-      if (cmd === 'war_getteaminfo') return { teamInfo: options.badFormation ? { 0: { heroId: 999 } } : Object.fromEntries([...formation.battleTeam].map(([k, v]) => [k, { heroId: v }])) };
+      if (cmd === 'war_getteaminfo') return { teamInfo: !formation ? {} : options.badFormation ? { 0: { heroId: 999 } } : Object.fromEntries([...formation.battleTeam].map(([k, v]) => [k, { heroId: v }])) };
       if (cmd === 'war_startmarch') {
         field.roles[11].state = 'march';
         field.marches[5] = { id: 5, codeId: 11, from: { x: 1, y: 2 }, to: params.target, startTime: time / 1000, endTime: time / 1000 + 40 };
@@ -45,7 +51,7 @@ function scenario(options = {}) {
       throw new Error(cmd);
     },
   };
-  const session = new SaltWarSession({ client, info, now: () => time, shouldStop: () => !!options.stop });
+  const session = new SaltWarSession({ client, info, now: () => time, sleep: async () => {}, shouldStop: () => !!options.stop });
   const advance = async ms => {
     time += ms; ticks++;
     if (field.state === 'ready') field.state = 'started';
@@ -79,7 +85,7 @@ for (const options of [{ diamond: 0 }, { speedCost: 40 }]) test(`金砖或预算
 });
 for (const cmd of ['war_teamsetbattleteam', 'war_setbattleteam', 'war_startmarch', 'war_speedup', 'war_startattackbuilding']) test(`${cmd}超时查询且不重发`, async () => {
   const s = scenario({ errorOn: cmd }); await assert.rejects(s.run(), /不自动重发/); assert.equal(count(s, cmd), 1);
-  assert.ok(count(s, 'war_getbattlefieldinfo') >= 2);
+  assert.equal(count(s, 'war_getbattlefieldinfo'), cmd === 'war_startattackbuilding' ? 2 : 1);
 });
 test('战场增量保留字段、显式null删除、其他战场通知不污染', async () => {
   const s = scenario(); await s.session.enter(100);
@@ -210,4 +216,107 @@ test('未出战缺少本人条目时仅按客户端已确认身份生成watching
     else assert.equal(session.self(), undefined);
     session.close();
   }
+});
+
+test('原始响应省略默认watching仍复制主线并提交出战，不跳过布阵', async () => {
+  const s = scenario({ omitWatching: true });
+  const result = await s.run();
+  assert.equal(result.status, 'completed');
+  assert.equal(count(s, 'war_teamsetbattleteam'), 1);
+  assert.equal(count(s, 'war_setbattleteam'), 1);
+  assert.ok(s.commands.findIndex(([cmd]) => cmd === 'war_setbattleteam') < s.commands.findIndex(([cmd]) => cmd === 'war_startmarch'));
+  assert.equal(count(s, 'war_getteaminfo'), 1);
+});
+
+test('角色默认值只补新条目，后续增量省略state不将idle重置为watching', async () => {
+  const s = scenario(); await s.session.enter(100);
+  await s.session.absorb({ battlefield: { roles: { 11: { state: 'idle' }, 12: { legionID: 2 } } } });
+  await s.session.absorb({ battlefield: { roles: { 11: { energy: 99 }, 12: { energy: 10 } } } });
+  assert.equal(s.session.self().state, 'idle');
+  assert.equal(s.session.battlefield.roles[12].state, 'watching');
+  assert.equal(s.session.self().lordWeaponId, 2);
+  s.session.close();
+});
+
+test('已出战但阵容为空先保存并核对，不能空阵行军或重复提交出战', async () => {
+  const s = scenario({ state: 'idle', emptyFormation: true });
+  assert.equal((await s.run()).status, 'completed');
+  assert.equal(count(s, 'war_teamsetbattleteam'), 1);
+  assert.equal(count(s, 'war_setbattleteam'), 0);
+  assert.equal(count(s, 'war_getteaminfo'), 2);
+  assert.ok(s.commands.findIndex(([cmd]) => cmd === 'war_teamsetbattleteam') < s.commands.findIndex(([cmd]) => cmd === 'war_startmarch'));
+});
+
+test('已出战有有效阵容只核对一次，不覆盖或重新出战', async () => {
+  const s = scenario({ state: 'idle' });
+  assert.equal((await s.run()).status, 'completed');
+  assert.equal(count(s, 'war_teamsetbattleteam'), 0);
+  assert.equal(count(s, 'war_setbattleteam'), 0);
+  assert.equal(count(s, 'war_getteaminfo'), 1);
+});
+
+test('保存成功但尚未提交出战的记录可继续，不重复保存阵容', async () => {
+  const s = scenario({ savedFormation: true });
+  const formation = saltFormation(s.role);
+  s.records['p1:bf1'] = { stage: 'formationSaved', formation: { team: [...formation.battleTeam], lordWeaponId: formation.lordWeaponId, petUId: formation.petUId } };
+  assert.equal((await s.run()).status, 'completed');
+  assert.equal(count(s, 'war_teamsetbattleteam'), 0);
+  assert.equal(count(s, 'war_setbattleteam'), 1);
+});
+
+test('提交出战超时且仍未确认时不重复布阵或出战', async () => {
+  const s = scenario({ savedFormation: true });
+  const formation = saltFormation(s.role);
+  s.records['p1:bf1'] = { stage: 'deploy', formation: { team: [...formation.battleTeam], lordWeaponId: formation.lordWeaponId, petUId: formation.petUId }, lastError: { uncertain: true } };
+  assert.equal((await s.run()).status, 'pending');
+  assert.equal(count(s, 'war_teamsetbattleteam'), 0);
+  assert.equal(count(s, 'war_setbattleteam'), 0);
+});
+
+test('旧保存记录不明确时只查询一次，未确认阵容不继续出战', async () => {
+  const s = scenario(); const formation = saltFormation(s.role);
+  s.records['p1:bf1'] = { stage: 'saveFormation', formation: { team: [...formation.battleTeam], lordWeaponId: formation.lordWeaponId, petUId: formation.petUId } };
+  assert.equal((await s.run()).status, 'pending');
+  assert.equal(count(s, 'war_getteaminfo'), 1);
+  assert.equal(count(s, 'war_teamsetbattleteam'), 0);
+  assert.equal(count(s, 'war_setbattleteam'), 0);
+});
+
+test('空阵修复未生效则持久化状态和人数，阻止移动及金砖消耗', async () => {
+  const s = scenario({ state: 'idle', emptyFormation: true, badFormation: true });
+  // Start genuinely empty, then make the save return a wrong hero map.
+  const original = s.session.client.sendWithPromise.bind(s.session.client);
+  let saved = false;
+  s.session.client.sendWithPromise = async (cmd, params) => {
+    if (cmd === 'war_getteaminfo' && !saved) { s.commands.push([cmd, params]); return { teamInfo: {} }; }
+    if (cmd === 'war_teamsetbattleteam') saved = true;
+    return original(cmd, params);
+  };
+  await assert.rejects(s.run(), /服务器阵容1人/);
+  assert.equal(s.records['p1:bf1'].lastError.heroCount, 1);
+  assert.equal(count(s, 'war_startmarch'), 0);
+  assert.equal(count(s, 'war_speedup'), 0);
+});
+
+test('布阵失败保存指令、阶段、状态与明确拒绝码，便于无日志追查', async () => {
+  const s = scenario();
+  const original = s.session.client.sendWithPromise.bind(s.session.client);
+  s.session.client.sendWithPromise = async (cmd, params) => {
+    if (cmd === 'war_teamsetbattleteam') { s.commands.push([cmd, params]); throw new Error('服务器错误: 123456 - 拒绝'); }
+    return original(cmd, params);
+  };
+  await assert.rejects(s.run(), /保存布阵失败.*war_teamsetbattleteam/);
+  assert.deepEqual(s.records['p1:bf1'].lastError, { stage: 'saveFormation', command: 'war_teamsetbattleteam', code: 123456, uncertain: false, playerState: 'watching' });
+  assert.equal(count(s, 'war_setbattleteam'), 0);
+});
+
+test('战场请求与业务错误后的查询都至少间隔500毫秒', async () => {
+  let clock = 10000; const times = [];
+  const client = { connected: true, subscribePackets: () => () => {}, sendWithPromise: async cmd => { times.push(clock); if (cmd === 'war_setbattleteam') throw new Error('服务器错误: 1 - 拒绝'); return {}; } };
+  const session = new SaltWarSession({ client, info: { battlefieldId: 'bf' }, now: () => clock, sleep: async ms => { clock += ms; } });
+  await session.send('war_teamsetbattleteam');
+  await assert.rejects(session.send('war_setbattleteam'));
+  await session.refresh();
+  assert.deepEqual(times, [10000, 10500, 11000]);
+  session.close();
 });

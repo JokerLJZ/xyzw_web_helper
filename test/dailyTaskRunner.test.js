@@ -1,4 +1,4 @@
-import { summarizeScheduledAccount } from "../src/utils/scheduledTaskResult.js";
+import { getDailyRunStatus, summarizeScheduledAccount } from "../src/utils/scheduledTaskResult.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DailyTaskRunner } from "../src/utils/dailyTaskRunner.js";
@@ -20,6 +20,9 @@ const definitions = [
 }));
 const config = {
   tasks: definitions,
+  constants: { arenaStarTime: 21600, arenaOverTime: 79200, DailyFreeFishing: 3 },
+  bossLoop: Object.fromEntries([1,2,3,4,5,6,7].map(day => [day, { monsters: [9905] }])),
+  bossRewards: { 1: { bossId: 9905, damage: 1000 } },
   dailyRewards: [
     { id: 1, limit: 20 },
     { id: 2, limit: 40 },
@@ -66,9 +69,11 @@ function fixture(progress = {}) {
     },
     statistics: {
       "artifact:normal:lottery:time": 1700000010,
+      "ar:normal:lo:cnt": 3,
       "genie:sweep:buy": 3,
     },
     statisticsTime: {
+      "ar:normal:lo:cnt": Math.floor(Date.now() / 1000),
       "genie:sweep:buy": 1700000010,
       "legion:sign:in": 1700000010,
       ...Object.fromEntries(
@@ -86,6 +91,9 @@ function fixture(progress = {}) {
     },
     async sendMessageWithPromise(id, cmd, params) {
       calls.push({ cmd, params });
+      if (cmd === "discount_getdiscountinfo") return { discountList: [{ discountId: 1, discountState: 2 }] };
+      if (cmd === "collection_goodslist") return { freeRewardTime: Math.floor(Date.now() / 1000) };
+      if (cmd === "boss_getstate") return { hurt: 0 };
       if (cmd === "presetteam_getinfo")
         return { presetTeamInfo: { useTeamId: 1 } };
       if (cmd === "system_buygold") role.dailyTask.complete[6]++;
@@ -278,9 +286,9 @@ test("stopping and missing server task data produce no game writes", async () =>
     /任务已停止/,
   );
   assert.equal(f.calls.length, 0);
-  delete f.role.dailyTask.complete;
+  f.role.dailyTask.complete = null;
   await assert.rejects(f.runner().run("account-a", {}, settings), /列表不完整/);
-  assert.equal(f.calls.filter((c) => c.cmd !== "role_getroleinfo").length, 0);
+  assert.equal(f.calls.filter((c) => !["role_getroleinfo", "task_checkdailytask"].includes(c.cmd)).length, 0);
 });
 
 test("a command acknowledgement without changed server progress is not completion", async () => {
@@ -331,7 +339,7 @@ test("a role response arriving after disconnect is discarded before game operati
     f.runner().run("account-a", {}, settings),
     /WebSocket 已断开/,
   );
-  assert.equal(f.calls.filter((c) => c.cmd !== "role_getroleinfo").length, 0);
+  assert.equal(f.calls.filter((c) => !["role_getroleinfo", "task_checkdailytask"].includes(c.cmd)).length, 0);
 });
 
 test("different accounts are judged by their own server response", async () => {
@@ -524,7 +532,7 @@ test("a failed initial query is not retried and does not start game operations",
   };
   await assert.rejects(f.runner().run("account-a", {}, settings), /200400/);
   assert.equal(reads, 1);
-  assert.equal(f.calls.length, 0);
+  assert.deepEqual(f.calls.map(call => call.cmd), ["task_checkdailytask"]);
 });
 
 test("free and paid recruitment together never exceed the initial server deficit", async () => {
@@ -980,7 +988,7 @@ test("精简日志减少一半以上输出，并保留相同请求、进度回�
   assert.deepEqual(concise.progress, verbose.progress);
   assert.ok(concise.logs.length < verbose.logs.length / 2, `${concise.logs.length}/${verbose.logs.length}`);
   assert.ok(concise.logs.some(entry => /免费点金.*已执行/.test(entry.message)));
-  assert.ok(concise.logs.some(entry => entry.message.includes("日常结束：")));
+  assert.ok(concise.logs.some(entry => entry.message.includes("日常已完成：")));
   assert.ok(!concise.logs.some(entry => /领奖阶段请求|本轮步骤处理进度|请求成功，待服务器确认/.test(entry.message)));
 });
 
@@ -997,4 +1005,169 @@ test("精简模式保留错误、未完成原因与奖励核对，不把请求�
   assert.ok(logs.some(entry => entry.type === "error" && entry.message.includes("物品不足")));
   assert.ok(logs.some(entry => entry.type === "warning" && entry.message.includes("未确认完成")));
   assert.ok(logs.some(entry => entry.message.includes("活跃奖励服务器核对")));
+});
+
+
+test("日志场景：竞技场未开放和通行证无奖励正常跳过，附加竞猜错误不改日常领奖成功", async () => {
+  const f = fixture({ 13: 0 });
+  f.role.dailyTask.dailyPoint = 40;
+  f.role.dailyTask.weekPoint = 100;
+  const send = f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise = async (...args) => {
+    if (args[1] === "activity_recyclewarorderrewardclaim")
+      throw new Error("服务器错误: 3500020 - 没有可领取的奖励");
+    return send(...args);
+  };
+  const midnight = new Date(); midnight.setHours(0, 10, 0, 0);
+  const runner = f.runner({ now: () => midnight.getTime() });
+  runner.runApexTask = async () => { throw new Error("竞猜奖励未生效：服务器错误: 200020 - 出了点小问题"); };
+  const logs = [];
+  const result = await runner.run("account-a", { onLog: entry => logs.push(entry) }, { ...settings, arenaEnable: true, apexDailyEnable: true });
+  assert.equal(result.normalSkippedTasks, 1);
+  assert.equal(result.dailyIncomplete, 0);
+  assert.equal(result.remainingRewards, 0);
+  assert.equal(result.failed, 1); // Only the unconfirmed supplemental guess reward.
+  assert.equal(result.supplementalWarnings.length, 1);
+  assert.match(result.supplementalWarnings[0], /竞猜奖励未生效/);
+  assert.equal(getDailyRunStatus(result), "completed");
+  assert.equal(summarizeScheduledAccount([getDailyRunStatus(result), "completed"]), "completed");
+  assert.ok(!f.calls.some(call => call.cmd === "arena_startarea"));
+  assert.ok(logs.some(entry => /竞技场战斗：正常跳过/.test(entry.message)));
+  assert.ok(logs.some(entry => /通行证.*正常跳过/.test(entry.message)));
+  assert.ok(!logs.some(entry => entry.type === "error" && /通行证/.test(entry.message)));
+  assert.ok(logs.some(entry => /日常已完成.*附加任务1项需注意/.test(entry.message)));
+});
+
+test("通行证无可领奖励仅处理对应命令和3500020，其他错误不吞掉", async () => {
+  for (const [cmd, code] of [["activity_recyclewarorderrewardclaim", 200020], ["task_claimdailyreward", 3500020]]) {
+    const f = fixture();
+    f.store.sendMessageWithPromise = async () => { throw new Error(`服务器错误: ${code} - 错误`); };
+    await assert.rejects(f.runner().executeGameCommand("account-a", cmd), /服务器错误/);
+  }
+});
+
+test("条件跳过或附加任务成功不能掩盖仍可领取的日常奖励", async () => {
+  const f = fixture({ 13: 0 });
+  f.role.dailyTask.dailyPoint = 40;
+  const send = f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise = async (...args) => args[1] === "task_claimdailyreward" ? {} : send(...args);
+  const midnight = new Date(); midnight.setHours(0, 10, 0, 0);
+  const result = await f.runner({ now: () => midnight.getTime() }).run("account-a", {}, { ...settings, arenaEnable: true });
+  assert.equal(result.normalSkippedTasks, 1);
+  assert.equal(result.remainingRewards, 2);
+  assert.equal(result.dailyIncomplete, 2);
+  assert.equal(getDailyRunStatus(result), "pending");
+});
+
+test("周活跃分数未到首档正常跳过，已达标未领才待继续", async () => {
+  for (const weekPoint of [0, 99, 100]) {
+    const f = fixture();
+    f.role.dailyTask.weekPoint = weekPoint;
+    const result = await f.runner().run("account-a", {}, settings);
+    const claims = f.calls.filter(call => call.cmd === "task_claimweekreward");
+    assert.equal(claims.length, weekPoint === 100 ? 1 : 0);
+    assert.equal(result.dailyIncomplete, 0);
+    assert.equal(getDailyRunStatus(result), "completed");
+  }
+});
+
+test("关闭的任务不阻塞本轮计划，已完成但未领的积分仍需领取", async () => {
+  const f = fixture({ 5: 0, 7: 0, 13: 0, 14: 0, 12: 1 });
+  const result = await f.runner().run("account-a", {}, { ...settings, openBox: false, blackMarketPurchase: false });
+  assert.equal(result.remainingTasks, 4);
+  assert.equal(result.dailyIncomplete, 0);
+  assert.ok(f.calls.some(call => call.cmd === "task_claimdailypoint" && call.params.taskId === 9));
+  assert.ok(!f.calls.some(call => call.cmd === "item_openbox"));
+});
+
+test("礼包与每日BOSS先读状态；已领及最高伤害达标不重复发送写请求", async () => {
+  const f = fixture();
+  const send = f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise = async (...args) => {
+    if (args[1] === "discount_getdiscountinfo") { f.calls.push({ cmd: args[1] }); return { discountList: [{ discountId: 1, discountState: 3 }] }; }
+    if (args[1] === "boss_getstate") { f.calls.push({ cmd: args[1] }); return { hurt: 1000 }; }
+    return send(...args);
+  };
+  const result = await f.runner().run("account-a", {}, settings);
+  assert.equal(getDailyRunStatus(result), "completed");
+  assert.ok(!f.calls.some(call => ["discount_claimreward", "fight_startboss"].includes(call.cmd)));
+  assert.equal(f.calls.filter(call => call.cmd === "boss_getstate").length, 1);
+});
+
+test("配置任务真实失败不能仅降级附加提醒，保留精确原因", async () => {
+  const f = fixture();
+  const send = f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise = async (...args) => {
+    if (args[1] === "discount_claimreward") throw new Error("服务器错误: 200020 - 礼包领取失败");
+    return send(...args);
+  };
+  const result = await f.runner().run("account-a", {}, settings);
+  assert.equal(result.dailyIncomplete, 0);
+  assert.equal(getDailyRunStatus(result), "failed");
+  assert.ok(result.reasons.some(reason => /领取每日礼包.*200020.*礼包领取失败/.test(reason)));
+});
+
+test("捕获的梦境异常不能算完成，正常停止不算失败", async () => {
+  for (const pushError of [undefined, "推层查询错误200020"]) {
+    const f = fixture(); f.role.levelId = 1000;
+    const runner = f.runner();
+    runner.runDreamTask = async () => ({ status: "stopped", reason: "吕布无法继续", pushError });
+    const result = await runner.run("account-a", {}, { ...settings, dreamEnable: true });
+    assert.equal(getDailyRunStatus(result), pushError ? "failed" : "completed");
+    if (pushError) assert.ok(result.reasons.some(reason => reason.includes(pushError)));
+  }
+});
+
+test("免费钓鱼补剩余2次，共用快照且月度阶段不因增量缺字段重复免费预算", async () => {
+  const f = fixture();
+  f.role.statistics["ar:normal:lo:cnt"] = 1;
+  const send = f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise = async (...args) => {
+    if (args[1] === "artifact_lottery") f.role.statistics["ar:normal:lo:cnt"]++;
+    return send(...args); // Deliberately no statistics patch.
+  };
+  const runner = f.runner();
+  runner.runMonthlyFishTopUp = async id => runner.runFreeFishingTask(id, await runner.getLatestRole(id), 5);
+  const result = await runner.run("account-a", {}, { ...settings, monthlyFishTopUpEnable: true });
+  assert.equal(f.calls.filter(call => call.cmd === "artifact_lottery").length, 2);
+  assert.equal(getDailyRunStatus(result), "completed");
+  assert.ok(f.calls.filter(call => call.cmd === "role_getroleinfo").length <= 4);
+});
+
+test("任务同步一次，正常领奖集中查询，不因档位数量逐档查询角色", async () => {
+  const f = fixture({ 6: 3, 7: 20, 12: 1 });
+  f.role.dailyTask.weekPoint = 200;
+  await f.runner().run("account-a", {}, settings);
+  assert.equal(f.calls.filter(call => call.cmd === "task_checkdailytask").length, 1);
+  assert.ok(f.calls.findIndex(call => call.cmd === "task_checkdailytask") < f.calls.findIndex(call => call.cmd === "role_getroleinfo"));
+  const roleQueries = f.calls.filter(call => call.cmd === "role_getroleinfo");
+  assert.ok(roleQueries.length <= 4);
+  const claims = f.calls.filter(call => call.cmd.startsWith("task_claim"));
+  assert.ok(claims.length > roleQueries.length);
+  assert.equal(f.calls.filter(call => call.cmd === "discount_getdiscountinfo").length, 1);
+});
+
+test("执行中断在抛出错误上保留步骤与原因供批量通知", async () => {
+  const f = fixture();
+  const send = f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise = async (...args) => {
+    if (args[1] === "discount_getdiscountinfo") throw new Error("请求超时: discount_getdiscountinfo");
+    return send(...args);
+  };
+  await assert.rejects(f.runner().run("account-a", {}, settings), error => error.dailyReasons.some(reason => /领取每日礼包.*请求超时/.test(reason)));
+});
+
+test("业务错误后也保持查询/操作间隔，阵容恢复仍可执行", async () => {
+  const f = fixture(); let clock = Date.parse("2026-10-18T12:00:00+08:00");
+  const sent = [];
+  const send = f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise = async (...args) => {
+    sent.push({ cmd: args[1], time: clock });
+    if (args[1] === "discount_claimreward") throw new Error("服务器错误: 200020 - 临时错误");
+    return send(...args);
+  };
+  const read = f.store.sendGetRoleInfo;
+  f.store.sendGetRoleInfo = async (...args) => { sent.push({ cmd: "role_getroleinfo", time: clock }); return read(...args); };
+  await f.runner({ now: () => clock, sleep: async ms => { clock += ms; } }).run("account-a", {}, settings);
+  for (let i = 1; i < sent.length; i++) assert.ok(sent[i].time - sent[i-1].time >= 500, `${sent[i-1].cmd} → ${sent[i].cmd}`);
 });

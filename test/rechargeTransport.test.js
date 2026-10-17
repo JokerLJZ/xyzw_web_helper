@@ -52,3 +52,25 @@ test("盐场命令携带战场hint并匹配独立响应，订阅不覆盖原监�
   assert.equal(calls, 1); assert.equal(client.messageListener, storeListener);
   assert.equal(client.registry.build("role_getroleinfo", 0, 1, {}).hint, undefined);
 });
+
+test("日常同步和BOSS状态按当前协议注册并匹配响应", async () => {
+  const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+  client.connected = true;
+  for (const [command, response] of [["task_checkdailytask", "syncresp"], ["boss_getstate", "boss_getstateresp"], ["discount_getdiscountinfo", "discount_getdiscountinforesp"]]) {
+    const pending = client.sendWithPromise(command, {}, 1000);
+    client._handlePromiseResponse({ cmd: response, code: 0, body: { checked: true } });
+    assert.equal((await pending).checked, true);
+  }
+});
+
+test("盐场保存和出战的实际BON报文携带非空数字阵容及玩具宠物", async () => {
+  const { bon } = await import("../src/utils/bonProtocol.js");
+  const client = new XyzwWebSocketClient({ url: "wss://test", utils: { bon } });
+  for (const command of ["war_teamsetbattleteam", "war_setbattleteam"]) {
+    const packet = client.registry.build(command, 0, 1, { battlefieldId: "battlefield-1", battleTeam: new Map([[0, 107], [1, 106]]), lordWeaponId: 2, petUId: "pet-1" });
+    const body = bon.decode(packet.body);
+    assert.deepEqual(body.battleTeam, { 0: 107, 1: 106 });
+    assert.equal(body.lordWeaponId, 2); assert.equal(body.petUId, "pet-1");
+    assert.equal(packet.hint, "battlefield-1");
+  }
+});

@@ -3802,7 +3802,7 @@ import {
 } from "vue";
 import { useTokenStore, gameTokens, tokenGroups } from "@/stores/tokenStore";
 import { $emit } from "@/stores/events/index.ts";
-import { normalizeTaskResultStatus, summarizeScheduledAccount } from "@/utils/scheduledTaskResult.js";
+import { getDailyRunStatus, normalizeTaskResultStatus, summarizeScheduledAccount } from "@/utils/scheduledTaskResult.js";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import {
   buildSnapshotWithIndexedDB,
@@ -3882,7 +3882,7 @@ import {
   normalizeBlackMarketSettings,
 } from "@/utils/blackMarket.js";
 import { HERO_DICT } from "@/utils/HeroList";
-import { sendWxPusherMessage, sendPushPlusMessage, formatScheduledTaskNotification, formatMissedExecutionNotification } from "@/utils/wxpusher";
+import { sendWxPusherMessage, sendPushPlusMessage, formatScheduledTaskNotification, formatBatchTaskNotification, formatMissedExecutionNotification } from "@/utils/wxpusher";
 
 // Initialize token store, message service, and task runner
 const tokenStore = useTokenStore();
@@ -4190,6 +4190,8 @@ const warGuessActivityTip = computed(() => {
 });
 
 const selectedTokens = ref([]);
+const tokenTaskWarnings = ref({});
+const tokenTaskReasons = ref({});
 const tokenStatus = ref({}); // { tokenId: 'waiting' | 'running' | 'completed' | 'failed' }
 const isRunning = ref(false);
 const shouldStop = ref(false);
@@ -6279,7 +6281,7 @@ const verifyTaskDependencies = async (task) => {
       message: `❌ localStorage不可用: ${error.message}`,
       type: "error",
     });
-    return false;
+    throw new Error(`localStorage不可用：${error.message}`);
   }
 
   // Verify token store is available
@@ -6289,7 +6291,7 @@ const verifyTaskDependencies = async (task) => {
       message: "❌ Token存储不可用",
       type: "error",
     });
-    return false;
+    throw new Error("Token存储不可用");
   }
 
   // Verify task functions exist
@@ -6303,7 +6305,7 @@ const verifyTaskDependencies = async (task) => {
         message: `❌ 任务函数不存在: ${taskName}`,
         type: "error",
       });
-      return false;
+      throw new Error(`任务函数不存在：${taskName}`);
     }
   }
 
@@ -6374,7 +6376,7 @@ const executeScheduledTask = async (task) => {
         message: `=== 定时任务 ${task.name} 依赖验证失败，取消执行 ===`,
         type: "error",
       });
-      return;
+      throw new Error("定时任务依赖验证失败");
     }
 
     // Filter out tokens that don't exist in current tokens.value
@@ -6404,7 +6406,7 @@ const executeScheduledTask = async (task) => {
         message: `=== 定时任务 ${task.name} 没有可用的Token，取消执行 ===`,
         type: "error",
       });
-      return;
+      throw new Error("没有可用账号，所选账号可能已被删除");
     }
 
     // 保存界面当前选择，定时任务按账号执行结束后恢复。
@@ -6413,7 +6415,7 @@ const executeScheduledTask = async (task) => {
     // Always use the latest selectedTokens from the task that exist in current tokens.value
     selectedTokens.value = [...availableTokens];
 
-    availableTokens.forEach(tokenId => { tokenStatus.value[tokenId] = "waiting"; });
+    availableTokens.forEach(tokenId => { tokenStatus.value[tokenId] = "waiting"; tokenTaskWarnings.value[tokenId] = []; tokenTaskReasons.value[tokenId] = []; });
 
     const selectedTaskNames = task.selectedTasks.filter((taskName) => {
       if (integratedDailyTaskNames.includes(taskName)) return false;
@@ -6602,6 +6604,8 @@ const executeScheduledTask = async (task) => {
       beginScheduledTokenSession(tokenId);
 
       const accountTaskStatuses = [];
+      const accountReasons = [];
+      const accountWarnings = [];
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -6616,10 +6620,16 @@ const executeScheduledTask = async (task) => {
 
           try {
             tokenStatus.value[tokenId] = "running";
+            tokenTaskReasons.value[tokenId] = [];
+            tokenTaskWarnings.value[tokenId] = [];
             const taskResult = await executeTaskForToken(taskName, tokenId);
             // Legacy tasks may resolve without writing a row status; daily tasks must
             // explicitly report their server-verified result.
             const status = tokenStatus.value[tokenId];
+            accountReasons.push(...(tokenTaskReasons.value[tokenId] || []));
+            accountWarnings.push(...(tokenTaskWarnings.value[tokenId] || []));
+            if (["failed", "pending", "stopped"].includes(status) && !(tokenTaskReasons.value[tokenId] || []).length)
+              accountReasons.push(`${taskLabel(taskName)}：${status === "stopped" ? "已停止" : status === "pending" ? "未取得明确完成结果" : "任务执行失败，请查看对应日志"}`);
             accountTaskStatuses.push(status === "running" && taskName !== "startBatch" ? "completed" : normalizeTaskResultStatus(status));
             if (
               taskName === "batchPushMainLevelInfo" &&
@@ -6631,6 +6641,7 @@ const executeScheduledTask = async (task) => {
               aggregatedSaltMasterResults.push(...taskResult);
             }
           } catch (error) {
+            accountReasons.push(...(error.dailyReasons || [`${taskLabel(taskName)}：${error.message}`]));
             accountTaskStatuses.push(error.interrupted ? "stopped" : "failed");
             tokenStatus.value[tokenId] = error.interrupted ? "stopped" : "failed";
             addLog({
@@ -6643,12 +6654,15 @@ const executeScheduledTask = async (task) => {
 
         const accountStatus = summarizeScheduledAccount(accountTaskStatuses, shouldStop.value);
         tokenStatus.value[tokenId] = accountStatus;
+        tokenTaskReasons.value[tokenId] = [...new Set(accountReasons)];
+        tokenTaskWarnings.value[tokenId] = [...new Set(accountWarnings)];
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `=== ${tokenName} 全部选中任务执行${accountStatus === "completed" ? "完成" : accountStatus === "pending" ? "结束（仍有未完成任务或奖励未领）" : accountStatus === "stopped" ? "已停止" : "结束（存在失败或跳过）"} ===`,
           type: accountStatus === "completed" ? "success" : "warning",
         });
       } catch (error) {
+        (tokenTaskReasons.value[tokenId] ||= []).push(`账号连接或执行异常：${error.message}`);
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -6692,8 +6706,10 @@ const executeScheduledTask = async (task) => {
     selectedTokens.value = [...previousSelectedTokens];
 
     for (const tokenId of availableTokens) {
-      if (["waiting", "running"].includes(tokenStatus.value[tokenId]))
+      if (["waiting", "running"].includes(tokenStatus.value[tokenId])) {
         tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "pending";
+        (tokenTaskReasons.value[tokenId] ||= []).push(shouldStop.value ? "用户停止，尚未执行完毕" : "本轮未取得明确执行结果");
+      }
     }
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -6704,8 +6720,9 @@ const executeScheduledTask = async (task) => {
     // 发送定时任务完成推送通知
     const scheduledTokenResults = availableTokens.map((tokenId) => {
       const token = tokens.value.find((t) => t.id === tokenId);
-      return { name: token?.name || tokenId, status: normalizeTaskResultStatus(tokenStatus.value[tokenId]) };
+      return { name: token?.name || tokenId, status: normalizeTaskResultStatus(tokenStatus.value[tokenId]), warnings: tokenTaskWarnings.value[tokenId] || [], reasons: tokenTaskReasons.value[tokenId] || [], error: (tokenTaskReasons.value[tokenId] || []).join("；") };
     });
+    scheduledTokenResults.push(...missingTokens.map(id => ({ name: id, status: "failed", reasons: ["账号不存在，未执行任务"] })));
     const upcomingScheduledTasks = getUpcomingScheduledTaskRuns(2);
     const { title, content } = formatScheduledTaskNotification(
       task.name,
@@ -6714,7 +6731,7 @@ const executeScheduledTask = async (task) => {
       upcomingScheduledTasks,
     );
     await sendNotifications(title, content, {
-      skipWxPusher: selectedTaskNames.some(name => ["batchPushMainLevelInfo", "batchCheckSaltMasters"].includes(name)),
+      skipWxPusher: !selectedTaskNames.includes("startBatch") && selectedTaskNames.some(name => ["batchPushMainLevelInfo", "batchCheckSaltMasters"].includes(name)),
     });
 
     // 记录执行成功，用于漏执行检测
@@ -7863,13 +7880,13 @@ const endScheduledTokenSession = (tokenId, tokenName) => {
     if (slotAcquired) releaseConnectionSlot();
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `${tokenName} 全部任务完成，连接已关闭 (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+      message: `${tokenName} 本轮会话结束，连接已关闭 (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
       type: "info",
     });
   } else {
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `${tokenName} 全部任务完成，保留原有连接`,
+      message: `${tokenName} 本轮会话结束，保留原有连接`,
       type: "info",
     });
   }
@@ -8440,11 +8457,12 @@ const startBatch = async () => {
   isRunning.value = true;
   if (!scheduledTaskExecutionActive) shouldStop.value = false;
   const tokenIds = [...selectedTokens.value];
-  tokenIds.forEach((id) => { tokenStatus.value[id] = "waiting"; });
+  tokenIds.forEach((id) => { tokenStatus.value[id] = "waiting"; tokenTaskWarnings.value[id] = []; tokenTaskReasons.value[id] = []; });
+  const batchStartTime = new Date();
   const taskPromises = tokenIds.map(async (tokenId) => {
-    if (shouldStop.value) { tokenStatus.value[tokenId] = "stopped"; return; }
+    if (shouldStop.value) { tokenStatus.value[tokenId] = "stopped"; tokenTaskReasons.value[tokenId] = ["用户停止，日常尚未开始"]; return; }
     const token = tokens.value.find((t) => t.id === tokenId);
-    if (!token) { tokenStatus.value[tokenId] = "failed"; return; }
+    if (!token) { tokenStatus.value[tokenId] = "failed"; tokenTaskReasons.value[tokenId] = ["账号不存在，无法执行日常"]; return; }
     tokenStatus.value[tokenId] = "running";
     let ownsSlot = false;
     try {
@@ -8458,8 +8476,11 @@ const startBatch = async () => {
         shouldStop: () => shouldStop.value,
         onLog: (log) => addLog({ ...log, message: `${token.name}: ${log.message}` }),
       });
-      tokenStatus.value[tokenId] = result.incomplete ? "pending" : "completed";
+      tokenStatus.value[tokenId] = getDailyRunStatus(result);
+      tokenTaskWarnings.value[tokenId] = result.supplementalWarnings || [];
+      tokenTaskReasons.value[tokenId] = result.reasons || [];
     } catch (error) {
+      tokenTaskReasons.value[tokenId] = error.dailyReasons || [`日常任务：${error.message}`];
       tokenStatus.value[tokenId] = error.interrupted ? "stopped" : "failed";
       addLog({ time: new Date().toLocaleTimeString(), message: `${token.name}: ${error.message}`, type: error.interrupted ? "warning" : "error" });
     } finally {
@@ -8481,6 +8502,10 @@ const startBatch = async () => {
     if (shouldStop.value) message.info("批量任务已停止，再次开始将读取服务器状态补差");
     else if (tokenIds.some((id) => tokenStatus.value[id] !== "completed")) message.warning("本轮结束，仍有未完成任务，可再次开始继续");
     else message.success("批量任务执行结束");
+    const results = tokenIds.map(id => ({ name: tokens.value.find(token => token.id === id)?.name || id,
+      status: normalizeTaskResultStatus(tokenStatus.value[id]), reasons: tokenTaskReasons.value[id] || [], warnings: tokenTaskWarnings.value[id] || [] }));
+    const report = formatBatchTaskNotification(results, batchStartTime);
+    await sendNotifications(report.title, report.content);
   }
 };
 

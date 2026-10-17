@@ -1,3 +1,4 @@
+import { normalizeDailyRoleSnapshot, chinaDayStart, arenaAvailability, remainingFreeFishing, rewardProgressText, dailyConditionEnabled, classifyDailyStepResult } from "./dailyTaskPolicy.js";
 import { createApexDailySender, runApexDailyTask } from "./apexDailyTask.js";
 import { runDailyGenieChallenges } from "./dailyGenieChallenges.js";
 import { isChinaMonday, runMondayResourcePurchase } from "./mondayResourcePurchase.js";
@@ -291,12 +292,6 @@ const getServerErrorCode = (error) => {
 
 const isTodayAvailable = (timestamp) => !isTimestampToday(timestamp, new Date());
 
-const getTodayBossId = (dailyTime) => {
-  const DAY_BOSS_MAP = [9904, 9905, 9901, 9902, 9903, 9904, 9905]; // 周日~周六
-  const dayOfWeek = new Date((dailyTime + 8 * 60 * 60) * 1000).getUTCDay();
-  return DAY_BOSS_MAP[dayOfWeek];
-};
-
 const isFreeGachaOpenDay = () => {
   const dayOfWeek = new Date().getDay();
   return dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 6;
@@ -397,11 +392,11 @@ export class DailyTaskRunner {
    */
   async sendRequest(tokenId, request, command = "") {
     if (!this.restoringFormation) this.throwIfInterrupted(tokenId);
-    if (this.rewardPhase) {
-      const interval = Math.max(1000, Number(this.delaySettings.commandDelay) || 0);
+    if (this.isRunActive || this.rewardPhase) {
+      const interval = Math.max(this.rewardPhase ? 1000 : 500, Number(this.delaySettings.commandDelay) || 0);
       const remaining = interval - (this.now() - (this.lastResponseAt.get(tokenId) ?? -Infinity));
       if (remaining > 0) await this.sleep(remaining);
-      this.throwIfInterrupted(tokenId);
+      if (!this.restoringFormation) this.throwIfInterrupted(tokenId);
     }
     if (this.rewardPhase && command) {
       const previous = this.lastResponseAt.get(tokenId);
@@ -425,7 +420,7 @@ export class DailyTaskRunner {
   ) {
     try {
       if (description) this.logDetail(`执行: ${description}`);
-      this.roleStateDirty = true;
+      if (!["role_getroleinfo", "presetteam_getinfo", "discount_getdiscountinfo", "boss_getstate", "collection_goodslist", "gacha_getinfo", "arena_getareatarget", "activity_get"].includes(cmd)) this.roleStateDirty = true;
       const result = await this.sendRequest(tokenId, () =>
         this.tokenStore.sendMessageWithPromise(tokenId, cmd, params, timeout),
         cmd,
@@ -447,6 +442,10 @@ export class DailyTaskRunner {
         (error.interrupted || !getServerErrorCode(error) ||
           [200400, 12400000].includes(getServerErrorCode(error)))) {
         this.transportFailure = error;
+      }
+      if (cmd === "activity_recyclewarorderrewardclaim" && getServerErrorCode(error) === 3500020) {
+        this.log(`${description || "领取通行证奖励"}：当前没有可领取的奖励，正常跳过`);
+        return { status: "skipped", reason: "通行证当前没有可领取的奖励" };
       }
       if (description) {
         const token = this.tokenStore.gameTokens.find((t) => t.id === tokenId);
@@ -498,6 +497,67 @@ export class DailyTaskRunner {
     }
   }
 
+  serverNow(tokenId) {
+    return this.tokenStore.getWebSocketClient?.(tokenId)?.getServerTime?.() ?? this.now();
+  }
+
+  async runFreeFishingTask(tokenId, role = this.roleData, max = Infinity) {
+    const observed = remainingFreeFishing(role, this.taskConfig.constants, this.serverNow(tokenId));
+    const sameBatchDay = this.freeFishingExpected?.day === chinaDayStart(this.serverNow(tokenId));
+    const available = Math.min(observed, sameBatchDay ? this.freeFishingExpected.remaining : Infinity);
+    const count = Math.min(available, max);
+    if (!count) return { status: "skipped", reason: "今日免费钓鱼次数已用完" };
+    // The known remaining free budget bounds the whole batch. Verify together with
+    // the shared role refresh, rather than reading after every draw.
+    for (let i = 0; i < count; i++) {
+      await this.executeGameCommand(tokenId, "artifact_lottery", { lotteryNumber: 1, newFree: true, type: 1 }, `免费钓鱼 ${i + 1}/${count}`);
+    }
+    this.freeFishingExpected = { remaining: available - count, day: chinaDayStart(this.serverNow(tokenId)) };
+    return { status: "completed" };
+  }
+
+  async claimDailyDiscountIfAvailable(tokenId) {
+    const response = await this.executeGameCommand(tokenId, "discount_getdiscountinfo", {}, "读取每日礼包领取状态");
+    const body = response?._raw?.body || response?.body || response;
+    if (!body || typeof body !== "object" || (body.discountList !== undefined && !Array.isArray(body.discountList)))
+      throw new Error("每日礼包领取状态异常");
+    const row = (body.discountList || []).find(item => item.discountId === 1);
+    const state = row?.discountState ?? 0;
+    if ([0, 1, 3].includes(state)) return { status: "skipped", reason: state === 3 ? "每日礼包已领取" : "每日礼包当前不可领取" };
+    if (state !== 2) throw new Error("每日礼包返回未知领取状态");
+    return this.executeGameCommand(tokenId, "discount_claimreward", { discountId: 1 }, "领取每日礼包");
+  }
+
+  async runDailyBossTask(tokenId) {
+    const now = this.serverNow(tokenId);
+    if (now - chinaDayStart(now) >= 86400000 - 5 * 60000)
+      return { status: "skipped", reason: "每日BOSS已进入结算时间" };
+    const weekday = new Date(now + 8 * 3600000).getUTCDay() || 7;
+    const bosses = this.taskConfig.bossLoop?.[weekday]?.monsters;
+    if (!Array.isArray(bosses) || !bosses.length) throw new Error("缺少当前日期的每日BOSS配置");
+    let fought = false;
+    for (const bossId of bosses) {
+      const thresholds = Object.values(this.taskConfig.bossRewards || {}).filter(row => row.bossId === bossId).map(row => Number(row.damage));
+      if (!thresholds.length || thresholds.some(value => !Number.isFinite(value))) throw new Error("每日BOSS奖励阈值配置无效");
+      const read = async () => {
+        const response = await this.executeGameCommand(tokenId, "boss_getstate", { bossId }, "读取每日BOSS伤害状态");
+        const body = response?._raw?.body || response?.body || response;
+        const hurt = body?.hurt ?? 0; // Boss_GetStateResp defaults hurt to zero.
+        if (!body || typeof body !== "object" || !Number.isFinite(hurt) || hurt < 0) throw new Error("每日BOSS伤害状态异常");
+        return hurt;
+      };
+      const before = await read();
+      if (before >= Math.max(...thresholds)) continue;
+      await this.switchToFormationIfNeeded(tokenId, this.dailySettings.bossFormation, "BOSS阵容");
+      // Three attempts are the existing automation budget, not a game daily quota.
+      for (let i = 0; i < 3; i++) await this.executeGameCommand(tokenId, "fight_startboss", { bossId }, `每日BOSS ${i + 1}/3`, 12000);
+      const after = await read();
+      if (after < before) throw new Error("每日BOSS状态回退，结果需核对");
+      fought = true;
+    }
+    return fought ? { status: "completed" } : { status: "skipped", reason: "每日BOSS最高奖励伤害已达到" };
+  }
+
   async runBlackMarketTask(tokenId, mode = BLACK_MARKET_MODES.LEGACY) {
     const blackMarketSettings = {
       ...loadBlackMarketSettings(),
@@ -542,7 +602,9 @@ export class DailyTaskRunner {
       if (!Number.isInteger(targetFormation) || targetFormation <= 0)
         throw new Error("目标阵容无效，停止切换");
       this.log(`检查${formationName}配置...`);
-      const teamInfo = await this.executeGameCommand(
+      const teamInfo = this.isRunActive && Number.isInteger(this.currentFormation)
+        ? { presetTeamInfo: { useTeamId: this.currentFormation } }
+        : await this.executeGameCommand(
         tokenId,
         "presetteam_getinfo",
         {},
@@ -558,6 +620,7 @@ export class DailyTaskRunner {
         throw new Error("服务器未提供有效阵容，停止切换");
       if (this.originalFormation === undefined)
         this.originalFormation = currentFormation;
+      if (this.isRunActive) this.currentFormation = currentFormation;
       this.log(`当前阵容: ${currentFormation}`);
 
       if (currentFormation === targetFormation) {
@@ -573,6 +636,7 @@ export class DailyTaskRunner {
       );
       // A lost acknowledgement can still follow a server-side switch.
       this.formationChanged = true;
+      this.currentFormation = undefined;
       await this.executeGameCommand(
         tokenId,
         "presetteam_saveteam",
@@ -580,6 +644,7 @@ export class DailyTaskRunner {
         `切换到${formationName}${targetFormation}`,
       );
 
+      if (this.isRunActive) this.currentFormation = targetFormation;
       this.log(`成功切换到${formationName}${targetFormation}`, "success");
       return true;
     } catch (error) {
@@ -939,29 +1004,7 @@ export class DailyTaskRunner {
     }
 
     let role = await this.getLatestRole(tokenId, "获取钓鱼库存信息");
-    const lastFreeTime = Number(
-      role?.statistics?.["artifact:normal:lottery:time"] || 0,
-    );
-
-    if (isTodayAvailable(lastFreeTime)) {
-      this.log("检测到今日免费钓鱼次数，开始消耗 3 次");
-      let freeUsed = 0;
-      for (let i = 0; i < 3 && freeUsed < need; i++) {
-        try {
-          await this.executeGameCommand(
-            tokenId,
-            "artifact_lottery",
-            { lotteryNumber: 1, newFree: true, type: 1 },
-            `免费钓鱼 ${i + 1}/3`,
-            8000,
-          );
-          freeUsed++;
-        } catch (error) {
-          this.log(`免费钓鱼失败: ${error.message}`, "warning");
-          break;
-        }
-      }
-    }
+    await this.runFreeFishingTask(tokenId, role, need);
 
     const updatedAct = await this.getActivityInfo(
       tokenId,
@@ -1032,8 +1075,7 @@ export class DailyTaskRunner {
   }
 
   async runMonthlyArenaTopUp(tokenId, settings) {
-    const hour = new Date().getHours();
-    if (hour < 6 || hour >= 22) {
+    if (!arenaAvailability(this.serverNow(tokenId), this.taskConfig.constants)) {
       this.log("当前不在竞技场开放时间 (6:00-22:00)，跳过月度竞技场补齐", "warning");
       return;
     }
@@ -1191,6 +1233,7 @@ export class DailyTaskRunner {
 
     let successCount = 0;
     let failCount = 0;
+    const purchaseErrors = [];
     const operations = [];
 
     for (const itemKey of purchaseList) {
@@ -1245,9 +1288,11 @@ export class DailyTaskRunner {
         }
       } catch (error) {
         failCount++;
+        purchaseErrors.push(error.message);
+        if (error.interrupted || !getServerErrorCode(error)) throw error;
       }
     }
-
+    if (failCount) throw new Error(`梦境采购${failCount}项未确认：${purchaseErrors.join("；") || "响应未包含奖励"}`);
     this.log(`梦境购买完成: 成功${successCount}, 失败${failCount}`, "success");
   }
 
@@ -1261,6 +1306,7 @@ export class DailyTaskRunner {
     } finally {
       // 灯神升级/战斗会修改角色数据，丢弃日常任务入口的旧快照。
       this.roleSnapshots.delete(tokenId);
+      this.currentFormation = undefined;
     }
   }
 
@@ -1290,7 +1336,7 @@ export class DailyTaskRunner {
       log: (text) => this.log(text),
     });
     this.log(`自动梦境：${result.reason}，当前层数 ${result.floor ?? "未知"}`);
-    return result;
+    return result.pushError ? { ...result, status: "failed" } : result;
   }
 
   async runApexTask(tokenId) {
@@ -1380,7 +1426,7 @@ export class DailyTaskRunner {
       );
       await this.sleep(this.delaySettings.commandDelay);
       this.throwIfInterrupted(tokenId);
-      const role = extractRolePatch(response);
+      const role = normalizeDailyRoleSnapshot(extractRolePatch(response));
       const states = getDailyTaskStates(role, this.taskConfig);
       if (
         this.taskDay !== undefined &&
@@ -1453,6 +1499,9 @@ export class DailyTaskRunner {
     this.transportFailure = null;
     try {
       return await this.runTasks(tokenId, callbacks, customSettings);
+    } catch (error) {
+      error.dailyReasons = [...new Set([...(this.runIssues || []).map(issue => `${issue.task}：${issue.reason}`), `${this.currentStep || "日常状态同步"}：${error.message}`])];
+      throw error;
     } finally {
       activeTokenRuns.delete(tokenId);
       this.isRunActive = false;
@@ -1464,17 +1513,22 @@ export class DailyTaskRunner {
 
   async runTasks(tokenId, callbacks = {}, customSettings = null) {
     this.callbacks = callbacks;
+    this.runIssues = [];
+    this.currentStep = "日常状态同步";
     this.taskDay = undefined;
     this.taskWeek = undefined;
     this.activeCondition = undefined;
     this.rewardPhase = false;
     this.originalFormation = undefined;
+    this.currentFormation = undefined;
     this.formationChanged = false;
     this.roleStateDirty = true;
     this.reportedProgress = undefined;
     this.loggedTaskStates = new Map();
     this.throwIfInterrupted(tokenId);
     const settings = customSettings || this.loadSettings(tokenId);
+    this.dailySettings = settings;
+    this.freeFishingExpected = null;
     if (!settings) throw new Error("每日任务设置无法读取");
     this.logDetail("读取服务器任务配置与当前任务列表...");
     this.taskConfig = await this.loadConfig(
@@ -1486,6 +1540,7 @@ export class DailyTaskRunner {
       },
       tokenId,
     );
+    await this.executeGameCommand(tokenId, "task_checkdailytask", {}, "同步日常及周活跃状态");
     const roleData = await this.refreshServerRole(tokenId);
     this.taskDay = roleData.dailyTask.dailyTime;
     this.taskWeek = roleData.dailyTask.weekTime;
@@ -1727,14 +1782,8 @@ export class DailyTaskRunner {
         condition: 13,
         execute: async () => {
           this.log("开始竞技场战斗流程");
-          const hour = new Date().getHours();
-          if (hour < 6) {
-            this.log("当前时间未到6点，跳过竞技场战斗", "warning");
-            return false;
-          }
-          if (hour > 22) {
-            this.log("当前时间已过22点，跳过竞技场战斗", "warning");
-            return false;
+          if (!arenaAvailability(this.serverNow(tokenId), this.taskConfig.constants)) {
+            return { status: "skipped", reason: "不在服务器竞技场开放时段" };
           }
 
           await this.switchToFormationIfNeeded(
@@ -1820,30 +1869,7 @@ export class DailyTaskRunner {
       }
     }
 
-    const todayBossId = getTodayBossId(roleData.dailyTask.dailyTime);
-    taskList.push({
-      name: "每日BOSS阵容检查",
-      checkOnly: true,
-      execute: () =>
-        this.switchToFormationIfNeeded(
-          tokenId,
-          settings.bossFormation,
-          "BOSS阵容",
-        ),
-    });
-    for (let i = 0; i < 3; i++) {
-      taskList.push({
-        name: `每日BOSS ${i + 1}/3`,
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "fight_startboss",
-            { bossId: todayBossId },
-            `每日BOSS ${i + 1}`,
-            12000,
-          ),
-      });
-    }
+    taskList.push({ name: "每日BOSS", execute: () => this.runDailyBossTask(tokenId) });
 
     // 4. 固定奖励
     const fixedRewards = [
@@ -1855,7 +1881,7 @@ export class DailyTaskRunner {
       ...(isTodayAvailable(statisticsTime["legion:sign:in"])
         ? [{ name: "俱乐部", cmd: "legion_signin" }]
         : []),
-      { name: "领取每日礼包", cmd: "discount_claimreward" },
+
       ...(isTodayAvailable(roleData.cardTime?.[1]?.lastClaimTime)
         ? [{ name: "领取免费礼包", cmd: "card_claimreward" }]
         : []),
@@ -1880,6 +1906,8 @@ export class DailyTaskRunner {
           ),
       });
     });
+
+    taskList.push({ name: "领取每日礼包", execute: () => this.claimDailyDiscountIfAvailable(tokenId) });
 
     taskList.push({
       name: "领取永久卡礼包",
@@ -1952,20 +1980,7 @@ export class DailyTaskRunner {
     }
 
     // 5. 免费活动
-    if (isTodayAvailable(statistics["artifact:normal:lottery:time"])) {
-      for (let i = 0; i < 3; i++) {
-        taskList.push({
-          name: `免费钓鱼 ${i + 1}/3`,
-          execute: () =>
-            this.executeGameCommand(
-              tokenId,
-              "artifact_lottery",
-              { lotteryNumber: 1, newFree: true, type: 1 },
-              `免费钓鱼 ${i + 1}`,
-            ),
-        });
-      }
-    }
+    taskList.push({ name: "免费钓鱼", execute: () => this.runFreeFishingTask(tokenId) });
 
     if (isGenieMainLevelUnlocked(roleData)) {
       taskList.push({
@@ -1982,6 +1997,7 @@ export class DailyTaskRunner {
     if (settings.apexDailyEnable === true) {
       taskList.push({
         name: "逐鹿盐山助威与竞猜",
+        optional: true,
         execute: () => this.runApexTask(tokenId),
       });
     }
@@ -2101,6 +2117,7 @@ export class DailyTaskRunner {
     for (const weekly of [false, true]) {
       taskList.push({
         name: weekly ? "领取周常任务奖励" : "领取日常任务奖励",
+        rewardGroup: weekly ? "week" : "day",
         execute: async () => {
           if (!pointRewardsStarted && this.roleStateDirty)
             await this.refreshServerRole(tokenId);
@@ -2113,6 +2130,7 @@ export class DailyTaskRunner {
             definitions,
             weekly,
           );
+          if (!ids.length) return { status: "skipped", reason: rewardProgressText(this.roleData.dailyTask, definitions, weekly) };
           for (const rewardId of ids) {
             this.throwIfInterrupted(tokenId);
             if (this.roleData.dailyTask[weekly ? "weekReward" : "dailyReward"]?.[rewardId] === true) continue;
@@ -2146,6 +2164,7 @@ export class DailyTaskRunner {
 
     const summary = { completed: 0, skipped: 0, failed: 0, deferred: 0 };
     let supplementalIncomplete = 0;
+    const skippedConditions = new Set(this.taskConfig.tasks.filter(task => !dailyConditionEnabled(task.completeCondition, settings, canRunDiamondBoxPaidRecruit)).map(task => task.completeCondition));
     const attemptedConditions = new Set();
     const attemptedClaims = new Set();
     const totalTasks = taskList.length;
@@ -2155,6 +2174,7 @@ export class DailyTaskRunner {
       for (let i = 0; i < taskList.length; i++) {
         this.throwIfInterrupted(tokenId);
         const task = taskList[i];
+        this.currentStep = task.name;
         this.activeCondition = task.condition ?? task.claimCondition;
         try {
           if (task.claimCondition !== undefined && !claimsStarted) {
@@ -2180,23 +2200,38 @@ export class DailyTaskRunner {
             attemptedClaims.add(task.claimCondition);
           this.logDetail(`执行中: ${task.name}`);
           const result = await task.execute();
+          const outcome = classifyDailyStepResult(result);
+          if (outcome.status === "failed" || (outcome.status === "pending" && !task.checkOnly)) {
+            this.runIssues.push({ task: task.name, reason: outcome.reason, status: outcome.status,
+              condition: this.activeCondition, rewardGroup: task.rewardGroup, optional: task.optional === true });
+          }
+          if (outcome.status === "skipped") {
+            summary.skipped++;
+            if (task.condition !== undefined) skippedConditions.add(task.condition);
+            this.log(`${task.name}：正常跳过（${outcome.reason}）`);
+            continue;
+          }
           if (
-            result === false &&
-            this.activeCondition === undefined &&
-            !task.checkOnly
+            ["pending", "failed"].includes(outcome.status) &&
+            this.activeCondition === undefined && !task.checkOnly
           ) {
             summary.deferred++;
             supplementalIncomplete++;
           } else summary.completed++;
+          if (outcome.status === "failed") summary.failed++;
           this.log(
-            `${task.name}: ${result === false && !task.checkOnly ? "待继续" : task.condition !== undefined || task.claimCondition !== undefined ? "已执行" : "已处理"}`,
+            `${task.name}: ${["pending", "failed"].includes(outcome.status) && !task.checkOnly ? "待继续" : task.condition !== undefined || task.claimCondition !== undefined ? "已执行" : "已处理"}`,
             "info",
           );
           await this.sleep(this.delaySettings.taskDelay);
         } catch (error) {
           if (error.interrupted) throw error;
           summary.failed++;
-          if (this.activeCondition === undefined) supplementalIncomplete++;
+          this.runIssues.push({ task: task.name, reason: error.message, status: "failed", condition: this.activeCondition, rewardGroup: task.rewardGroup,
+            optional: task.optional === true });
+          if (this.activeCondition === undefined) {
+            supplementalIncomplete++;
+          }
           this.log(`任务执行失败: ${task.name} - ${error.message}`, "error");
           // Match the original runner: a business rejection fails this step only.
           if (
@@ -2241,7 +2276,7 @@ export class DailyTaskRunner {
     for (const state of serverTasks) {
       if (
         (attemptedConditions.has(state.condition) &&
-          state.status === "pending") ||
+          !skippedConditions.has(state.condition) && state.status === "pending") ||
         (attemptedClaims.has(state.condition) && state.status !== "claimed")
       )
         summary.deferred++;
@@ -2268,18 +2303,39 @@ export class DailyTaskRunner {
         weekly ? this.taskConfig.weeklyRewards : this.taskConfig.dailyRewards,
         weekly,
       );
-      this.log(`${weekly ? "周" : "日"}活跃奖励服务器核对：${remaining.length ? `仍待领取 ${remaining.join("、")}` : "当前可领取档位均已领取"}`, remaining.length ? "warning" : "success");
+      this.log(`${weekly ? "周" : "日"}活跃奖励服务器核对：${rewardProgressText(this.roleData.dailyTask, weekly ? this.taskConfig.weeklyRewards : this.taskConfig.dailyRewards, weekly)}`, remaining.length ? "warning" : "info");
     }
-    summary.incomplete =
-      summary.remainingTasks +
-      summary.unclaimedTasks +
-      summary.remainingRewards +
-      supplementalIncomplete;
+    summary.normalSkippedTasks = serverTasks.filter(task => task.status === "pending" && skippedConditions.has(task.condition)).length;
+    summary.dailyIncomplete = summary.remainingTasks - summary.normalSkippedTasks + summary.unclaimedTasks + summary.remainingRewards;
+    if (this.freeFishingExpected && this.freeFishingExpected.day === chinaDayStart(this.serverNow(tokenId)) &&
+        remainingFreeFishing(this.roleData, this.taskConfig.constants, this.serverNow(tokenId)) > this.freeFishingExpected.remaining) {
+      this.runIssues.push({ task: "免费钓鱼", status: "pending", reason: "免费钓鱼次数未确认扣除", optional: false });
+    }
+    // A fresh claimed state supersedes an earlier business rejection for that goal.
+    const issues = this.runIssues.filter(issue => {
+      if (issue.rewardGroup) return getClaimablePointRewards(this.roleData.dailyTask, issue.rewardGroup === "week" ? this.taskConfig.weeklyRewards : this.taskConfig.dailyRewards, issue.rewardGroup === "week").length > 0;
+      return issue.condition === undefined || serverTasks.find(task => task.condition === issue.condition)?.status !== "claimed";
+    });
+    const planIssues = issues.filter(issue => issue.condition === undefined && !issue.optional);
+    summary.planFailed = planIssues.filter(issue => issue.status === "failed").length;
+    summary.planIncomplete = summary.dailyIncomplete + planIssues.length;
+    summary.supplementalWarnings = issues.filter(issue => issue.optional).map(issue => `${issue.task}：${issue.reason}`);
+    summary.reasons = issues.filter(issue => !issue.optional).map(issue => `${issue.task}：${issue.reason}`);
+    for (const task of serverTasks) {
+      if ((task.status === "pending" && !skippedConditions.has(task.condition)) || task.status === "claimable")
+        summary.reasons.push(`${taskLabels[task.condition] || `任务${task.id}`}：${task.status === "claimable" ? "已完成但任务积分未领取" : `进度${task.progress}/${task.required}，尚未完成`}`);
+    }
+    for (const weekly of [false, true]) {
+      for (const id of getClaimablePointRewards(this.roleData.dailyTask, weekly ? this.taskConfig.weeklyRewards : this.taskConfig.dailyRewards, weekly))
+        summary.reasons.push(`${weekly ? "周" : "日"}活跃第${id}档已达标但未领取`);
+    }
+    summary.reasons = [...new Set(summary.reasons)];
+    summary.incomplete = summary.dailyIncomplete + supplementalIncomplete;
     this.log(
-      summary.incomplete
-        ? `本轮结束，${summary.incomplete} 个步骤未确认完成；下次重新读取服务器任务列表`
-        : `日常结束：处理${summary.completed}步，跳过${summary.skipped}步，失败${summary.failed}步，服务器任务已核对`,
-      summary.incomplete ? "warning" : "success",
+      summary.dailyIncomplete
+        ? `本轮结束，${summary.dailyIncomplete} 个日常任务或奖励未确认完成；下次重新读取服务器任务列表`
+        : `日常已完成：当前可领奖励均已核对，正常跳过${summary.skipped}步${summary.supplementalWarnings.length ? `；附加任务${summary.supplementalWarnings.length}项需注意，请查看具体原因` : ""}${planIssues.length ? `；本轮配置任务${planIssues.length}项未完成：${planIssues.map(issue => `${issue.task}（${issue.reason}）`).join("；")}` : ""}`,
+      summary.planIncomplete || summary.supplementalWarnings.length ? "warning" : "success",
     );
     return summary;
   }

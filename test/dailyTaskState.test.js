@@ -129,7 +129,7 @@ test("config version is verified each run while immutable configuration requests
     loadDailyTaskConfig(store, "b", fetchConfig),
   ]);
   assert.equal(a, b);
-  assert.equal(reads, 1);
+  assert.equal(reads, 2);
   assert.equal(versions, 2);
 });
 
@@ -149,7 +149,7 @@ test("failed config reads can be retried and unsafe versions are rejected", asyn
     /读取失败/,
   );
   await loadDailyTaskConfig(store, "a", fetchConfig);
-  assert.equal(attempt, 2);
+  assert.equal(attempt, 3);
   await assert.rejects(
     loadDailyTaskConfig(
       {
@@ -199,5 +199,5 @@ test("an evicted failed config request cannot remove a newer cached request for 
   rejectFirst(new Error("first request failed"));
   await rejected;
   await loadDailyTaskConfig(store, "cache-race-a", fetchConfig);
-  assert.equal(readsA, 2);
+  assert.equal(readsA, 3);
 });

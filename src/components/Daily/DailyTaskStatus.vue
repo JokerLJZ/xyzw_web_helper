@@ -602,8 +602,10 @@ const runDailyFix = async () => {
       settings,
     ); // 传入当前组件的响应式 settings
 
-    const incomplete = result.incomplete;
-    if (incomplete) {
+    const incomplete = result.planIncomplete ?? result.dailyIncomplete ?? result.incomplete;
+    if (result.planFailed > 0) {
+      message.error(`日常执行有异常：${result.reasons?.join("；") || "请查看日志"}`);
+    } else if (incomplete) {
       message.warning("仍有未完成步骤，再次补差将重新读取服务器任务状态");
     } else {
       message.success("每日任务补差执行完成");
