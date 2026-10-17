@@ -369,6 +369,7 @@
                 >
                   一键俱乐部签到
                 </n-button>
+                <n-button size="small" @click="previewSaltBattle()" :disabled="isRunning || selectedTokens.length === 0">自动盐场（一次攻击）</n-button>
                 <n-button
                   size="small"
                   @click="batchSaltSignup"
@@ -2485,6 +2486,7 @@
               </n-tabs>
             </n-checkbox-group>
           </div>
+          <SaltBattleSettings v-if="taskForm.selectedTasks.includes('batchSaltBattle')" v-model="taskForm.taskConfig.batchSaltBattle" />
           <div v-if="taskForm.selectedTasks.includes('batchGoldenCheer')" class="setting-item">
             <label class="setting-label">黄金天宫助威目标</label>
             <p>各账号本期一次；跨期后须刷新列表并重新选择目标。</p>
@@ -3755,9 +3757,25 @@
       </div>
     </n-modal>
   </div>
+  <n-modal v-model:show="saltBattlePreviewOpen" preset="card" title="自动盐场预览" style="width: min(860px, 95vw)">
+    <n-space vertical>
+      <SaltBattleSettings v-model="batchSettings.saltBattle" />
+      <div v-for="row in saltBattlePreviews" :key="row.tokenId">
+        {{ row.name }}：{{ row.reason || `战场${row.battlefieldId}，${row.playerState}，目标${row.targetId}，路径${row.distance ?? '—'}格，加速单价${row.speedCost}金砖` }}
+      </div>
+      <n-text depth="3">执行时逐账号重新核对资格和最近地块，实际目标可能变化。预览未布阵、加速或攻击。</n-text>
+      <n-space justify="end">
+        <n-button @click="saltBattlePreviewOpen = false">关闭</n-button>
+        <n-button type="primary" :disabled="isRunning || !saltBattlePreviews.some(row => !row.reason)" @click="saltBattlePreviewOpen = false; batchSaltBattle()">按预算出战并攻击一次</n-button>
+      </n-space>
+    </n-space>
+  </n-modal>
 </template>
 
 <script setup>
+import SaltBattleSettings from "@/components/SaltBattleSettings.vue";
+import { createTasksSaltBattle } from "@/utils/batch/tasksSaltBattle.js";
+import { DEFAULT_SALT_BATTLE_SETTINGS } from "@/utils/saltWarRunner.js";
 import { connectWithTokenRefresh } from "@/utils/batch/connectWithTokenRefresh.js";
 import RechargeExchangeDialog from "@/components/RechargeExchangeDialog.vue";
 import { createTasksRecharge } from "@/utils/batch/tasksRecharge.js";
@@ -4570,6 +4588,7 @@ for (const merchantId in goldItemsConfig) {
 const createDefaultBlackMarketPurchaseList = () => defaultBlackMarketPurchaseList.map(item => ({ ...item }));
 const blackMarketItemOptions = blackMarketItemCatalog.map(item => ({ label: item.label, value: item.itemId }));
 const batchSettings = reactive({
+  saltBattle: { ...DEFAULT_SALT_BATTLE_SETTINGS },
   weirdTowerClimbCount: DEFAULT_WEIRD_TOWER_CLIMB_COUNT,
   blackMarketPurchaseList: createDefaultBlackMarketPurchaseList(),
   legionId: null,
@@ -4705,6 +4724,7 @@ const loadBatchSettings = () => {
     if (saved) {
       const parsed = JSON.parse(saved);
       Object.assign(batchSettings, parsed);
+      batchSettings.saltBattle = { ...DEFAULT_SALT_BATTLE_SETTINGS, ...(parsed.saltBattle || {}) };
     }
     batchSettings.weirdTowerClimbCount = normalizeWeirdTowerClimbCount(batchSettings.weirdTowerClimbCount);
     batchSettings.blackMarketPurchaseList = normalizeBlackMarketPurchaseList(batchSettings.blackMarketPurchaseList);
@@ -4803,6 +4823,7 @@ const showTasksModal = ref(false); // Control the visibility of the tasks list m
 const editingTask = ref(null); // Currently editing task
 
 const createScheduledTaskConfig = (config = {}) => ({
+  batchSaltBattle: { ...DEFAULT_SALT_BATTLE_SETTINGS, ...batchSettings.saltBattle, ...config.batchSaltBattle },
   batchGoldenCheer: { legionId: config.batchGoldenCheer?.legionId ?? batchSettings.goldenCheerLegionId, expectedPhase: config.batchGoldenCheer?.expectedPhase ?? batchSettings.goldenCheerPhase },
   batchSmartBoxWeekly: {
     rewardChoice: normalizeWeeklyRewardChoice(config.batchSmartBoxWeekly?.rewardChoice ?? batchSettings.weeklyRewardChoices.box),
@@ -4982,6 +5003,7 @@ const taskGroupDefinitions = [
       "batchlingguanzi",
       "batchclubsign",
       "batchSaltSignup",
+      "batchSaltBattle",
       "batchCampSignup",
       "batchPeachSignup",
       "batchGoldenCheer",
@@ -5670,6 +5692,7 @@ const importConfig = async ({ file }) => {
         }
         if (importData.batchSettings) {
           Object.assign(batchSettings, importData.batchSettings);
+          batchSettings.saltBattle = { ...DEFAULT_SALT_BATTLE_SETTINGS, ...(batchSettings.saltBattle || {}) };
           saveBatchSettings();
         }
         if (Array.isArray(importData.scheduledTasks)) {
@@ -8242,6 +8265,7 @@ const {
 
 const tasksSalt = createTasksSalt(createTaskDeps());
 const { batchSaltSignup } = tasksSalt;
+const { batchSaltBattle, previewSaltBattle, saltBattlePreviews, saltBattlePreviewOpen } = createTasksSaltBattle({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession });
 const { batchCampChallenge } = createTasksCamp(createTaskDeps());
 const signupCheerTasks = createTasksSignupCheer(createTaskDeps());
 const { batchCampSignup, batchPeachSignup } = signupCheerTasks;
@@ -8317,6 +8341,7 @@ const getScheduledTaskFunction = (name) => {
     batchmengjing,
     batchclubsign,
     batchSaltSignup,
+    batchSaltBattle,
     batchCampSignup,
     batchPeachSignup,
     batchGoldenCheer,

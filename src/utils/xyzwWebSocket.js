@@ -103,6 +103,7 @@ export class CommandRegistry {
       ack,
       seq,
       time: Date.now(),
+      ...(options.hintField ? { hint: params[options.hintField] ?? defaultBody[options.hintField] } : {}),
       body: options.rawBody
         ? { ...defaultBody, ...params }
         : this.encoder?.bon?.encode
@@ -148,6 +149,15 @@ export function registerDefaultCommands(reg) {
   const registry = reg
     .registerHeartbeat()
     // 角色/系统
+    .register("war_enterbattlefield", {}, { hintField: "battlefieldId" })
+    .register("war_getbattlefieldinfo", {}, { hintField: "battlefieldId" })
+    .register("war_getteaminfo", {}, { hintField: "battlefieldId" })
+    .register("war_teamsetbattleteam", {}, { hintField: "battlefieldId" })
+    .register("war_setbattleteam", {}, { hintField: "battlefieldId" })
+    .register("war_startmarch", {}, { hintField: "battlefieldId" })
+    .register("war_speedup", {}, { hintField: "battlefieldId" })
+    .register("war_startattackbuilding", {}, { hintField: "battlefieldId" })
+    .register("war_ping", {}, { hintField: "battlefieldId" })
     .register("role_getroleinfo", {
       clientVersion: "2.21.2-fa918e1997301834-wx",
       inviteUid: 0,
@@ -557,6 +567,7 @@ export class XyzwWebSocketClient {
 
     this.dialogStatus = false;
     this.messageListener = null;
+    this.packetSubscribers = new Set();
     this.showMsg = false;
     this.connected = false;
     this.isReconnecting = false; // 重连状态标志
@@ -666,6 +677,8 @@ export class XyzwWebSocketClient {
                 this.messageListener(packet);
               }
 
+              this._notifyPacketSubscribers(packet);
+
               // Promise 响应处理
               this._handlePromiseResponse(packet);
             } catch (error) {
@@ -737,6 +750,7 @@ export class XyzwWebSocketClient {
           this.messageListener(packet);
         }
 
+        this._notifyPacketSubscribers(packet);
         // Promise 响应处理
         this._handlePromiseResponse(packet);
       } catch (error) {
@@ -771,6 +785,18 @@ export class XyzwWebSocketClient {
   /** 注册消息回调 */
   setMessageListener(fn) {
     this.messageListener = fn;
+  }
+
+  /** Independent packet subscriptions preserve the store's existing listener. */
+  subscribePackets(listener) {
+    this.packetSubscribers.add(listener);
+    return () => this.packetSubscribers.delete(listener);
+  }
+
+  _notifyPacketSubscribers(packet) {
+    for (const listener of this.packetSubscribers) {
+      try { listener(packet); } catch (error) { gameLogger.warn("战场消息订阅处理失败", error); }
+    }
   }
 
   /** 控制台消息开关 */
@@ -1172,6 +1198,16 @@ export class XyzwWebSocketClient {
     // 命令到响应的映射 - 处理响应命令与原始命令不匹配的情况
     const responseToCommandMap = {
       // 1:1 响应映射（优先级高）
+      war_enterbattlefieldresp: "war_enterbattlefield",
+      war_getbattlefieldinforesp: "war_getbattlefieldinfo",
+      war_getteaminforesp: "war_getteaminfo",
+      war_teamsetbattleteamresp: "war_teamsetbattleteam",
+      war_setbattleteamresp: "war_setbattleteam",
+      war_startmarchresp: "war_startmarch",
+      war_speedupresp: "war_speedup",
+      war_startattackbuildingresp: "war_startattackbuilding",
+      war_pingresp: "war_ping",
+      war_enterbattlefieldgzipresp: "war_enterbattlefield",
       hero_calcpowerbyteamresp: "hero_calcpowerbyteam",
       fight_startgenieresp: "fight_startgenie",
       fight_startpvpresp: "fight_startpvp",

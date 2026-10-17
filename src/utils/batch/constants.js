@@ -1,3 +1,4 @@
+import { DEFAULT_SALT_BATTLE_SETTINGS } from "@/utils/saltWarRunner.js";
 import { DEFAULT_WEIRD_TOWER_CLIMB_COUNT } from "@/utils/evoTowerRewards.js";
 import { DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES } from "@/utils/jianghuBlackMarketWeekly.js";
 /**
@@ -61,6 +62,7 @@ export const availableTasks = [
   { label: "自动梦境", value: "batchmengjing" },
   { label: "一键俱乐部签到", value: "batchclubsign" },
   { label: "一键盐场报名（周六）", value: "batchSaltSignup" },
+  { label: "自动盐场（一次攻击）", value: "batchSaltBattle" },
   { label: "自动营地报名（周日）", value: "batchCampSignup" },
   { label: "自动蟠桃报名（周日）", value: "batchPeachSignup" },
   { label: "批量黄金天宫助威", value: "batchGoldenCheer" },
@@ -192,6 +194,7 @@ export const defaultSettings = {
 
 // 默认批量设置
 export const defaultBatchSettings = {
+  saltBattle: { ...DEFAULT_SALT_BATTLE_SETTINGS },
   legionId: null,
   crystalHeroId: 107,
   altRefineHeroId: 107,
