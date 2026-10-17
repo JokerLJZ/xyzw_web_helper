@@ -104,25 +104,20 @@ class Cache {
     const oldItem = this.content[key];
     const newItem = new CacheItem(key, null, conf.timeout);
     this.content[key] = newItem;
-    let data;
-    if (callback instanceof Function || callback instanceof Promise) {
-      try {
-        data = await callback(key, conf);
-        oldItem && oldItem.reslove.map((f) => f && f(data));
-        newItem && newItem.reslove.map((f) => f && f(data));
-      } catch (e) {
-        console.error(`${this.name}-${key}: the ajax request is failed : ${e}`);
-        oldItem && oldItem.reject.map((f) => f && f(data));
-        newItem && newItem.reject.map((f) => f && f(data));
+    try {
+      const data = await (typeof callback === "function" ? callback(key, conf) : callback);
+      newItem.val = data;
+      for (const item of [oldItem, newItem]) item?.reslove.forEach((resolve) => resolve(data));
+      return data;
+    } catch (error) {
+      if (this.content[key] === newItem) delete this.content[key];
+      for (const item of [oldItem, newItem]) item?.reject.forEach((reject) => reject(error));
+      throw error;
+    } finally {
+      for (const item of [oldItem, newItem]) {
+        if (item) { item.reject.length = 0; item.reslove.length = 0; }
       }
-    } else {
-      data = callback;
-      oldItem && oldItem.reslove.map((f) => f && f(data));
-      newItem && newItem.reslove.map((f) => f && f(data));
     }
-    oldItem && ((oldItem.reject.length = 0), (oldItem.reslove.length = 0));
-    newItem && ((newItem.reject.length = 0), (newItem.reslove.length = 0));
-    return (newItem.val = data);
   }
 
   clean(content = new Content()) {
@@ -161,13 +156,13 @@ class CacheManager {
 const $CacheManager = new CacheManager();
 
 const install = (vm:App, options:any) => {
-  if (vm.version.startWith("3.")) {
+  if (vm.version.startsWith("3.")) {
     vm.config.globalProperties.$CacheManager = $CacheManager;
   } else {
     vm.prototype.$CacheManager = $CacheManager;
   }
 };
 
-window.$CacheManager = $CacheManager;
+if (typeof window !== "undefined") window.$CacheManager = $CacheManager;
 
 export { $CacheManager, Content, CacheManager, Cache, install };
