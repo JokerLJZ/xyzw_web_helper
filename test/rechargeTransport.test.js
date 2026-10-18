@@ -12,6 +12,9 @@ test("庆典各协议注册并匹配客户端声明的响应", async () => {
   client.connected = true;
   for (const [command, response] of [
     ["book_claimskinpoint", "syncresp"],
+    ["mail_getlist", "mail_getlistresp"],
+    ["mail_claimattachment", "mail_claimattachmentresp"],
+    ["mail_changestate", "mail_changestateresp"],
     ["team_getallteam", "syncteamresp"],
     ["team_setteam", "syncteamresp"],
     ["celebrate_getcelebrateinfo", "celebrate_getcelebrateinforesp"],

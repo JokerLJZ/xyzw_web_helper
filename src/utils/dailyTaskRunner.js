@@ -1,3 +1,4 @@
+import { cleanupMondayMail } from "./mondayMailCleanup.js";
 import { normalizeDailyRoleSnapshot, chinaDayStart, arenaAvailability, remainingFreeFishing, rewardProgressText, dailyConditionEnabled, classifyDailyStepResult } from "./dailyTaskPolicy.js";
 import { createApexDailySender, runApexDailyTask } from "./apexDailyTask.js";
 import { runDailyGenieChallenges } from "./dailyGenieChallenges.js";
@@ -1378,6 +1379,7 @@ export class DailyTaskRunner {
         arenaEnable: true,
         claimHangUp: true,
         claimEmail: true,
+        mondayMailCleanup: false,
         blackMarketPurchase: true,
         blackMarketDiscountPurchase: false,
         holyBeastFragmentPurchase: false,
@@ -1890,6 +1892,25 @@ export class DailyTaskRunner {
         ? [{ name: "领取免费礼包", cmd: "card_claimreward" }]
         : []),
     ];
+
+    if (settings.mondayMailCleanup === true) {
+      taskList.push({
+        name: "周一领取并删除系统邮件与公告",
+        execute: () => cleanupMondayMail({
+          send: async (cmd, params) => {
+            if (cmd !== "mail_getlist") this.roleStateDirty = true;
+            const response = await this.sendRequest(tokenId, () =>
+              this.tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000), cmd);
+            const patch = extractRolePatch(response);
+            const snapshot = this.roleSnapshots.get(tokenId);
+            if (patch && snapshot) mergeRoleSnapshot(snapshot, patch);
+            return response;
+          },
+          now: () => this.tokenStore.getWebSocketClient?.(tokenId)?.getServerTime?.() ?? this.now(),
+          stopped: () => this.callbacks?.shouldStop?.() === true,
+        }),
+      });
+    }
 
     if (settings.claimEmail) {
       fixedRewards.push({

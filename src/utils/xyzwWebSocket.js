@@ -261,6 +261,8 @@ export function registerDefaultCommands(reg) {
     // 邮件
     .register("mail_getlist", { category: [0, 4, 5], lastId: 0, size: 60 })
     .register("mail_claimallattachment", { category: 0 })
+    .register("mail_claimattachment", { mailId: 0 })
+    .register("mail_changestate", { mailId: 0, state: 9 })
     .register("mail_getmtlinfo")
     .register("mail_getmtlshortinfo")
 
@@ -1261,6 +1263,9 @@ export class XyzwWebSocketClient {
       presetteam_saveteamresp: "presetteam_saveteam",
       presetteam_getinforesp: "presetteam_getinfo",
       mail_claimallattachmentresp: "mail_claimallattachment",
+      mail_getlistresp: "mail_getlist",
+      mail_claimattachmentresp: "mail_claimattachment",
+      mail_changestateresp: "mail_changestate",
       store_goodslistresp: "store_goodslist",
       store_getpurchaseresp: "store_getpurchase",
       store_setpurchaseresp: "store_setpurchase",
