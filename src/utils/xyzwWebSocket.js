@@ -370,6 +370,7 @@ export function registerDefaultCommands(reg) {
     .register("hero_skillawake", { heroId: 0, index: 0 })
     .register("book_upgrade")
     .register("book_claimpointreward")
+    .register("book_claimskinpoint", { skinId: 0 })
 
     // 排名相关
     .register("rank_getroleinfo")
@@ -1379,6 +1380,7 @@ export class XyzwWebSocketClient {
 
       legion_researchresp: ["legion_research", "legion_resetresearch"],
       syncresp: [
+        "book_claimskinpoint",
         "system_mysharecallback",
         "task_claimdailypoint",
         "task_checkdailytask",

@@ -27,8 +27,12 @@ export function classifyWarehouseActivityItem({ itemId, config, role = {}, now =
   }
   if (Number(item.type) === 2) {
     const convertAt = Number(item.changePackTime);
-    if (!(convertAt > 0)) return { status: "skipped", reason: "客户端未配置过期转礼包时间" };
-    if (!(seconds > convertAt)) return { status: "skipped", reason: "尚未到客户端配置的转礼包时间" };
+    // Explicitly restored legacy hammer: params=[1,89] defines a direct pack,
+    // but the old item has no conversion timestamp. Keep current-event guards above.
+    const legacyHammer = Number(itemId) === 6001 && convertAt === 0 &&
+      item.params?.[0] === 1 && item.params?.[1] === 89;
+    if (!(convertAt > 0) && !legacyHammer) return { status: "skipped", reason: "客户端未配置过期转礼包时间" };
+    if (convertAt > 0 && !(seconds > convertAt)) return { status: "skipped", reason: "尚未到客户端配置的转礼包时间" };
   } else if (Number(item.type) !== 5) {
     return { status: "skipped", reason: "客户端未将此道具识别为可开礼包" };
   }

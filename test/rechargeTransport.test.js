@@ -11,6 +11,7 @@ test("庆典各协议注册并匹配客户端声明的响应", async () => {
   const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
   client.connected = true;
   for (const [command, response] of [
+    ["book_claimskinpoint", "syncresp"],
     ["team_getallteam", "syncteamresp"],
     ["team_setteam", "syncteamresp"],
     ["celebrate_getcelebrateinfo", "celebrate_getcelebrateinforesp"],

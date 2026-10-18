@@ -137,3 +137,16 @@ test("固定排除仅保留美梦枕头和全服祝福，其余历史排除项�
   await tasks.batchUseWarehouseItems();
   assert.deepEqual(calls, restored);
 });
+
+test("金锤真实配置无转换时间但有礼包89时恢复开包，当期保护和配置校验仍有效", () => {
+  const f = { itemId: 6001, now: 201000, config: {
+    ItemConf: { 6001: { type: 2, params: [1, 89], changePackTime: 0 } },
+    PackConf: { 89: {} }, ActFestivalConf: {},
+  } };
+  assert.equal(classifyWarehouseActivityItem(f).status, "ready");
+  f.config.ActFestivalConf[1] = { itemId: 6001, start: 100, end: 300 };
+  assert.match(classifyWarehouseActivityItem(f).reason, /当期/);
+  f.config.ActFestivalConf = {};
+  delete f.config.PackConf[89];
+  assert.equal(classifyWarehouseActivityItem(f).status, "skipped");
+});

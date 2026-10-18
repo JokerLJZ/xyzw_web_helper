@@ -1,3 +1,4 @@
+import { claimSkinBookRewards } from "../skinBookRewards.js";
 import { classifyWarehouseActivityItem } from "../warehouseActivityItems.js";
 import { loadRechargeConfig } from "../rechargeActivity.js";
 import { formatWarehouseItem } from "../warehouseItemNames.js";
@@ -2224,6 +2225,22 @@ export function createTasksItem(deps) {
                 `图鉴升星校验失败，仍有${remainingBookPlan.reduce((sum, item) => sum + item.upgradeCount, 0)}次未完成`,
               );
             }
+          }
+
+          if (!shouldStop.value) {
+            const config = await (deps.loadSkinBookConfig || loadRechargeConfig)(
+              (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, HELPER_COMMAND_TIMEOUT_MS),
+            );
+            const skinResult = await claimSkinBookRewards({
+              config,
+              getRole: () => getRoleInfoWithStarRateLimitRetry(tokenId, token.name, "核对皮肤图鉴领取状态"),
+              send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, HELPER_COMMAND_TIMEOUT_MS),
+              wait: () => waitForBookActionInterval(tokenId),
+              stopped: () => shouldStop.value,
+              log: text => addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} ${text}`, type: "success" }),
+            });
+            roleInfo = skinResult.role;
+            addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} 皮肤图鉴领取${skinResult.claimed}项`, type: "info" });
           }
 
           let claimedRewards = 0;
