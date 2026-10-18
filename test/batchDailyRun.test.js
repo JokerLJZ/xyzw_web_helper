@@ -190,7 +190,7 @@ test("实际批量通知将日常失败和未领原因传递到推送正文", as
   const f = fixture({ dailyIncomplete: 0, planFailed: 1, planIncomplete: 1, reasons: ["领取每日礼包：服务器错误200020"] });
   await f.startBatch();
   assert.equal(f.context.tokenStatus.value["account-a"], "failed");
-  assert.match(f.state.notification.content, /领取每日礼包：服务器错误200020/);
+  assert.match(f.state.notification.content, /领取每日礼包：服务器异常（200020）/);
 });
 
 test("实际批量入口发生超时，推送仍保留失败步骤而非只有账号名", async () => {

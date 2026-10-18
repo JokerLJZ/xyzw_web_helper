@@ -9,7 +9,7 @@ test("账号日常未领奖后即使后续任务成功，推送仍为待继续",
     assert.equal(status, "pending");
     const report = formatScheduledTaskNotification("批量日常", [{ name: "未领奖账号", status }, { name: "已完成账号", status: "completed" }], new Date());
     assert.match(report.title, /⚠️.*执行结束.*1\/2/);
-    assert.match(report.content, /### 待继续账号\n- 未领奖账号/);
+    assert.match(report.content, /未领奖账号：批量日常：未取得明确完成结果/);
     assert.doesNotMatch(report.content, /### ✅ 成功账号\n- 未领奖账号/);
   }
 });

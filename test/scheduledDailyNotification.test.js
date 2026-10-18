@@ -41,19 +41,19 @@ function fixture({ beforeFailure = false, dailyFailure = true, connectionFailure
 test("实际定时调度：日常失败不被后续成功覆盖，包含专项推送任务也发WxPusher失败原因", async () => {
   const f = fixture(); await f.run();
   assert.equal(f.reports.length, 1);
-  assert.match(f.reports[0].content, /领取每日礼包：200020/);
+  assert.match(f.reports[0].content, /领取每日礼包：服务器异常（200020）/);
   assert.match(f.reports[0].title, /⚠️/);
   assert.equal(f.reports[0].options.skipWxPusher, false);
 });
 
 test("实际定时调度：日常重置临时状态也不会丢失之前任务的失败原因", async () => {
   const f = fixture({ beforeFailure: true, dailyFailure: false }); await f.run();
-  assert.match(f.reports[0].content, /前置任务失败：200020/);
+  assert.match(f.reports[0].content, /before：服务器异常（200020）/);
   assert.match(f.reports[0].title, /⚠️/);
 });
 
 test("实际定时调度：连接失败也推送账号与连接原因", async () => {
   const f = fixture({ connectionFailure: true }); await f.run();
   assert.match(f.reports[0].content, /测试账号/);
-  assert.match(f.reports[0].content, /连接超时/);
+  assert.match(f.reports[0].content, /账号连接异常/);
 });

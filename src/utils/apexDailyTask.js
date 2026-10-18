@@ -169,7 +169,7 @@ async function runAccount({ guessOnly = false, accountId, send, config, loadConf
     }
     info = await readRole();
     if (!applied(info)) {
-      const error = new Error(`${operationLabel(command, params)}结果未生效：${failure?.message || "服务器状态未确认"}，已停止，重新执行会先查询状态`, { cause: failure });
+      const error = new Error(`${operationLabel(command, params)}结果未确认：${failure?.message || "服务器状态未确认"}，已停止，重新执行会先查询状态`, { cause: failure });
       if (failure?.code !== undefined) error.code = failure.code;
       throw error;
     }

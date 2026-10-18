@@ -259,3 +259,22 @@ test("写操作200020不自动重发，响应完成后查询也至少间隔1.5�
   await assert.rejects(sender("apex_guess",{teamId:"target"}),/预测队伍target失败/);
   await sender("apex_getroleinfo");assert.deepEqual(calls,["apex_guess","apex_getroleinfo"]);assert.deepEqual(waits,[1500]);
 });
+
+test("竞猜领奖200020后一次核对未确认，保留记录且不重发或声称必然未生效", async () => {
+  const f = fixture({ time: stamp("2026-11-20T10:00:00"), groups: [[{teamId:"winner",isWin:true,isOut:false}]] });
+  f.info.guessMap = {3:["winner"]}; f.info.guessClaimMap = {3:{winner:false}};
+  const send = f.options.send, writes = [], waits = [];
+  f.options.pause = async ms => waits.push(ms);
+  f.options.send = async (cmd, params) => {
+    if (cmd === "apex_guessclaim") {
+      writes.push(params);
+      throw Object.assign(new Error("服务器错误: 200020 - 出了点小问题"), {code:200020});
+    }
+    return send(cmd, params);
+  };
+  await assert.rejects(runApexGuessTask(f.options), error => /结果未确认/.test(error.message) && error.code === 200020 && !/结果未生效/.test(error.message));
+  assert.equal(writes.length, 1);
+  assert.equal(commands(f, "apex_getroleinfo").length, 2);
+  assert.deepEqual(waits, [6000]);
+  assert.equal(JSON.parse(f.storage.getItem("apex-daily:v1:a")).pending.command, "apex_guessclaim");
+});

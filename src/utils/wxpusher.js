@@ -186,189 +186,56 @@ export function formatRedFeatherCatchNotification(results) {
   return { title, content: lines.join("\n") };
 }
 
-/**
- * 格式化定时任务完成通知 (Markdown)
- * @param {string} taskName - 定时任务名称
- * @param {Array<{name: string, status: 'completed'|'failed'|'skipped'|'pending'|'stopped', error?: string}>} tokenResults
- * @param {Date} startTime - 任务开始时间
- * @param {Array<{name: string, startTime: Date|string}>} [upcomingTasks] - 后续批量任务
- * @returns {{title: string, content: string}}
- */
-export function formatScheduledTaskNotification(taskName, tokenResults, startTime, upcomingTasks = null) {
-  tokenResults = tokenResults.map(result => ({ ...result, status: normalizeTaskResultStatus(result.status) }));
-  const total = tokenResults.length;
-  const completed = tokenResults.filter((r) => r.status === "completed").length;
-  const failed = tokenResults.filter((r) => r.status === "failed").length;
-  const pending = tokenResults.filter((r) => r.status === "pending").length;
-  const stopped = tokenResults.filter((r) => r.status === "stopped").length;
-  const skipped = tokenResults.filter((r) => r.status === "skipped").length;
-
-  const duration = Math.round((Date.now() - startTime.getTime()) / 1000);
-  const minutes = Math.floor(duration / 60);
-  const seconds = duration % 60;
-  const durationStr = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
-  const endTime = new Date().toLocaleTimeString();
-
-  const statusIcon = total > 0 && completed === total ? "✅" : "⚠️";
-  const title = `${statusIcon} 定时任务${completed === total ? "完成" : "执行结束"}: ${taskName} (${completed}/${total})`;
-
-  const lines = [
-    `## ${statusIcon} 定时任务执行完毕`,
-    ``,
-    `**任务名称**: ${taskName}`,
-    ``,
-    `| 项目 | 数值 |`,
-    `|------|------|`,
-    `| 总账号 | ${total} |`,
-    `| 成功 | ${completed} |`,
-    `| 失败 | ${failed} |`,
-    ...(pending > 0 ? [`| 待继续 | ${pending} |`] : []),
-    ...(stopped > 0 ? [`| 已停止 | ${stopped} |`] : []),
-    ...(skipped > 0 ? [`| 跳过 | ${skipped} |`] : []),
-    `| 耗时 | ${durationStr} |`,
-    `| 完成时间 | ${endTime} |`,
-  ];
-
-  if (failed > 0) {
-    lines.push(``, `### ❌ 失败账号`);
-    tokenResults
-      .filter((r) => r.status === "failed")
-      .forEach((r) => {
-        lines.push(`- **${r.name}**${!r.reasons?.length && r.error ? `：${r.error}` : ""}`);
-        (r.reasons || []).forEach(reason => lines.push(`  - ${reason}`));
-      });
+/** 推送只保留任务和简要原因，完整诊断留在任务日志中。 */
+function briefTaskReason(value, fallbackTask) {
+  const text = String(value ?? "").split(/\r?\n/).map(line => line.trim()).find(Boolean)?.replace(/^\d{2}:\d{2}:\d{2}\s*/, "") || "未取得完成结果";
+  const separator = text.search(/[：:]/);
+  const task = (separator > 0 ? text.slice(0, separator) : fallbackTask)
+    .replace(/领取赛程\d+队伍.*竞猜奖励/g, "逐鹿盐山竞猜领奖")
+    .replace(/(?:结果未生效|结果未确认|失败)$/, "");
+  const detail = separator > 0 ? text.slice(separator + 1) : text;
+  const code = detail.match(/服务器错误[：:\s]*(\d+)|\b(200020|200400)\b/);
+  let reason;
+  if (code) {
+    reason = `服务器异常（${code[1] || code[2]}）`;
+    if (/未确认|结果未生效|状态未确认/.test(text)) reason += "，执行结果未确认";
+  } else if (/断开|未连接|连接失败|连接异常|连接超时/.test(detail)) reason = "账号连接异常";
+  else if (/超时|timeout/i.test(detail)) reason = "请求超时，执行结果未确认";
+  else {
+    reason = detail.replace(/[,，;；]?(?:已停止[,，]?重新执行会先查询状态|等待\d+秒后.*|请尝试重启游戏解决.*|请查看.*日志.*).*$/, "").trim();
+    if (!reason || /[{}]|at \S+\s*\(/.test(reason)) reason = "执行异常，请在应用内查看详情";
   }
+  const compact = value => [...value].length > 60 ? [...value].slice(0, 59).join("") + "…" : value;
+  return `${compact(task || fallbackTask)}：${compact(reason)}`;
+}
 
-  if (skipped > 0) {
-    lines.push(``, `### 跳过账号`);
-    tokenResults
-      .filter((r) => r.status === "skipped")
-      .forEach((r) => {
-        lines.push(`- ${r.name}`);
-      });
-  }
-
-  for (const [status, label] of [["pending", "待继续"], ["stopped", "已停止"]]) {
-    const accounts = tokenResults.filter((result) => result.status === status);
-    if (accounts.length) {
-      lines.push(``, `### ${label}账号`);
-      accounts.forEach((result) => {
-        lines.push(`- ${result.name}`);
-        const reasons = result.reasons?.length ? result.reasons : result.error ? [result.error] : [status === "stopped" ? "任务已停止" : "未取得明确完成结果，请重新执行核对"];
-        reasons.forEach(reason => lines.push(`  - ${reason}`));
-      });
+function formatTaskReport(taskName, tokenResults, scheduled) {
+  const results = tokenResults.map(result => ({ ...result, status: normalizeTaskResultStatus(result.status) }));
+  const completed = results.filter(result => result.status === "completed").length;
+  const allCompleted = results.length > 0 && completed === results.length;
+  const title = `${allCompleted ? "✅" : "⚠️"} ${scheduled ? "定时任务" : "批量日常任务"}${allCompleted ? "完成" : "执行结束"}${scheduled ? `: ${taskName}` : ""} (${completed}/${results.length})`;
+  const lines = [`成功 ${completed}/${results.length} 个账号。`];
+  for (const result of results) {
+    const reasons = [...(result.reasons || []), ...(result.warnings || [])];
+    if (!["completed", "skipped"].includes(result.status) && !reasons.length) {
+      reasons.push(result.error || (result.status === "stopped" ? "任务已停止" : "未取得明确完成结果"));
     }
+    if (!reasons.length) continue;
+    const concise = [...new Set(reasons.map(reason => briefTaskReason(reason, taskName)))];
+    if (lines.length === 1) lines.push("", "未完成任务：");
+    concise.forEach(reason => lines.push(`- ${String(result.name ?? "未知账号").replace(/[\r\n]+/g, " ")}：${reason}`));
   }
-
-  if (completed > 0) {
-    lines.push(``, `### ✅ 成功账号`);
-    tokenResults
-      .filter((r) => r.status === "completed")
-      .forEach((r) => {
-        lines.push(`- ${r.name}`);
-      });
-  }
-
-  const warnings = tokenResults.filter(result => result.warnings?.length);
-  if (warnings.length) {
-    lines.push("", "### 附加任务提示");
-    warnings.forEach(result => {
-      lines.push(`- **${result.name}**`);
-      result.warnings.forEach(warning => lines.push(`  - ${warning}`));
-    });
-  }
-
-  if (Array.isArray(upcomingTasks)) {
-    lines.push(``, `### 后续批量任务`);
-    if (upcomingTasks.length === 0) {
-      lines.push(`暂无已启用的后续批量任务`);
-    } else {
-      lines.push(``, `| 序号 | 任务名称 | 启动时间 |`, `|------|----------|----------|`);
-      upcomingTasks.forEach((task, index) => {
-        lines.push(
-          `| ${index + 1} | ${escapeMarkdownTableCell(task.name)} | ${formatNotificationTime(task.startTime)} |`,
-        );
-      });
-    }
-  }
-
   return { title, content: lines.join("\n") };
 }
 
-/**
- * 格式化批量日常任务完成通知 (Markdown)
- * @param {Array<{name: string, status: 'completed'|'failed'|'pending'|'stopped', error?: string}>} tokenResults
- * @param {Date} startTime - 任务开始时间
- * @returns {{title: string, content: string}}
- */
+/** 定时结果仅汇总账号、未完成任务和简要原因，不附日志或成功账号清单。 */
+export function formatScheduledTaskNotification(taskName, tokenResults, startTime, upcomingTasks = null) {
+  return formatTaskReport(taskName, tokenResults, true);
+}
+
+/** 手动批量与定时计划使用相同的简洁结果格式。 */
 export function formatBatchTaskNotification(tokenResults, startTime) {
-  tokenResults = tokenResults.map(result => ({ ...result, status: normalizeTaskResultStatus(result.status) }));
-  const total = tokenResults.length;
-  const completed = tokenResults.filter((r) => r.status === "completed").length;
-  const failed = tokenResults.filter((r) => r.status === "failed").length;
-  const pending = tokenResults.filter((r) => r.status === "pending").length;
-  const stopped = tokenResults.filter((r) => r.status === "stopped").length;
-
-  const duration = Math.round((Date.now() - startTime.getTime()) / 1000);
-  const minutes = Math.floor(duration / 60);
-  const seconds = duration % 60;
-  const durationStr = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
-  const endTime = new Date().toLocaleTimeString();
-
-  const statusIcon = total > 0 && completed === total ? "✅" : "⚠️";
-  const title = `${statusIcon} 批量日常任务${completed === total ? "完成" : "执行结束"} (${completed}/${total})`;
-
-  const lines = [
-    `## ${statusIcon} 批量日常任务执行完毕`,
-    ``,
-    `| 项目 | 数值 |`,
-    `|------|------|`,
-    `| 总账号 | ${total} |`,
-    `| 成功 | ${completed} |`,
-    `| 失败 | ${failed} |`,
-    ...(pending > 0 ? [`| 待继续 | ${pending} |`] : []),
-    ...(stopped > 0 ? [`| 已停止 | ${stopped} |`] : []),
-    `| 耗时 | ${durationStr} |`,
-    `| 完成时间 | ${endTime} |`,
-  ];
-
-  if (failed > 0) {
-    lines.push(``, `### ❌ 失败账号`);
-    tokenResults
-      .filter((r) => r.status === "failed")
-      .forEach((r) => {
-        lines.push(`- **${r.name}**${!r.reasons?.length && r.error ? `：${r.error}` : ""}`);
-        (r.reasons || []).forEach(reason => lines.push(`  - ${reason}`));
-      });
-  }
-
-  for (const [status, label] of [["pending", "待继续"], ["stopped", "已停止"]]) {
-    const accounts = tokenResults.filter((result) => result.status === status);
-    if (accounts.length) {
-      lines.push(``, `### ${label}账号`);
-      accounts.forEach((result) => {
-        lines.push(`- ${result.name}`);
-        const reasons = result.reasons?.length ? result.reasons : result.error ? [result.error] : [status === "stopped" ? "任务已停止" : "未取得明确完成结果，请重新执行核对"];
-        reasons.forEach(reason => lines.push(`  - ${reason}`));
-      });
-    }
-  }
-
-  if (completed > 0) {
-    lines.push(``, `### ✅ 成功账号`);
-    tokenResults
-      .filter((r) => r.status === "completed")
-      .forEach((r) => {
-        lines.push(`- ${r.name}`);
-      });
-  }
-
-  const warnings = tokenResults.filter(result => result.warnings?.length);
-  if (warnings.length) {
-    lines.push("", "### 附加任务提示");
-    warnings.forEach(result => { lines.push(`- **${result.name}**`); result.warnings.forEach(warning => lines.push(`  - ${warning}`)); });
-  }
-  return { title, content: lines.join("\n") };
+  return formatTaskReport("日常任务", tokenResults, false);
 }
 
 /**
