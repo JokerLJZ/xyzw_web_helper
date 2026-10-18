@@ -136,7 +136,7 @@ export async function runApexDailyTask(options) {
 
 export const runApexGuessTask = options => runApexDailyTask({ ...options, guessOnly: true });
 
-async function runAccount({ guessOnly = false, accountId, send, config, loadConfig = loadApexDailyConfig, now = Date.now, stopped = () => false, log = () => {}, storage = globalThis.localStorage, pause = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+async function runAccount({ guessOnly = false, initialRole, accountId, send, config, loadConfig = loadApexDailyConfig, now = Date.now, stopped = () => false, log = () => {}, storage = globalThis.localStorage, pause = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   if (!storage?.getItem || !storage?.setItem) throw new Error("无法保存逐鹿盐山执行记录，停止自动操作");
   const key = `apex-daily:v1:${accountId}`;
   const record = JSON.parse(storage.getItem(key) || "{}");
@@ -155,7 +155,22 @@ async function runAccount({ guessOnly = false, accountId, send, config, loadConf
     guard();
     return info;
   };
-  let info = await readRole();
+  // LV compares the current mainline levelId; 6001 means cleared level 6000.
+  if (Number.isSafeInteger(initialRole?.levelId)) {
+    config ||= await loadConfig(send);
+    const conditions = field(config.ModuleConf, 10149)?.condition || [];
+    const required = conditions.find(condition => condition.type === 1)?.value;
+    if (Number.isSafeInteger(required) && initialRole.levelId < required)
+      return { status: "skipped", reason: `逐鹿盐山未开启，需通关${required - 1}关，正常跳过` };
+  }
+  let info;
+  try { info = await readRole(); }
+  catch (error) {
+    // Only the initial Apex read can establish that this module is unavailable.
+    if (!error.interrupted && (Number(error.code) === 200160 || /(?:^|\D)200160(?:\D|$)/.test(error.message || "")))
+      return { status: "skipped", reason: "逐鹿盐山模块未开启（200160），正常跳过" };
+    throw error;
+  }
   config ||= await loadConfig(send);
   const rules = buildApexDailyRules(config);
   const season = rules.getCurrentSeason(now());

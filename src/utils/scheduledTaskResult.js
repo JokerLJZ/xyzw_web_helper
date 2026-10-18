@@ -20,3 +20,10 @@ export function getDailyRunStatus(result) {
   const remaining = result?.planIncomplete ?? result?.dailyIncomplete ?? result?.incomplete;
   return Number.isFinite(remaining) && remaining === 0 ? "completed" : "pending";
 }
+
+/** One retry round, only when no more than 30% of the original accounts failed. */
+export function getBatchRetryTokenIds(tokenIds, statuses, stopped = false) {
+  if (stopped || !tokenIds.length) return [];
+  const failed = tokenIds.filter(id => statuses[id] === "failed");
+  return failed.length > 0 && failed.length * 10 <= tokenIds.length * 3 ? failed : [];
+}

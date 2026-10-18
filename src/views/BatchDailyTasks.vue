@@ -3802,7 +3802,7 @@ import {
 } from "vue";
 import { useTokenStore, gameTokens, tokenGroups } from "@/stores/tokenStore";
 import { $emit } from "@/stores/events/index.ts";
-import { getDailyRunStatus, normalizeTaskResultStatus, summarizeScheduledAccount } from "@/utils/scheduledTaskResult.js";
+import { getBatchRetryTokenIds, getDailyRunStatus, normalizeTaskResultStatus, summarizeScheduledAccount } from "@/utils/scheduledTaskResult.js";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import {
   buildSnapshotWithIndexedDB,
@@ -6585,8 +6585,8 @@ const executeScheduledTask = async (task) => {
     };
 
     // 按账号执行：当前账号完成所有选中任务后才切换到下一个账号。
-    for (const tokenId of availableTokens) {
-      if (shouldStop.value) break;
+    const runScheduledAccount = async (tokenId) => {
+      if (shouldStop.value) return;
 
       const token = tokens.value.find((t) => t.id === tokenId);
       const tokenName = token?.name || tokenId;
@@ -6596,7 +6596,7 @@ const executeScheduledTask = async (task) => {
           !legacyExcludedTokens.includes(tokenId),
       );
 
-      if (!hasRunnableTask) continue;
+      if (!hasRunnableTask) return;
 
       selectedTokens.value = [tokenId];
       currentRunningTokenId.value = tokenId;
@@ -6672,6 +6672,23 @@ const executeScheduledTask = async (task) => {
       } finally {
         endScheduledTokenSession(tokenId, tokenName);
       }
+    };
+    for (const tokenId of availableTokens) {
+      if (shouldStop.value) break;
+      await runScheduledAccount(tokenId);
+    }
+    const retryIds = getBatchRetryTokenIds(availableTokens, tokenStatus.value, shouldStop.value);
+    for (const tokenId of retryIds) {
+      if (shouldStop.value) break;
+      if (!availableTokens.includes(tokenId)) continue;
+      // Replace collected query rows as well as statuses with the second run's results.
+      for (const rows of [aggregatedMainLevelResults, aggregatedSaltMasterResults]) {
+        for (let i = rows.length - 1; i >= 0; i--) if (rows[i].tokenId === tokenId) rows.splice(i, 1);
+      }
+      tokenTaskReasons.value[tokenId] = [];
+      tokenTaskWarnings.value[tokenId] = [];
+      addLog({ time: new Date().toLocaleTimeString(), message: `${tokens.value.find(t => t.id === tokenId)?.name || tokenId}：失败账号补跑一次所选任务`, type: "info" });
+      await runScheduledAccount(tokenId);
     }
 
     if (aggregatedSaltMasterResults.length > 0) {
@@ -8459,7 +8476,7 @@ const startBatch = async () => {
   const tokenIds = [...selectedTokens.value];
   tokenIds.forEach((id) => { tokenStatus.value[id] = "waiting"; tokenTaskWarnings.value[id] = []; tokenTaskReasons.value[id] = []; });
   const batchStartTime = new Date();
-  const taskPromises = tokenIds.map(async (tokenId) => {
+  const runToken = async (tokenId) => {
     if (shouldStop.value) { tokenStatus.value[tokenId] = "stopped"; tokenTaskReasons.value[tokenId] = ["用户停止，日常尚未开始"]; return; }
     const token = tokens.value.find((t) => t.id === tokenId);
     if (!token) { tokenStatus.value[tokenId] = "failed"; tokenTaskReasons.value[tokenId] = ["账号不存在，无法执行日常"]; return; }
@@ -8490,8 +8507,20 @@ const startBatch = async () => {
         finally { releaseConnectionSlot(); }
       }
     }
-  });
-  try { await Promise.all(taskPromises); }
+  };
+  try {
+    await Promise.all(tokenIds.map(runToken));
+    if (!scheduledTaskExecutionActive) {
+      const retryIds = getBatchRetryTokenIds(tokenIds, tokenStatus.value, shouldStop.value);
+      for (const id of retryIds) {
+        if (shouldStop.value) break;
+        addLog({ time: new Date().toLocaleTimeString(), message: `${tokens.value.find(t => t.id === id)?.name || id}：失败账号补跑一次日常`, type: "info" });
+        tokenTaskReasons.value[id] = [];
+        tokenTaskWarnings.value[id] = [];
+        await runToken(id);
+      }
+    }
+  }
   finally {
     if (!scheduledTaskExecutionActive) {
       isRunning.value = false;

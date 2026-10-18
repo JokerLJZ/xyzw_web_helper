@@ -1355,7 +1355,7 @@ export class DailyTaskRunner {
       },
     });
     this.roleStateDirty = true;
-    const result = await runApexDailyTask({ accountId: tokenId, send, stopped, log });
+    const result = await runApexDailyTask({ accountId: tokenId, initialRole: this.roleSnapshots.get(tokenId), send, stopped, log });
     this.log(result.reason);
     return result;
   }

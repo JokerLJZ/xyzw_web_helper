@@ -429,3 +429,22 @@ test("某赛程列表异常仍继续其他赛程领奖，停止信号则立即�
   await assert.rejects(g.run(),error=>error.interrupted===true);
   assert.deepEqual(JSON.parse(g.storage.getItem("apex-daily:v1:a")).pendingClaims,[{scheduleId:2,teamId:"a"}]);
 });
+
+test("主线未通关6000关按当前模块配置跳过，不查询APEX", async () => {
+  const f = fixture();
+  f.options.initialRole = { levelId: 6000 };
+  f.options.config.ModuleConf = { 10149: { condition: [{ type: 1, value: 6001 }] } };
+  assert.equal((await f.run()).status, "skipped");
+  assert.equal(f.calls.length, 0);
+  f.options.initialRole.levelId = 6001;
+  assert.equal((await f.run()).status, "completed");
+});
+
+test("初次角色查询200160正常跳过；其他错误不能隐藏", async () => {
+  for (const code of [200160, 200020, 200400]) {
+    const f = fixture();
+    f.options.send = async () => { throw new Error(`查询逐鹿盐山账号状态失败：服务器错误: ${code}`); };
+    if (code === 200160) assert.equal((await f.run()).status, "skipped");
+    else await assert.rejects(f.run(), new RegExp(String(code)));
+  }
+});

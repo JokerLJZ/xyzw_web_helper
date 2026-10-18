@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readFile } from "node:fs/promises";
 import ts from "typescript";
-import { normalizeTaskResultStatus, summarizeScheduledAccount } from "../src/utils/scheduledTaskResult.js";
+import { getBatchRetryTokenIds, normalizeTaskResultStatus, summarizeScheduledAccount } from "../src/utils/scheduledTaskResult.js";
 import { formatScheduledTaskNotification } from "../src/utils/wxpusher.js";
 const component = await readFile(new URL("../src/views/BatchDailyTasks.vue", import.meta.url), "utf8");
 const source = ts.createSourceFile("batch.js", component.match(/<script setup[^>]*>([\s\S]*?)<\/script>/)[1], ts.ScriptTarget.Latest, true);
@@ -20,7 +20,7 @@ function fixture({ beforeFailure = false, dailyFailure = true, connectionFailure
     isLegacyTaskName: () => false, availableTasks: [], shouldStop: ref(false), currentRunningTokenId: ref(null),
     beginScheduledTokenSession() {}, endScheduledTokenSession() {}, scheduledTokenSession: { active: false },
     ensureConnection: async () => { if (connectionFailure) throw new Error("连接超时"); },
-    normalizeTaskResultStatus, summarizeScheduledAccount, formatScheduledTaskNotification,
+    getBatchRetryTokenIds, normalizeTaskResultStatus, summarizeScheduledAccount, formatScheduledTaskNotification,
     getUpcomingScheduledTaskRuns: () => [], recordTaskExecution() {},
     sendNotifications: async (title, content, options) => reports.push({ title, content, options }),
     getScheduledTaskFunction: name => async () => {
@@ -56,4 +56,30 @@ test("实际定时调度：连接失败也推送账号与连接原因", async ()
   const f = fixture({ connectionFailure: true }); await f.run();
   assert.match(f.reports[0].content, /测试账号/);
   assert.match(f.reports[0].content, /账号连接异常/);
+});
+
+test("定时账号失败不超过30%时整套任务补跑一次，恢复成功后只推送最终成功", async () => {
+  const f = fixture({ dailyFailure: false });
+  const ids = ["a", "b", "c", "d"];
+  f.context.tokens.value = ids.map(id => ({ id, name: id }));
+  const attempts = {};
+  f.context.getScheduledTaskFunction = name => async () => {
+    const id = f.context.selectedTokens.value[0];
+    if (name === "startBatch") {
+      attempts[id] = (attempts[id] || 0) + 1;
+      f.context.tokenStatus.value[id] = id === "a" && attempts[id] === 1 ? "failed" : "completed";
+      f.context.tokenTaskReasons.value[id] = id === "a" && attempts[id] === 1 ? ["领取每日礼包：200020"] : [];
+    } else f.context.tokenStatus.value[id] = "completed";
+    return [];
+  };
+  await f.context.execute({ id: "retry", name: "恢复计划", selectedTokens: ids, selectedTasks: ["startBatch"], legacyExcludedTokens: [] });
+  assert.deepEqual(attempts, { a: 2, b: 1, c: 1, d: 1 });
+  assert.equal(f.reports.length, 1);
+  assert.doesNotMatch(f.reports[0].content, /200020/);
+  assert.ok(ids.every(id => f.context.tokenStatus.value[id] === "completed"));
+});
+
+test("用户停止或待继续不触发失败账号重跑", () => {
+  assert.deepEqual(getBatchRetryTokenIds(["a", "b", "c", "d"], { a: "failed", b: "completed", c: "completed", d: "completed" }, true), []);
+  assert.deepEqual(getBatchRetryTokenIds(["a", "b", "c", "d"], { a: "pending", b: "stopped", c: "completed", d: "completed" }), []);
 });

@@ -1,5 +1,5 @@
 import { formatBatchTaskNotification } from "../src/utils/wxpusher.js";
-import { normalizeTaskResultStatus } from "../src/utils/scheduledTaskResult.js";
+import { getBatchRetryTokenIds, normalizeTaskResultStatus } from "../src/utils/scheduledTaskResult.js";
 import { getDailyRunStatus } from "../src/utils/scheduledTaskResult.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -53,7 +53,7 @@ function fixture({
   const state = { runs: 0, closed: 0, connected };
   const context = {
     connectWithTokenRefresh,
-    getDailyRunStatus, normalizeTaskResultStatus, formatBatchTaskNotification,
+    getBatchRetryTokenIds, getDailyRunStatus, normalizeTaskResultStatus, formatBatchTaskNotification,
     sendNotifications: async (title, content) => { state.notification = { title, content }; },
     tokenTaskWarnings: { value: {} },
     tokenTaskReasons: { value: {} },
@@ -198,4 +198,45 @@ test("实际批量入口发生超时，推送仍保留失败步骤而非只有�
   const f = fixture({ runError: error });
   await f.startBatch();
   assert.match(f.state.notification.content, /同步日常状态：请求超时/);
+});
+
+test("失败比例含30%时只补跑失败账号一次，推送使用补跑后结果", async () => {
+  for (const failed of [0, 1, 3, 4]) {
+    const f = fixture();
+    const ids = Array.from({ length: 10 }, (_, i) => `a${i}`);
+    f.context.selectedTokens.value = ids;
+    f.context.tokens.value = ids.map(id => ({ id, name: id }));
+    const runs = new Map();
+    f.context.DailyTaskRunner = class {
+      async run(id) {
+        const attempt = (runs.get(id) || 0) + 1;
+        runs.set(id, attempt);
+        return { planFailed: ids.indexOf(id) < failed && attempt === 1 ? 1 : 0,
+          planIncomplete: 0, reasons: attempt === 1 && ids.indexOf(id) < failed ? ["首次失败"] : [] };
+      }
+    };
+    await f.startBatch();
+    assert.equal([...runs.values()].reduce((a, b) => a + b, 0), 10 + (failed <= 3 ? failed : 0));
+    if (failed <= 3) {
+      assert.ok(ids.every(id => f.context.tokenStatus.value[id] === "completed"));
+      assert.doesNotMatch(f.state.notification.content, /首次失败/);
+    }
+  }
+});
+
+test("补跑仍失败保留最终原因且不会开启第三轮", async () => {
+  const f = fixture();
+  f.context.selectedTokens.value = ["a", "b", "c", "d"];
+  f.context.tokens.value = ["a", "b", "c", "d"].map(id => ({ id, name: id }));
+  let attempts = 0;
+  f.context.DailyTaskRunner = class {
+    async run(id) {
+      if (id === "a") { attempts++; throw new Error(`失败第${attempts}次`); }
+      return { planFailed: 0, planIncomplete: 0 };
+    }
+  };
+  await f.startBatch();
+  assert.equal(attempts, 2);
+  assert.match(f.state.notification.content, /失败第2次/);
+  assert.doesNotMatch(f.state.notification.content, /失败第1次/);
 });
