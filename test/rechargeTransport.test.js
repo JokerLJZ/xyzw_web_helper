@@ -74,3 +74,11 @@ test("盐场保存和出战的实际BON报文携带非空数字阵容及玩具�
     assert.equal(packet.hint, "battlefield-1");
   }
 });
+
+test("竞猜领奖实际BON报文保留数字赛程和完整字符串队伍ID", async () => {
+  const { bon } = await import("../src/utils/bonProtocol.js");
+  const client = new XyzwWebSocketClient({ url: "wss://test", utils: { bon } });
+  const packet = client.registry.build("apex_guessclaim", 0, 1, {scheduleId:124,teamId:"A10000037"});
+  assert.deepEqual(bon.decode(packet.body), {scheduleId:124,teamId:"A10000037"});
+  assert.equal(packet.hint, undefined);
+});

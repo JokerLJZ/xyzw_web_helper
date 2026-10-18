@@ -5,7 +5,9 @@ const DAY = 86400000;
 const CONFIGS = new Map();
 const ACTIVE = new Map();
 const data = response => response?.data || response?._raw?.body || response?.body || response;
-const field = (map, key) => map instanceof Map ? map.get(key) : map?.[key];
+const field = (map, key) => map instanceof Map
+  ? map.get(key) ?? map.get(String(key)) ?? (/^\d+$/.test(String(key)) ? map.get(Number(key)) : undefined)
+  : map?.[key];
 const list = map => map instanceof Map ? [...map.values()] : Object.values(map || {});
 const count = (value, label) => {
   const number = Number(value);
@@ -18,6 +20,17 @@ const guessIds = (info, id) => {
   return ids.map(String);
 };
 const voteCount = (info, round, teamId) => count(field(field(info.voteMap, round), teamId)?.cnt ?? 0, "个人助威次数");
+
+/** 客户端可切换的期次窗口；与仅按决赛结束划分的历史列表不同。 */
+export function getApexClaimableRounds(rules, season, now) {
+  return new Set(rules.getAvailableRounds(season, now).filter(round => {
+    const schedules = rules.getRoundSchedules(round, season);
+    const first = schedules[0];
+    const start = rules.getDateZeroTime(first?.date) + first?.signStartTime * 1000;
+    const end = rules.getDateZeroTime(schedules.at(-1)?.endDate);
+    return Number.isFinite(start) && Number.isFinite(end) && now >= start && now <= end;
+  }));
+}
 
 export function getApexChinaDate(time) {
   const d = new Date(Number(time) + 8 * 3600000);
@@ -147,6 +160,23 @@ async function runAccount({ guessOnly = false, accountId, send, config, loadConf
   const rules = buildApexDailyRules(config);
   const season = rules.getCurrentSeason(now());
   if (season > 0 && Number(info.resetTime.season) !== season) throw new Error("逐鹿盐山账号赛季与当前配置不一致，请刷新游戏状态");
+  const inClaimWindow = scheduleId => {
+    const conf = rules.getScheduleConf(scheduleId);
+    return conf && conf.season === season && getApexClaimableRounds(rules, season, now()).has(conf.round);
+  };
+  const isClaimed = (latest, params) => field(field(latest.guessClaimMap, params.scheduleId), params.teamId) === true;
+  // 竞猜逐笔保存；某笔失败不能被后续成功覆盖，也不能阻挡其他可领取项。
+  record.pendingClaims ||= [];
+  if (!Array.isArray(record.pendingClaims)) throw new Error("逐鹿盐山竞猜待确认记录异常");
+  if (record.pending?.command === "apex_guessclaim") {
+    record.pendingClaims.push(record.pending.params);
+    delete record.pending;
+  }
+  record.pendingClaims = record.pendingClaims.filter(params => {
+    if (!params?.teamId || !Number.isSafeInteger(params.scheduleId)) throw new Error("逐鹿盐山竞猜待确认记录异常");
+    return inClaimWindow(params.scheduleId) && !isClaimed(info, params);
+  });
+  save();
   // 中断后重新查询，确认历史写操作；跨赛季/周无法可靠复查时不自动重发。
   if (record.pending) {
     const pending = record.pending;
@@ -234,6 +264,7 @@ async function runAccount({ guessOnly = false, accountId, send, config, loadConf
 
   // 每个开放赛程先完整分页，再逐组选择支持人数较多的一方；已预测的对阵保持原选择。
   let guesses = 0;
+  const guessLists = new Map();
   for (const round of checkedToday ? [] : rules.getCurrentRounds(season, now())) {
     for (const tab of rules.getGuessTabs(round, season, now())) {
       guard();
@@ -249,6 +280,7 @@ async function runAccount({ guessOnly = false, accountId, send, config, loadConf
         groups.push(...response.apexGuessList); last = response.last === true;
       }
       if (!last) throw new Error("可预测清单未完整读取，停止预测");
+      guessLists.set(tab.scheduleId, groups);
       for (const group of groups) {
         guard();
         if (!rules.canGuessNow(rules.getScheduleStatus(tab.scheduleId, now()))) break;
@@ -266,7 +298,14 @@ async function runAccount({ guessOnly = false, accountId, send, config, loadConf
       }
     }
   }
-  let rewards = 0;
+  let rewards = 0, closedRewards = 0;
+  const claimAttempts = [], claimErrors = [];
+  const confirmClaim = params => {
+    record.pendingClaims = record.pendingClaims.filter(item => item.scheduleId !== params.scheduleId || String(item.teamId) !== String(params.teamId));
+    save();
+    rewards++;
+    log(`竞猜奖励已领取：赛程${params.scheduleId}，${params.teamId}`);
+  };
   for (const [scheduleKey, predicted] of info.guessMap instanceof Map ? info.guessMap.entries() : Object.entries(info.guessMap)) {
     guard();
     const scheduleId = Number(scheduleKey);
@@ -274,24 +313,73 @@ async function runAccount({ guessOnly = false, accountId, send, config, loadConf
     if (!claimMap || !rules.getScheduleConf(scheduleId) || !Array.isArray(predicted)) continue;
     const pendingIds = predicted.filter(id => field(claimMap, id) === false).map(String);
     if (!pendingIds.length) continue;
-    const groups = []; let last = false;
-    for (let page = 0; page < 50 && !last; page++) {
+    if (!inClaimWindow(scheduleId)) { closedRewards += pendingIds.length; continue; }
+    let groups = guessLists.get(scheduleId);
+    try {
+      if (!groups) {
+        groups = []; let last = false;
+        for (let page = 0; page < 50 && !last; page++) {
+          guard();
+          const response = data(await send("apex_getguesslist", { scheduleId, idx: groups.length }));
+          if (!Array.isArray(response?.apexGuessList) || (!response.apexGuessList.length && response.last !== true)) throw new Error("竞猜奖励对阵清单不完整");
+          groups.push(...response.apexGuessList); last = response.last === true;
+        }
+        if (!last) throw new Error("竞猜奖励对阵清单未完整读取");
+        guessLists.set(scheduleId, groups);
+      }
+    } catch (error) {
+      if (error.interrupted) throw error;
       guard();
-      const response = data(await send("apex_getguesslist", { scheduleId, idx: groups.length }));
-      if (!Array.isArray(response?.apexGuessList) || (!response.apexGuessList.length && response.last !== true)) throw new Error("竞猜奖励对阵清单不完整");
-      groups.push(...response.apexGuessList); last = response.last === true;
+      claimErrors.push(`赛程${scheduleId}：${error.message}`);
+      continue;
     }
-    if (!last) throw new Error("竞猜奖励对阵清单未完整读取");
     for (const group of groups) {
+      guard();
       if (!Array.isArray(group)) throw new Error("竞猜奖励对阵格式异常");
       for (const team of group) {
-        if (!pendingIds.includes(String(team?.teamId)) || team.isWin !== true || team.isOut !== false || field(field(info.guessClaimMap, scheduleKey), team.teamId) !== false) continue;
-        await writeVerified("apex_guessclaim", { scheduleId, teamId: team.teamId }, latest => field(field(latest.guessClaimMap, scheduleKey), team.teamId) === true);
-        rewards++;
-        log(`竞猜奖励已领取：赛程${scheduleId}，${team.name || team.teamId}`);
+        // ApexTeamCheerInfo 默认isOut=false；原始BON可以省略默认字段。
+        if (!pendingIds.includes(String(team?.teamId)) || team.isWin !== true || (team.isOut !== undefined && team.isOut !== false) || field(field(info.guessClaimMap, scheduleKey), team.teamId) !== false) continue;
+        guard();
+        if (!inClaimWindow(scheduleId)) { closedRewards++; continue; }
+        const params = { scheduleId, teamId: team.teamId };
+        if (claimAttempts.some(item => item.params.scheduleId === scheduleId && item.params.teamId === team.teamId)) continue;
+        if (!record.pendingClaims.some(item => item.scheduleId === scheduleId && item.teamId === team.teamId)) record.pendingClaims.push(params);
+        save();
+        const attempt = { params };
+        claimAttempts.push(attempt);
+        try {
+          const response = data(await send("apex_guessclaim", params));
+          if (response?.apexRoleInfo && isClaimed(response.apexRoleInfo, params)) {
+            confirmClaim(params);
+            attempt.confirmed = true;
+          }
+        } catch (error) {
+          if (error.interrupted) throw error;
+          attempt.error = error;
+          log(`赛程${scheduleId}竞猜领奖异常，继续检查其他奖励，结束后统一核对`);
+          if (/200020|200400/.test(`${error.code} ${error.message}`)) await pause(6000);
+        }
       }
     }
   }
+  // 正响应携带明确领取标记则直接确认；其余所有写入只合并补查一次。
+  const unconfirmed = claimAttempts.filter(attempt => !attempt.confirmed);
+  if (unconfirmed.length) {
+    info = await readRole();
+    for (const attempt of unconfirmed) {
+      if (isClaimed(info, attempt.params)) confirmClaim(attempt.params);
+      else claimErrors.push(`赛程${attempt.params.scheduleId}队伍${attempt.params.teamId}领取未确认：${attempt.error?.message || "服务器领取标记未更新"}`);
+    }
+  }
+  if (closedRewards) log(`跳过${closedRewards}条已不在游戏可用期次内的历史竞猜奖励记录`);
+  for (const params of record.pendingClaims) {
+    if (!claimAttempts.some(item => item.params.scheduleId === params.scheduleId && item.params.teamId === params.teamId))
+      claimErrors.push(`赛程${params.scheduleId}队伍${params.teamId}上次领取结果未确认`);
+  }
+  if (claimErrors.length) throw Object.assign(new Error(`竞猜领奖未完成${claimErrors.length}项：${claimErrors.join("；")}`), {
+    apexClaimFailures: claimErrors, claimedRewards: rewards,
+    code: unconfirmed.find(attempt => attempt.error?.code !== undefined)?.error.code,
+  });
   guard(); if (!guessOnly) record.checkedDay = today.day; save();
   return { status: "completed", reason: `逐鹿盐山检查完成，新增${guesses}次预测，领取${rewards}份竞猜奖励${checkedToday ? "（今天已检查，跳过重复预测）" : ""}`, guesses, rewards };
 }

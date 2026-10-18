@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runApexGuessTask, runApexDailyTask, buildApexDailyRules, getApexChinaDate, createApexDailySender } from "../src/utils/apexDailyTask.js";
+import { runApexGuessTask, runApexDailyTask, buildApexDailyRules, getApexChinaDate, createApexDailySender, getApexClaimableRounds } from "../src/utils/apexDailyTask.js";
 import { defaultSettings, defaultTemplate } from "../src/utils/batch/constants.js";
 import { DailyTaskRunner } from "../src/utils/dailyTaskRunner.js";
 
@@ -216,8 +216,8 @@ test("批量竞猜共用多数选择、已有选择不反押，领奖超时已�
   assert.equal(f.info.guessClaimMap[3].winner,true);
 });
 
-test("没有开放竞猜或赛季结束，仍可领取历史竞猜奖励", async () => {
-  const f=fixture({time:stamp("2026-11-20T10:00:00"),groups:[[{teamId:"winner",isWin:true,isOut:false},{teamId:"loser",isWin:false,isOut:true}]]});
+test("决赛结束但游戏期次尚未关闭，仍可领取历史竞猜奖励", async () => {
+  const f=fixture({time:stamp("2026-10-24T23:00:00"),groups:[[{teamId:"winner",isWin:true,isOut:false},{teamId:"loser",isWin:false,isOut:true}]]});
   f.info.guessMap={3:["winner"]};f.info.guessClaimMap={3:{winner:false}};
   await runApexGuessTask(f.options);
   assert.equal(commands(f,"apex_guess").length,0);assert.equal(commands(f,"apex_guessclaim").length,1);
@@ -237,7 +237,7 @@ test("批量入口执行统一竞猜领奖流程，结束后释放连接", async
 
 
 test("缺失竞猜领取标记不当作可领取，不发送猜测的领奖请求", async () => {
-  const f=fixture({time:stamp("2026-11-20T10:00:00"),groups:[[{teamId:"winner",isWin:true,isOut:false},{teamId:"loser",isWin:false,isOut:true}]]});
+  const f=fixture({time:stamp("2026-10-24T23:00:00"),groups:[[{teamId:"winner",isWin:true,isOut:false},{teamId:"loser",isWin:false,isOut:true}]]});
   f.info.guessMap={3:["winner"]};f.info.guessClaimMap={3:{}};
   await runApexGuessTask(f.options);assert.equal(commands(f,"apex_guessclaim").length,0);
 });
@@ -261,7 +261,7 @@ test("写操作200020不自动重发，响应完成后查询也至少间隔1.5�
 });
 
 test("竞猜领奖200020后一次核对未确认，保留记录且不重发或声称必然未生效", async () => {
-  const f = fixture({ time: stamp("2026-11-20T10:00:00"), groups: [[{teamId:"winner",isWin:true,isOut:false}]] });
+  const f = fixture({ time: stamp("2026-10-24T23:00:00"), groups: [[{teamId:"winner",isWin:true,isOut:false}]] });
   f.info.guessMap = {3:["winner"]}; f.info.guessClaimMap = {3:{winner:false}};
   const send = f.options.send, writes = [], waits = [];
   f.options.pause = async ms => waits.push(ms);
@@ -272,9 +272,160 @@ test("竞猜领奖200020后一次核对未确认，保留记录且不重发或�
     }
     return send(cmd, params);
   };
-  await assert.rejects(runApexGuessTask(f.options), error => /结果未确认/.test(error.message) && error.code === 200020 && !/结果未生效/.test(error.message));
+  await assert.rejects(runApexGuessTask(f.options), error => /领取未确认/.test(error.message) && error.code === 200020 && !/结果未生效/.test(error.message));
   assert.equal(writes.length, 1);
   assert.equal(commands(f, "apex_getroleinfo").length, 2);
   assert.deepEqual(waits, [6000]);
-  assert.equal(JSON.parse(f.storage.getItem("apex-daily:v1:a")).pending.command, "apex_guessclaim");
+  assert.deepEqual(JSON.parse(f.storage.getItem("apex-daily:v1:a")).pendingClaims, [{scheduleId:3,teamId:"winner"}]);
+});
+
+test("竞猜领奖遵循客户端期次截止零点，保留决赛结束后的领奖窗口", () => {
+  const rules = buildApexDailyRules(config());
+  assert.deepEqual([...getApexClaimableRounds(rules, 1, stamp("2026-10-24T23:59:59"))], [1]);
+  assert.deepEqual([...getApexClaimableRounds(rules, 1, stamp("2026-10-25T00:00:00"))], [1]);
+  assert.deepEqual([...getApexClaimableRounds(rules, 1, stamp("2026-10-25T00:00:01"))], []);
+});
+
+test("游戏期次关闭后的false历史记录不再查询或领取", async () => {
+  const f = fixture({ time: stamp("2026-11-20T10:00:00") });
+  f.info.guessMap = {3:["winner"]}; f.info.guessClaimMap = {3:{winner:false}};
+  await runApexGuessTask(f.options);
+  assert.equal(commands(f,"apex_getguesslist").length, 0);
+  assert.equal(commands(f,"apex_guessclaim").length, 0);
+});
+
+test("日志中的已关闭赛程74不会挡住当前竞猜奖励，兼容旧待确认记录", async () => {
+  const f = fixture({ time: stamp("2026-10-18T08:00:00"), inventory:0, groups:[[{teamId:"current",isWin:true,isOut:false}]] });
+  f.options.config.ApexScheduleConf[74] = {...f.options.config.ApexScheduleConf[2], id:74, round:0, serverDate:"2026/09/01"};
+  f.options.config.ApexScheduleConf[78] = {...f.options.config.ApexScheduleConf[3], id:78, round:0, serverDate:"2026/09/08", endDate:"2026/09/27"};
+  f.info.guessMap = {74:["A10000037"], 2:["current"]};
+  f.info.guessClaimMap = {74:{A10000037:false}, 2:{current:false}};
+  f.storage.setItem("apex-daily:v1:a", JSON.stringify({pending:{command:"apex_guessclaim",params:{scheduleId:74,teamId:"A10000037"},season:1}}));
+  await f.run();
+  assert.deepEqual(commands(f,"apex_guessclaim").map(item=>item.params), [{scheduleId:2,teamId:"current"}]);
+  assert.deepEqual(commands(f,"apex_getguesslist").map(item=>item.params.scheduleId), [2]);
+  assert.deepEqual(JSON.parse(f.storage.getItem("apex-daily:v1:a")).pendingClaims, []);
+});
+
+test("赢家省略默认isOut=false仍领奖，明确淘汰、未获胜和缺少标记仍跳过", async () => {
+  const f = fixture({ time: stamp("2026-10-18T08:00:00"), inventory:0,
+    groups:[[{teamId:"winner",isWin:true},{teamId:"out",isWin:true,isOut:true}], [{teamId:"unknown"},{teamId:"missing",isWin:true}]] });
+  f.info.guessMap = {2:["winner","out","unknown","missing"]};
+  f.info.guessClaimMap = {2:{winner:false,out:false,unknown:false}};
+  await f.run();
+  assert.deepEqual(commands(f,"apex_guessclaim").map(item=>item.params.teamId), ["winner"]);
+});
+
+test("一笔200020未领取不阻挡其余奖励，合并核对一次并保留失败记录", async () => {
+  const f = fixture({ time: stamp("2026-10-18T08:00:00"), inventory:0,
+    groups:[[{teamId:"bad",isWin:true},{teamId:"good",isWin:true}]] });
+  f.info.guessMap = {2:["bad","good"]}; f.info.guessClaimMap = {2:{bad:false,good:false}};
+  const send = f.options.send, writes = [];
+  f.options.pause = async () => {};
+  let reject = true;
+  f.options.send = async (cmd, params) => {
+    if (cmd === "apex_guessclaim") {
+      writes.push(params.teamId);
+      if (params.teamId === "bad" && reject) throw Object.assign(new Error("服务器错误: 200020"),{code:200020});
+    }
+    return send(cmd, params);
+  };
+  await assert.rejects(f.run(), error => error.claimedRewards === 1 && error.apexClaimFailures.length === 1);
+  assert.deepEqual(writes, ["bad","good"]);
+  assert.equal(f.info.guessClaimMap[2].good, true);
+  assert.equal(commands(f,"apex_getroleinfo").length, 2);
+  assert.deepEqual(JSON.parse(f.storage.getItem("apex-daily:v1:a")).pendingClaims, [{scheduleId:2,teamId:"bad"}]);
+  reject = false;
+  await f.run();
+  assert.deepEqual(writes, ["bad","good","bad"]);
+  assert.deepEqual(JSON.parse(f.storage.getItem("apex-daily:v1:a")).pendingClaims, []);
+});
+
+test("多笔正响应无标记或响应丢失，全部集中一次角色查询核对", async () => {
+  const f = fixture({ time: stamp("2026-10-18T08:00:00"), inventory:0,
+    groups:[[{teamId:"a",isWin:true},{teamId:"b",isWin:true}]] });
+  f.info.guessMap = {2:["a","b"]}; f.info.guessClaimMap = {2:{a:false,b:false}};
+  const send = f.options.send;
+  f.options.send = async (cmd, params) => {
+    const response = await send(cmd,params);
+    if (cmd === "apex_guessclaim") {
+      if (params.teamId === "b") throw new Error("请求超时");
+      return {apexRoleInfo:{voteItemCnt:0}};
+    }
+    return response;
+  };
+  const result = await f.run();
+  assert.equal(result.rewards, 2);
+  assert.equal(commands(f,"apex_getroleinfo").length, 2);
+  assert.equal(commands(f,"apex_guessclaim").length, 2);
+});
+
+test("原生Map数字赛程键的正响应标记可直接确认，不逐笔重复查询", async () => {
+  const f = fixture({ time: stamp("2026-10-18T08:00:00"), inventory:0,
+    groups:[[{teamId:"winner",isWin:true}]] });
+  f.info.guessMap = new Map([[2,["winner"]]]);
+  f.info.guessClaimMap = new Map([[2,new Map([["winner",false]])]]);
+  const send = f.options.send;
+  let writes = 0;
+  f.options.send = async (cmd, params) => {
+    if (cmd === "apex_guessclaim") {
+      writes++;
+      f.info.guessClaimMap.get(2).set("winner",true);
+      return {apexRoleInfo:{guessClaimMap:new Map([[2,new Map([["winner",true]])]])}};
+    }
+    return send(cmd, params);
+  };
+  assert.equal((await f.run()).rewards, 1);
+  assert.equal(writes, 1);
+  assert.equal(commands(f,"apex_getroleinfo").length, 1);
+});
+
+test("竞猜待确认复查失败保留全部记录，重跑已领取项不重发", async () => {
+  const f = fixture({ time: stamp("2026-10-18T08:00:00"), inventory:0, groups:[[{teamId:"winner",isWin:true}]] });
+  f.info.guessMap = {2:["winner"]}; f.info.guessClaimMap = {2:{winner:false}};
+  const send = f.options.send;
+  let reads=0, failed=false;
+  f.options.send = async (cmd,params) => {
+    if (cmd === "apex_getroleinfo" && ++reads === 2 && !failed) {failed=true;throw new Error("核对查询失败");}
+    const response = await send(cmd,params);
+    return cmd === "apex_guessclaim" ? {} : response;
+  };
+  await assert.rejects(f.run(), /核对查询失败/);
+  assert.equal(JSON.parse(f.storage.getItem("apex-daily:v1:a")).pendingClaims.length, 1);
+  await f.run();
+  assert.equal(commands(f,"apex_guessclaim").length, 1);
+  assert.deepEqual(JSON.parse(f.storage.getItem("apex-daily:v1:a")).pendingClaims, []);
+});
+
+test("同一轮预测与领奖复用已完整分页的对阵清单", async () => {
+  const f = fixture({ inventory:0, guessMap:{2:["low"]}, groups:[
+    [{teamId:"low",cheerCnt:1,isWin:true},{teamId:"high",cheerCnt:4,isOut:true}],
+    [{teamId:"next",cheerCnt:5},{teamId:"other",cheerCnt:1}],
+  ] });
+  f.info.guessClaimMap = {2:{low:false}};
+  const result = await f.run();
+  assert.equal(result.rewards, 1);
+  assert.equal(commands(f,"apex_getguesslist").filter(item=>item.params.scheduleId===2).length, 1);
+});
+
+test("某赛程列表异常仍继续其他赛程领奖，停止信号则立即保留待确认退出", async () => {
+  const f = fixture({time:stamp("2026-10-18T08:00:00"),inventory:0,groups:[[{teamId:"winner",isWin:true}]]});
+  f.info.guessMap={2:["bad"],3:["winner"]}; f.info.guessClaimMap={2:{bad:false},3:{winner:false}};
+  const send=f.options.send;
+  f.options.send=async(cmd,params)=>{
+    if(cmd==="apex_getguesslist"&&params.scheduleId===2) throw new Error("对阵查询失败");
+    return send(cmd,params);
+  };
+  await assert.rejects(f.run(),error=>error.claimedRewards===1&&/对阵查询失败/.test(error.message));
+  assert.equal(f.info.guessClaimMap[3].winner,true);
+
+  const g=fixture({time:stamp("2026-10-18T08:00:00"),inventory:0,groups:[[{teamId:"a",isWin:true},{teamId:"b",isWin:true}]]});
+  g.info.guessMap={2:["a","b"]};g.info.guessClaimMap={2:{a:false,b:false}};
+  const original=g.options.send;
+  g.options.send=async(cmd,params)=>{
+    if(cmd==="apex_guessclaim") {g.stop();throw Object.assign(new Error("停止"),{interrupted:true});}
+    return original(cmd,params);
+  };
+  await assert.rejects(g.run(),error=>error.interrupted===true);
+  assert.deepEqual(JSON.parse(g.storage.getItem("apex-daily:v1:a")).pendingClaims,[{scheduleId:2,teamId:"a"}]);
 });
