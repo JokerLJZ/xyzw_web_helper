@@ -3,6 +3,20 @@ import { activityBody } from "./rechargeActivity.js";
 const CATEGORIES = [0, 5]; // categorySystemMail, categoryPublicNoticeMail
 export const isMailCleanupMonday = time => new Date(time + 8 * 3600000).getUTCDay() === 1;
 
+/** Mail_GetListResp defaults omitted in raw BON: list=[], left=0. */
+export function normalizeMailListResponse(response) {
+  const code = response?._raw?.code ?? response?.code;
+  if (code !== undefined && code !== 0) throw new Error(`系统邮件查询失败：服务器错误${code}`);
+  const body = activityBody(response);
+  if (!body || typeof body !== "object" || Array.isArray(body) || body instanceof Map)
+    throw new Error("系统邮件列表未确认");
+  const list = body.list === undefined ? [] : body.list;
+  const left = body.left === undefined ? 0 : body.left;
+  if (!Array.isArray(list) || !Number.isSafeInteger(left) || left < 0)
+    throw new Error("系统邮件列表或剩余数量异常");
+  return { ...body, list, left };
+}
+
 /** Claim before delete, scoped to system mail and announcements; never blindly retry writes. */
 export async function cleanupMondayMail({ send, now = Date.now, stopped = () => false }) {
   if (!isMailCleanupMonday(now())) return { status: "skipped", reason: "非周一，跳过系统邮件与公告清理" };
@@ -12,8 +26,7 @@ export async function cleanupMondayMail({ send, now = Date.now, stopped = () => 
   };
   const read = async () => {
     guard();
-    const body = activityBody(await send("mail_getlist", { category: CATEGORIES, lastId: 0, size: 60 }));
-    if (!Array.isArray(body?.list)) throw new Error("系统邮件列表未确认");
+    const body = normalizeMailListResponse(await send("mail_getlist", { category: CATEGORIES, lastId: 0, size: 60 }));
     for (const mail of body.list) {
       if (!Number.isSafeInteger(mail.id) || mail.id <= 0 || !CATEGORIES.includes(mail.category ?? 0) ||
           (mail.state !== undefined && !Number.isInteger(mail.state)) ||

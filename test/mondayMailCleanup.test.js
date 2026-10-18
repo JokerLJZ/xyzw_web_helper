@@ -67,3 +67,26 @@ test("超过60封逐批清理，用户停止不删除，重复执行空列表正
   await assert.rejects(cleanupMondayMail(g.options), /停止/);
   assert.equal(g.calls.length,0);
 });
+
+test("空邮件响应省略list与left按协议默认值完成，不发送领取删除", async () => {
+  for (const response of [{}, {list:[]}, {left:0}, {_raw:{code:0,body:{}}}, {data:{}}]) {
+    const calls = [];
+    const result = await cleanupMondayMail({ now: () => monday, send: async cmd => { calls.push(cmd); return response; } });
+    assert.equal(result.status,"completed");
+    assert.equal(result.deleted,0);
+    assert.deepEqual(calls,["mail_getlist"]);
+  }
+});
+test("非法列表、非法剩余数量、空响应与明确失败仍报错", async () => {
+  for (const response of [null, undefined, [], {list:null}, {list:{}}, {left:null}, {left:-1}, {left:"0"}, {code:200020}, {_raw:{code:200020,body:{}}}, {left:1}]) {
+    await assert.rejects(cleanupMondayMail({now:()=>monday,send:async()=>response}));
+  }
+});
+test("删除超时后空响应可确认已删除，left省略不误报失败", async () => {
+  let reads=0, sends=0;
+  const result = await cleanupMondayMail({now:()=>monday,send:async cmd=>{
+    if(cmd==="mail_getlist")return ++reads===1 ? {list:[{id:1,category:5}]} : {};
+    sends++;throw new Error("请求超时");
+  }});
+  assert.equal(result.deleted,1);assert.equal(sends,1);
+});
