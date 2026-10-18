@@ -1,3 +1,6 @@
+import { classifyWarehouseActivityItem } from "../warehouseActivityItems.js";
+import { loadRechargeConfig } from "../rechargeActivity.js";
+import { formatWarehouseItem } from "../warehouseItemNames.js";
 import { createFormationRequestGate } from "./formationRequestGate.js";
 import { extractRolePatch, mergeRoleSnapshot } from "../roleSnapshot.js";
 import { createPetTasks } from "./tasksPet.js";
@@ -5419,6 +5422,8 @@ export function createTasksItem(deps) {
   const batchUseWarehouseItems = async () => {
     if (selectedTokens.value.length === 0) return;
 
+    const itemConfigs = new Map();
+    const itemLabel = (tokenId, itemId) => formatWarehouseItem(itemId, itemConfigs.get(tokenId));
     const MAX_USE_PER_REQUEST = 999;
     const MIN_ACTION_DELAY_MS = 2000;
     const ITEM_COOLDOWN_MS = 5000;
@@ -5489,7 +5494,6 @@ export function createTasksItem(deps) {
         })
         .map(({ itemId }) => itemId)
         .filter((itemId) => !OPEN_PACK_ITEM_IDS.includes(itemId))
-        .filter((itemId) => !EXCLUDED_ACTIVITY_ITEM_IDS.has(itemId))
         .sort((left, right) => left - right);
     const getMainLevel = (result) =>
       Number(getRole(result).levelId ?? result?.levelId ?? 0) || 0;
@@ -5497,8 +5501,8 @@ export function createTasksItem(deps) {
       const hero = heroes[heroId] ?? heroes[String(heroId)];
       return Number(hero?.star ?? 0) || 0;
     };
-    const sleep = (delayMs) =>
-      new Promise((resolve) => setTimeout(resolve, delayMs));
+    const sleep = deps.warehousePause || ((delayMs) =>
+      new Promise((resolve) => setTimeout(resolve, delayMs)));
     const isRateLimitError = (error) =>
       isHeroStarRateLimitError(error);
     const getRoleInfoWithRetry = async (tokenId, tokenName) => {
@@ -5559,7 +5563,7 @@ export function createTasksItem(deps) {
               if (attempt >= MAX_RATE_LIMIT_RETRIES) throw error;
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${tokenName} 使用物品${itemId}触发200400，等待6秒后进行第${attempt + 1}次重试`,
+                message: `${tokenName} 使用${itemLabel(tokenId, itemId)}触发200400，等待6秒后进行第${attempt + 1}次重试`,
                 type: "warning",
               });
               await sleep(RATE_LIMIT_RETRY_DELAY_MS);
@@ -5585,7 +5589,7 @@ export function createTasksItem(deps) {
       if (used > 0) {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 使用物品${itemId}：${used}个${command === "item_openpack" ? `，目标序号${index}` : ""}`,
+          message: `${tokenName} 使用${itemLabel(tokenId, itemId)}：${used}个${command === "item_openpack" ? `，目标序号${index}` : ""}`,
           type: "success",
         });
       }
@@ -5811,6 +5815,18 @@ export function createTasksItem(deps) {
       try {
         await ensureConnection(tokenId);
         let roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
+        try {
+          const config = await (deps.loadWarehouseItemConfig || loadRechargeConfig)(
+            (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, HELPER_COMMAND_TIMEOUT_MS),
+          );
+          itemConfigs.set(tokenId, config);
+        } catch {
+          addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} 道具名称配置暂不可用，使用已知道具名称，未知道具保留编号`, type: "info" });
+        }
+        const excluded = [...EXCLUDED_ACTIVITY_ITEM_IDS].filter(id => getQuantity(getItems(roleInfo), id) > 0);
+        if (excluded.length) addLog({ time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 仓库历史排除道具（当前持有，将按配置重新判定）：${excluded.map(id => `${itemLabel(tokenId, id)}×${getQuantity(getItems(roleInfo), id)}`).join("、")}`,
+          type: "info" });
         const mainLevel = getMainLevel(roleInfo);
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -5888,7 +5904,7 @@ export function createTasksItem(deps) {
           } catch (error) {
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 物品${itemId}无法直接使用，已跳过：${getErrorMessage(error)}`,
+              message: `${tokenName} ${itemLabel(tokenId, itemId)}无法直接使用，已跳过：${getErrorMessage(error)}`,
               type: "warning",
             });
           }
@@ -5901,19 +5917,28 @@ export function createTasksItem(deps) {
         if (activityItemIds.length > 0) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 检测到活动道具：${activityItemIds.join(", ")}`,
+            message: `${tokenName} 检测到活动道具：${activityItemIds.map(id => itemLabel(tokenId, id)).join("、")}`,
             type: "info",
           });
         }
         for (const itemId of activityItemIds) {
           if (shouldStop.value) break;
+          const decision = classifyWarehouseActivityItem({
+            itemId, config: itemConfigs.get(tokenId), role: getRole(roleInfo),
+            now: deps.warehouseNow ? deps.warehouseNow() : (tokenStore.getWebSocketClient?.(tokenId)?.getServerTime?.() ?? Date.now()),
+          });
+          if (decision.status !== "ready") {
+            addLog({ time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${itemLabel(tokenId, itemId)}：${decision.reason}，正常跳过`, type: "info" });
+            continue;
+          }
           const quantity = getQuantity(latestItems, itemId);
           try {
-            await useInBatches({ tokenId, itemId, quantity, tokenName });
+            await useInBatches({ tokenId, itemId, quantity, tokenName, command: decision.command, index: decision.index });
           } catch (error) {
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 活动道具${itemId}不支持直接开启或使用失败，已跳过：${getErrorMessage(error)}`,
+              message: `${tokenName} 活动道具${itemLabel(tokenId, itemId)}不支持直接开启或使用失败，已跳过：${getErrorMessage(error)}`,
               type: "warning",
             });
           }
