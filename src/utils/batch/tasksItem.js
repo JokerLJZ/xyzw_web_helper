@@ -5433,20 +5433,9 @@ export function createTasksItem(deps) {
     const UNIVERSAL_RED_ITEM_ID = 3201;
     const UNIVERSAL_ORANGE_ITEM_ID = 3302;
     const OPEN_PACK_ITEM_IDS = [
-      3001, 3002, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 35011,
+      3001, 3002, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 35011, 37005,
     ];
-    const EXCLUDED_ACTIVITY_ITEM_IDS = new Set([
-      5054,
-      5095,
-      5128,
-      5282,
-      5283,
-      5284,
-      5285,
-      5286,
-      5288,
-      6001,
-    ]);
+    const EXCLUDED_ACTIVITY_ITEM_IDS = new Set([5054, 5095]);
     const useUniversalRed = batchSettings.useUniversalRed !== false;
     const useUniversalOrange = batchSettings.useUniversalOrange !== false;
     const redPrimaryHeroId = Number(
@@ -5494,6 +5483,7 @@ export function createTasksItem(deps) {
         })
         .map(({ itemId }) => itemId)
         .filter((itemId) => !OPEN_PACK_ITEM_IDS.includes(itemId))
+        .filter((itemId) => !EXCLUDED_ACTIVITY_ITEM_IDS.has(itemId))
         .sort((left, right) => left - right);
     const getMainLevel = (result) =>
       Number(getRole(result).levelId ?? result?.levelId ?? 0) || 0;
@@ -5825,7 +5815,7 @@ export function createTasksItem(deps) {
         }
         const excluded = [...EXCLUDED_ACTIVITY_ITEM_IDS].filter(id => getQuantity(getItems(roleInfo), id) > 0);
         if (excluded.length) addLog({ time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 仓库历史排除道具（当前持有，将按配置重新判定）：${excluded.map(id => `${itemLabel(tokenId, id)}×${getQuantity(getItems(roleInfo), id)}`).join("、")}`,
+          message: `${tokenName} 仓库自动打开排除道具（当前持有）：${excluded.map(id => `${itemLabel(tokenId, id)}×${getQuantity(getItems(roleInfo), id)}`).join("、")}`,
           type: "info" });
         const mainLevel = getMainLevel(roleInfo);
         addLog({

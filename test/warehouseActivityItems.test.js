@@ -82,3 +82,58 @@ test("仓库实际入口：当期货币不发送请求，历史排除的过期�
   assert.ok(logs.some(log => /金吉他.*当期/.test(log.message)));
   assert.ok(logs.some(log => /满天星.*当期/.test(log.message)));
 });
+
+test("怪异礼包进入固定仓库序列，超过999分批开启且日志显示名称", async () => {
+  const { createTasksItem } = await import("../src/utils/batch/tasksItem.js");
+  const ref = value => ({ value });
+  const shouldStop = ref(false), calls = [], logs = [];
+  let quantity = 1000, reads = 0;
+  const tasks = createTasksItem({
+    selectedTokens: ref(["a"]), tokens: ref([{ id: "a", name: "账号" }]), tokenStatus: ref({}),
+    isRunning: ref(false), shouldStop, currentRunningTokenId: ref(null), batchSettings: {}, helperSettings: {},
+    delayConfig: { action: 0 }, connectionQueue: { active: 1 }, warehousePause: async () => {},
+    loadWarehouseItemConfig: async () => ({}),
+    ensureConnection: async () => {}, releaseConnectionSlot() {}, addLog: log => logs.push(log), message: { success() {} },
+    tokenStore: {
+      sendGetRoleInfo: async () => {
+        if (++reads === 5) shouldStop.value = true; // skip unrelated star-book follow-up
+        return { role: { levelId: 7001, items: { 37005: { quantity } }, heroes: {} } };
+      },
+      sendMessageWithPromise: async (_id, cmd, params) => { calls.push({ cmd, params }); quantity -= params.number; return {}; },
+      closeWebSocketConnection() {},
+    },
+  });
+  await tasks.batchUseWarehouseItems();
+  assert.deepEqual(calls, [999, 1].map(number => ({ cmd: "item_openpack", params: { itemId: 37005, number, index: 0 } })));
+  assert.equal(quantity, 0);
+  assert.ok(logs.some(log => /怪异礼包（37005）/.test(log.message)));
+});
+
+test("固定排除仅保留美梦枕头和全服祝福，其余历史排除项恢复候选", async () => {
+  const { createTasksItem } = await import("../src/utils/batch/tasksItem.js");
+  const ref = value => ({ value });
+  const restored = [5128, 5282, 5283, 5284, 5285, 5286, 5288, 6001];
+  const ids = [5054, 5095, ...restored];
+  const items = Object.fromEntries(ids.map(id => [id, { quantity: 1 }]));
+  // All are configured as usable packs to distinguish fixed exclusion from config checks.
+  const config = { ItemConf: Object.fromEntries(ids.map(id => [id, { type: 5, params: [1, 40] }])), PackConf: { 40: {} } };
+  const shouldStop = ref(false), calls = [];
+  let reads = 0;
+  const tasks = createTasksItem({
+    selectedTokens: ref(["a"]), tokens: ref([{ id: "a", name: "账号" }]), tokenStatus: ref({}),
+    isRunning: ref(false), shouldStop, currentRunningTokenId: ref(null), batchSettings: {}, helperSettings: {},
+    delayConfig: { action: 0 }, connectionQueue: { active: 1 }, warehousePause: async () => {},
+    loadWarehouseItemConfig: async () => config,
+    ensureConnection: async () => {}, releaseConnectionSlot() {}, addLog() {}, message: { success() {} },
+    tokenStore: {
+      sendGetRoleInfo: async () => {
+        if (++reads === 3) shouldStop.value = true;
+        return { role: { levelId: 7001, items: structuredClone(items), heroes: {} } };
+      },
+      sendMessageWithPromise: async (_id, cmd, params) => { calls.push(params.itemId); items[params.itemId].quantity = 0; return {}; },
+      closeWebSocketConnection() {},
+    },
+  });
+  await tasks.batchUseWarehouseItems();
+  assert.deepEqual(calls, restored);
+});
