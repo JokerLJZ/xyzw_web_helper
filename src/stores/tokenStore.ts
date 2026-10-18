@@ -39,7 +39,8 @@ declare interface TokenData {
 }
 
 declare interface WebSocketConnection {
-  status: "connecting" | "connected" | "disconnected" | "error";
+  status:
+    "connecting" | "connected" | "disconnecting" | "disconnected" | "error";
   client: XyzwWebSocketClient | null;
   lastError: { timestamp: string; error: string } | null;
   tokenId: string;
@@ -834,18 +835,20 @@ export const useTokenStore = defineStore("tokens", () => {
         connection.status = "disconnecting";
         updateCrossTabConnectionState(tokenId, "disconnecting");
 
+        const socket = connection.client.socket;
         connection.client.disconnect();
-
-        // 等待连接完全关闭
-        await new Promise((resolve) => {
-          const checkDisconnected = () => {
-            if (!connection.client.connected) {
-              resolve();
-            } else {
-              setTimeout(checkDisconnected, 100);
-            }
+        await new Promise<void>((resolve) => {
+          let pollTimer: ReturnType<typeof setTimeout> | undefined;
+          const finish = () => {
+            clearTimeout(timeoutTimer);
+            clearTimeout(pollTimer);
+            resolve();
           };
-          setTimeout(resolve, 5000); // 最多等待5秒
+          const timeoutTimer = setTimeout(finish, 5000);
+          const checkDisconnected = () => {
+            if (!socket || socket.readyState === WebSocket.CLOSED) finish();
+            else pollTimer = setTimeout(checkDisconnected, 100);
+          };
           checkDisconnected();
         });
 

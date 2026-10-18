@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import fs from "node:fs/promises";
 const source = (await fs.readFile(new URL("../src/utils/xyzwWebSocket.js", import.meta.url), "utf8")).replace(/^import .*;$/gm, "");
-const prelude = `const $CacheManager = { getCache: () => ({}) };
+const prelude = `const WebSocket = { OPEN: 1 };
+const $CacheManager = { getCache: () => ({}) };
 const bonProtocol = {}, g_utils = {};
 const wsLogger = new Proxy({}, {get: () => () => {}}), gameLogger = wsLogger;`;
 const { XyzwWebSocketClient } = await import(`data:text/javascript;base64,${Buffer.from(prelude + source).toString("base64")}`);
 
 test("庆典各协议注册并匹配客户端声明的响应", async () => {
   const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
-  client.connected = true;
+  client.connected = true; client.socket = { readyState: 1, close() {} };
   for (const [command, response] of [
     ["book_claimskinpoint", "syncresp"],
     ["mail_getlist", "mail_getlistresp"],
@@ -38,7 +39,7 @@ test("庆典各协议注册并匹配客户端声明的响应", async () => {
 
 test("盐场命令携带战场hint并匹配独立响应，订阅不覆盖原监听", async () => {
   const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
-  client.connected = true;
+  client.connected = true; client.socket = { readyState: 1, close() {} };
   for (const cmd of ["enterbattlefield", "getbattlefieldinfo", "getteaminfo", "teamsetbattleteam", "setbattleteam", "startmarch", "speedup", "startattackbuilding", "ping"]) {
     const command = `war_${cmd}`;
     assert.equal(client.registry.build(command, 0, 1, { battlefieldId: "battlefield-1" }).hint, "battlefield-1");
@@ -59,7 +60,7 @@ test("盐场命令携带战场hint并匹配独立响应，订阅不覆盖原监�
 
 test("日常同步和BOSS状态按当前协议注册并匹配响应", async () => {
   const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
-  client.connected = true;
+  client.connected = true; client.socket = { readyState: 1, close() {} };
   for (const [command, response] of [["task_checkdailytask", "syncresp"], ["boss_getstate", "boss_getstateresp"], ["discount_getdiscountinfo", "discount_getdiscountinforesp"]]) {
     const pending = client.sendWithPromise(command, {}, 1000);
     client._handlePromiseResponse({ cmd: response, code: 0, body: { checked: true } });

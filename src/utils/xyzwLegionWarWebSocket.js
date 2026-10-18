@@ -112,6 +112,11 @@
      this.socket = null
      this.ack = 0
      this.seq = 0
+     this.wireSeq = 0;
+     this.heartbeatStartTimer = null;
+     this.reconnectTimer = null;
+     this.reconnectResetTimer = null;
+     this.dialogResetTimer = null;
      this.hint=hint;
      this.sendQueue = []
      this.sendQueueTimer = null
@@ -137,164 +142,215 @@
  
    /** 初始化连接 */
    init() {
-     wsLogger.info(`连接: ${this.url.split('?')[0]}`)
- 
-     this.socket = new WebSocket(this.url)
- 
-     this.socket.onopen = () => {
-       wsLogger.info('连接成功')
-       this.connected = true
-       // 启动心跳机制
-       this._setupHeartbeat()
-       // 启动消息队列处理
-       this._processQueueLoop()
-       if (this.onConnect) this.onConnect()
-     }
- 
-     this.socket.onmessage = (evt) => {
-       try {
-         let packet
-         if (typeof evt.data === "string") {
-           packet = JSON.parse(evt.data)
-         } else if (evt.data instanceof ArrayBuffer) {
-           // 二进制数据需要自动检测并解码
-           packet = this.utils?.parse ? this.utils.parse(evt.data, "auto",true) : evt.data
- 
-           // 移除特定命令的控制台直出日志，统一用 wsLogger/gameLogger 控制
-         } else if (evt.data instanceof Blob) {
-           // 处理Blob数据
-           // 收到Blob数据
-           evt.data.arrayBuffer().then(buffer => {
-             try {
-               packet = this.utils?.parse ? this.utils.parse(buffer, "auto",true) : buffer
-               // Blob解析完成
- 
-               // 处理消息体解码（ProtoMsg会自动解码）
-               if (packet instanceof Object && packet.rawData !== undefined) {
-                 gameLogger.verbose('ProtoMsg Blob消息，使用rawData:', packet.rawData)
-               } else if (packet.body && this.shouldDecodeBody(packet.body)) {
-                 try {
-                   if (this.utils && this.utils.bon && this.utils.bon.decode) {
-                     // 转换body数据为Uint8Array
-                     const bodyBytes = this.convertToUint8Array(packet.body)
-                     if (bodyBytes) {
-                       const decodedBody = this.utils.bon.decode(bodyBytes)
-                       gameLogger.debug('BON Blob解码成功:', packet.cmd, decodedBody)
-                       // 不修改packet.body，而是创建一个新的属性存储解码后的数据
-                       packet.decodedBody = decodedBody
-                     }
-                   } else {
-                     gameLogger.warn('BON解码器不可用 (Blob)')
-                   }
-                 } catch (error) {
-                   gameLogger.error('BON Blob消息体解码失败:', error.message, packet.cmd)
-                 }
-               }
-               // 更新 ack 为服务端最新的 seq（若存在）
-               const actualPacket = packet._raw || packet
-               const incomingSeq = (typeof actualPacket?.seq === 'number') ? actualPacket.seq :
-                 (typeof packet?.seq === 'number') ? packet.seq : undefined
-               if (typeof incomingSeq === 'number' && incomingSeq >= 0) {
-                 this.ack = incomingSeq
-               }
- 
-               if (this.showMsg) {
-                 // 收到Blob消息
-               }
- 
-               // 回调处理
-               if (this.messageListener) {
-                 this.messageListener(packet)
-               }
- 
-               // Promise 响应处理
-               this._handlePromiseResponse(packet)
- 
-             } catch (error) {
-               gameLogger.error('Blob解析失败:', error.message)
-             }
-           })
-           return // 异步处理，直接返回
-         } else {
-           gameLogger.warn('未知数据类型:', typeof evt.data, evt.data)
-           packet = evt.data
-         }
- 
-         if (this.showMsg) {
-           gameLogger.verbose('收到消息:', packet)
-         }
- 
-         // 处理消息体解码（ProtoMsg会自动解码）
-         if (packet instanceof Object && packet.rawData !== undefined) {
-           gameLogger.verbose('ProtoMsg消息，使用rawData:', packet.rawData)
-         } else {
-           // 处理可能存在_raw包装的情况
-           const actualPacket = packet._raw || packet
- 
-           // 更新 ack 为服务端最新的 seq（若存在）
-           const incomingSeq = (typeof actualPacket.seq === 'number') ? actualPacket.seq :
-             (typeof packet.seq === 'number') ? packet.seq : undefined
-           if (typeof incomingSeq === 'number' && incomingSeq >= 0) {
-             this.ack = incomingSeq
-           }
- 
-           if (actualPacket.body && this.shouldDecodeBody(actualPacket.body)) {
-             try {
-               if (this.utils && this.utils.bon && this.utils.bon.decode) {
-                 // 转换body数据为Uint8Array
-                 const bodyBytes = this.convertToUint8Array(actualPacket.body)
-                 if (bodyBytes) {
-                   const decodedBody = this.utils.bon.decode(bodyBytes)
-                   gameLogger.debug('BON解码成功:', actualPacket.cmd || packet.cmd, decodedBody)
-                   // 将解码后的数据存储到原始packet中
-                   packet.decodedBody = decodedBody
-                   // 如果有_raw结构，也存储到_raw中
-                   if (packet._raw) {
-                     packet._raw.decodedBody = decodedBody
-                   }
-                 }
-               } else {
-                 gameLogger.warn('BON解码器不可用')
-               }
-             } catch (error) {
-               gameLogger.error('BON消息体解码失败:', error.message, actualPacket.cmd || packet.cmd)
-             }
-           }
-         }
- 
-         // 回调处理
-         if (this.messageListener) {
-           this.messageListener(packet)
-         }
- 
-         // Promise 响应处理
-         this._handlePromiseResponse(packet)
- 
-       } catch (error) {
-         gameLogger.error('消息处理失败:', error.message)
-       }
-     }
- 
-     this.socket.onclose = (evt) => {
-       wsLogger.info(`WebSocket 连接关闭: ${evt.code} ${evt.reason || ''}`)
-       wsLogger.debug('关闭详情:', {
-         code: evt.code,
-         reason: evt.reason || '未提供原因',
-         wasClean: evt.wasClean,
-         timestamp: new Date().toISOString()
-       })
-       this.connected = false
-       this._clearTimers()
-       if (this.onDisconnect) this.onDisconnect(evt)
-     }
- 
-     this.socket.onerror = (error) => {
-       wsLogger.error('WebSocket 错误:', error)
-       this.connected = false
-       this._clearTimers()
-       if (this.onError) this.onError(error)
-     }
-   }
+    wsLogger.info(`连接: ${this.url.split("?")[0]}`);
+
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.isReconnecting = false;
+    }
+    if (this.socket) this.disconnect();
+    const socket = new WebSocket(this.url);
+    this.socket = socket;
+    this.wireSeq = 0;
+    this.ack = 0;
+
+    socket.onopen = () => {
+      if (this.socket !== socket) return;
+      wsLogger.info("连接成功");
+      this.connected = true;
+      // 启动心跳机制
+      this._setupHeartbeat();
+      // 启动消息队列处理
+      this._processQueueLoop();
+      if (this.onConnect) this.onConnect();
+    };
+
+    socket.onmessage = (evt) => {
+      if (this.socket !== socket) return;
+      try {
+        let packet;
+        if (typeof evt.data === "string") {
+          packet = JSON.parse(evt.data);
+        } else if (evt.data instanceof ArrayBuffer) {
+          // 二进制数据需要自动检测并解码
+          packet = this.utils?.parse
+            ? this.utils.parse(evt.data, "auto", true)
+            : evt.data;
+
+          // 移除特定命令的控制台直出日志，统一用 wsLogger/gameLogger 控制
+        } else if (evt.data instanceof Blob) {
+          // 处理Blob数据
+          // 收到Blob数据
+          evt.data
+            .arrayBuffer()
+            .then((buffer) => {
+              if (this.socket !== socket) return;
+              try {
+                packet = this.utils?.parse
+                  ? this.utils.parse(buffer, "auto", true)
+                  : buffer;
+                // Blob解析完成
+
+                // 处理消息体解码（ProtoMsg会自动解码）
+                if (packet instanceof Object && packet.rawData !== undefined) {
+                  gameLogger.verbose(
+                    "ProtoMsg Blob消息，使用rawData:",
+                    packet.rawData,
+                  );
+                } else if (packet.body && this.shouldDecodeBody(packet.body)) {
+                  try {
+                    if (this.utils && this.utils.bon && this.utils.bon.decode) {
+                      // 转换body数据为Uint8Array
+                      const bodyBytes = this.convertToUint8Array(packet.body);
+                      if (bodyBytes) {
+                        const decodedBody = this.utils.bon.decode(bodyBytes);
+                        gameLogger.debug(
+                          "BON Blob解码成功:",
+                          packet.cmd,
+                          decodedBody,
+                        );
+                        // 不修改packet.body，而是创建一个新的属性存储解码后的数据
+                        packet.decodedBody = decodedBody;
+                      }
+                    } else {
+                      gameLogger.warn("BON解码器不可用 (Blob)");
+                    }
+                  } catch (error) {
+                    gameLogger.error(
+                      "BON Blob消息体解码失败:",
+                      error.message,
+                      packet.cmd,
+                    );
+                  }
+                }
+                // 更新 ack 为服务端最新的 seq（若存在）
+                const actualPacket = packet._raw || packet;
+                const incomingSeq =
+                  typeof actualPacket?.seq === "number"
+                    ? actualPacket.seq
+                    : typeof packet?.seq === "number"
+                      ? packet.seq
+                      : undefined;
+                if (typeof incomingSeq === "number" && incomingSeq >= 0) {
+                  this.ack = incomingSeq;
+                }
+
+                if (this.showMsg) {
+                  // 收到Blob消息
+                }
+
+                // 回调处理
+                if (this.messageListener) {
+                  this.messageListener(packet);
+                }
+
+                // Promise 响应处理
+                if (this.socket === socket) this._handlePromiseResponse(packet);
+              } catch (error) {
+                gameLogger.error("Blob解析失败:", error.message);
+              }
+            })
+            .catch((error) => {
+              if (this.socket === socket) {
+                gameLogger.error("Blob读取失败:", error.message);
+              }
+            });
+          return; // 异步处理，直接返回
+        } else {
+          gameLogger.warn("未知数据类型:", typeof evt.data, evt.data);
+          packet = evt.data;
+        }
+
+        if (this.showMsg) {
+          gameLogger.verbose("收到消息:", packet);
+        }
+
+        // 处理消息体解码（ProtoMsg会自动解码）
+        if (packet instanceof Object && packet.rawData !== undefined) {
+          gameLogger.verbose("ProtoMsg消息，使用rawData:", packet.rawData);
+        } else {
+          // 处理可能存在_raw包装的情况
+          const actualPacket = packet._raw || packet;
+
+          // 更新 ack 为服务端最新的 seq（若存在）
+          const incomingSeq =
+            typeof actualPacket.seq === "number"
+              ? actualPacket.seq
+              : typeof packet.seq === "number"
+                ? packet.seq
+                : undefined;
+          if (typeof incomingSeq === "number" && incomingSeq >= 0) {
+            this.ack = incomingSeq;
+          }
+
+          if (actualPacket.body && this.shouldDecodeBody(actualPacket.body)) {
+            try {
+              if (this.utils && this.utils.bon && this.utils.bon.decode) {
+                // 转换body数据为Uint8Array
+                const bodyBytes = this.convertToUint8Array(actualPacket.body);
+                if (bodyBytes) {
+                  const decodedBody = this.utils.bon.decode(bodyBytes);
+                  gameLogger.debug(
+                    "BON解码成功:",
+                    actualPacket.cmd || packet.cmd,
+                    decodedBody,
+                  );
+                  // 将解码后的数据存储到原始packet中
+                  packet.decodedBody = decodedBody;
+                  // 如果有_raw结构，也存储到_raw中
+                  if (packet._raw) {
+                    packet._raw.decodedBody = decodedBody;
+                  }
+                }
+              } else {
+                gameLogger.warn("BON解码器不可用");
+              }
+            } catch (error) {
+              gameLogger.error(
+                "BON消息体解码失败:",
+                error.message,
+                actualPacket.cmd || packet.cmd,
+              );
+            }
+          }
+        }
+
+        // 回调处理
+        if (this.messageListener) {
+          this.messageListener(packet);
+        }
+
+        // Promise 响应处理
+        if (this.socket === socket) this._handlePromiseResponse(packet);
+      } catch (error) {
+        gameLogger.error("消息处理失败:", error.message);
+      }
+    };
+
+    socket.onclose = (evt) => {
+      if (this.socket !== socket) return;
+      this.socket = null;
+      wsLogger.info(`WebSocket 连接关闭: ${evt.code} ${evt.reason || ""}`);
+      wsLogger.debug("关闭详情:", {
+        code: evt.code,
+        reason: evt.reason || "未提供原因",
+        wasClean: evt.wasClean,
+        timestamp: new Date().toISOString(),
+      });
+      this.connected = false;
+      this._clearTimers();
+      if (this.onDisconnect) this.onDisconnect(evt);
+    };
+
+    socket.onerror = (error) => {
+      if (this.socket !== socket) return;
+      wsLogger.error("WebSocket 错误:", error);
+      this.connected = false;
+      this._clearTimers();
+      if (this.onError) this.onError(error);
+    };
+  }
  
    /** 注册消息回调 */
    setMessageListener(fn) {
@@ -384,101 +440,115 @@
  
    /** 重连（防重复连接版本） */
    reconnect() {
-     // 防止重复重连
-     if (this.isReconnecting) {
-       wsLogger.debug('重连已在进行中，跳过此次重连请求')
-       return
-     }
- 
-     this.isReconnecting = true
-     wsLogger.info('开始WebSocket重连...')
- 
-     // 先断开现有连接
-     this.disconnect()
- 
-     // 延迟重连，避免过于频繁
-     setTimeout(() => {
-       try {
-         this.init()
-       } finally {
-         // 无论成功或失败都重置重连状态
-         setTimeout(() => {
-           this.isReconnecting = false
-         }, 2000) // 2秒后允许下次重连
-       }
-     }, 1000)
-   }
+    // 防止重复重连
+    if (this.isReconnecting) {
+      wsLogger.debug("重连已在进行中，跳过此次重连请求");
+      return;
+    }
+
+    wsLogger.info("开始WebSocket重连...");
+
+    // 先取消旧会话的等待请求与队列，再安排新的重连。
+    this.disconnect();
+    this.isReconnecting = true;
+
+    // 延迟重连，避免过于频繁
+    const reconnectTimer = setTimeout(() => {
+      if (this.reconnectTimer !== reconnectTimer) return;
+      this.reconnectTimer = null;
+      try {
+        this.init();
+      } finally {
+        // 无论成功或失败都重置重连状态
+        const resetTimer = setTimeout(() => {
+          if (this.reconnectResetTimer !== resetTimer) return;
+          this.reconnectResetTimer = null;
+          this.isReconnecting = false;
+        }, 2000); // 2秒后允许下次重连
+        this.reconnectResetTimer = resetTimer;
+      }
+    }, 1000);
+    this.reconnectTimer = reconnectTimer;
+  }
  
    /** 断开连接 */
    disconnect() {
-     if (this.socket) {
-       this.socket.close()
-       this.socket = null
-     }
-     this.connected = false
-     this._clearTimers()
-   }
+    const socket = this.socket;
+    this.socket = null;
+    this.connected = false;
+    this._clearTimers();
+    socket?.close();
+  }
  
    /** 发送消息 */
    send(cmd, params = {}, options = {}) {
-     if (!this.connected) {
-       wsLogger.warn(`WebSocket 未连接，消息已入队: ${cmd}`)
-       // 防止频繁重连
-       if (!this.dialogStatus && !this.isReconnecting) {
-         this.dialogStatus = true
-         wsLogger.info('自动触发重连...')
-         this.reconnect()
-         setTimeout(() => { this.dialogStatus = false }, 2000)
-       }
-     }
- 
-     // 移除特定命令的控制台直出日志，统一用 wsLogger 控制
- 
-     // 统一在入队时分配 seq，避免与 Promise 版本竞争导致重复
-     const assignedSeq = (options.seq !== undefined)
-       ? options.seq
-       : (cmd === 'heart_beat' ? 0 : ++this.seq)
-     const task = {
-       cmd,
-       params,
-       seq: assignedSeq,
-       hint: this.hint,
-       respKey: options.respKey || cmd,
-       sleep: options.sleep || 0,
-       onSent: options.onSent
-     }
-     this.sendQueue.push(task)
-     return task
-   }
+    if (!this.connected) {
+      wsLogger.warn(`WebSocket 未连接，消息已入队: ${cmd}`);
+      // 防止频繁重连
+      if (!this.dialogStatus && !this.isReconnecting) {
+        this.dialogStatus = true;
+        wsLogger.info("自动触发重连...");
+        this.reconnect();
+        const dialogTimer = setTimeout(() => {
+          if (this.dialogResetTimer !== dialogTimer) return;
+          this.dialogResetTimer = null;
+          this.dialogStatus = false;
+        }, 2000);
+        this.dialogResetTimer = dialogTimer;
+      }
+    }
+
+    // 移除特定命令的控制台直出日志，统一用 wsLogger 控制
+
+    // 统一在入队时分配 seq，避免与 Promise 版本竞争导致重复
+    const assignedSeq = options.request
+      ? options.request.seq
+      : cmd === "heart_beat"
+        ? 0
+        : ++this.seq;
+    const task = {
+      cmd,
+      params,
+      seq: assignedSeq,
+      hint: this.hint,
+      respKey: options.respKey || cmd,
+      sleep: options.sleep || 0,
+      onSent: options.onSent,
+      request: options.request,
+    };
+    this.sendQueue.push(task);
+    return task;
+  }
  
    /** Promise 版发送 */
    sendWithPromise(cmd, params = {}, timeoutMs = 5000) {
-     return new Promise((resolve, reject) => {
-       if (!this.connected && !this.socket) {
-         return reject(new Error("WebSocket 连接已关闭"))
-       }
-       // 为此请求生成唯一的seq值
-       const requestSeq = ++this.seq
- 
-       // 设置 Promise 状态，使用seq作为键
-       this.promises[requestSeq] = { resolve, reject, originalCmd: cmd }
- 
-       // 超时处理
-       const timer = setTimeout(() => {
-         delete this.promises[requestSeq]
-         reject(new Error(`请求超时: ${cmd} (${timeoutMs}ms)`))
-       }, timeoutMs)
- 
-       // 发送消息，直接传递seq
-       this.send(cmd, params, {
-         seq: requestSeq,
-         onSent: () => {
-           // 消息发送成功后，不要清除超时器，让它继续等待响应
-           // 只有在收到响应或超时时才清除
-         }
-       })
-     })
-   }
+    return new Promise((resolve, reject) => {
+      if (!this.connected || this.socket?.readyState !== WebSocket.OPEN) {
+        return reject(new Error("WebSocket连接已断开，请重新执行任务"));
+      }
+      // 为此请求生成唯一的seq值
+      const requestSeq = ++this.seq;
+
+      // 设置 Promise 状态，使用seq作为键
+      const request = { resolve, reject, originalCmd: cmd, seq: requestSeq };
+      this.promises[requestSeq] = request;
+
+      // 超时处理
+      const timer = setTimeout(() => {
+        this._rejectRequest(
+          request.seq,
+          new Error(`请求超时: ${cmd} (${timeoutMs}ms)`),
+        );
+      }, timeoutMs);
+      request.timer = timer;
+
+      try {
+        this.send(cmd, params, { request });
+      } catch (error) {
+        this._rejectRequest(requestSeq, error);
+      }
+    });
+  }
  
    /** 发送心跳 */
    sendHeartbeat() {
@@ -490,97 +560,150 @@
  
    /** 设置心跳 */
    _setupHeartbeat() {
-     // 延迟3秒后开始发送第一个心跳，避免连接刚建立就发送
-     setTimeout(() => {
-       if (this.connected && this.socket?.readyState === WebSocket.OPEN) {
-         wsLogger.debug('开始发送首次心跳')
-         this.sendHeartbeat()
-       }
-     }, 3000)
- 
-     // 设置定期心跳
-     this.heartbeatTimer = setInterval(() => {
-       if (this.connected && this.socket?.readyState === WebSocket.OPEN) {
-         this.sendHeartbeat()
-       } else {
-         wsLogger.warn('心跳检查失败: 连接状态异常')
-       }
-     }, this.heartbeatInterval)
-   }
+    // 延迟3秒后开始发送第一个心跳，避免连接刚建立就发送
+    const socket = this.socket;
+    const heartbeatTimer = setTimeout(() => {
+      if (this.heartbeatStartTimer !== heartbeatTimer) return;
+      this.heartbeatStartTimer = null;
+      if (
+        this.socket === socket &&
+        this.connected &&
+        socket?.readyState === WebSocket.OPEN
+      ) {
+        wsLogger.debug("开始发送首次心跳");
+        this.sendHeartbeat();
+      }
+    }, 3000);
+    this.heartbeatStartTimer = heartbeatTimer;
+
+    // 设置定期心跳
+    this.heartbeatTimer = setInterval(() => {
+      if (
+        this.socket === socket &&
+        this.connected &&
+        socket?.readyState === WebSocket.OPEN
+      ) {
+        this.sendHeartbeat();
+      } else {
+        wsLogger.warn("心跳检查失败: 连接状态异常");
+      }
+    }, this.heartbeatInterval);
+  }
  
    /** 队列处理循环 */
    _processQueueLoop() {
-     if (this.sendQueueTimer) clearInterval(this.sendQueueTimer)
- 
-     this.sendQueueTimer = setInterval(async () => {
-       if (!this.sendQueue.length) return
-       if (!this.connected || this.socket?.readyState !== WebSocket.OPEN) return
- 
-       const task = this.sendQueue.shift()
-       if (!task) return
-        
-       try {
-         // 直接使用任务指定的 seq（已在入队时分配）
-         const raw = this.registry.build(task.cmd, this.ack, task.seq, task.params)
-         // 发送前日志（仅标准五段）
-         if (raw && raw.cmd !== 'war_ping') {
-           const decodedBody = this.decodeBodyForLog(raw.body)
-           wsLogger.info('📤 发送报文', {
-             cmd: raw.cmd,
-             hint: raw.hint ?? 0,
-             ack: raw.ack ?? 0,
-             seq: raw.seq ?? 0,
-             time: raw.time,
-             body: decodedBody ?? formatBodyForLog(raw.body)
-           })
-         }
- 
-         // 编码并发送
-         const bin = this.registry.encodePacket(raw)
-         this.socket?.send(bin)
-         if (this.showMsg || task.cmd === "heart_beat") {
-           wsLogger.wsMessage('local', task.cmd, false)
-           if (this.showMsg) {
-             wsLogger.verbose('原始数据:', raw)
-             wsLogger.verbose('编码后数据:', bin)
-             wsLogger.verbose('编码类型:', typeof bin, bin instanceof Uint8Array ? 'Uint8Array (加密)' : 'String (明文)')
-             if (bin instanceof Uint8Array && bin.length > 0) {
-               wsLogger.verbose(`加密验证: 前8字节 [${Array.from(bin.slice(0, 8)).join(', ')}]`)
-             }
-           }
-         }
- 
-         // 触发发送回调
-         if (task.onSent) {
-           try {
-             const meta = {
-               respKey: task.respKey,
-               cmd: task.cmd,
-               seq: raw?.seq ?? task.seq,
-               ack: raw?.ack ?? this.ack,
-               time: raw?.time ?? Date.now()
-             }
-             task.onSent(meta)
-           } catch (error) {
-             wsLogger.warn('发送回调执行失败:', error)
-           }
-         }
- 
-         // 可选延时
-         if (task.sleep) await sleep(task.sleep)
- 
-       } catch (error) {
-         wsLogger.error(`发送消息失败: ${task.cmd}`, error)
-       }
-     }, 50)
-   }
+    if (this.sendQueueTimer) clearInterval(this.sendQueueTimer);
+
+    const socket = this.socket;
+    this.sendQueueTimer = setInterval(async () => {
+      if (!this.sendQueue.length) return;
+      if (
+        this.socket !== socket ||
+        !this.connected ||
+        socket?.readyState !== WebSocket.OPEN
+      )
+        return;
+
+      const task = this.sendQueue.shift();
+      if (!task) return;
+      const request = task.request;
+      if (request && this.promises[request.seq] !== request) return;
+      // Server sequences must be contiguous: cancelled or failed unsent commands use no number.
+      const wireSeq =
+        task.cmd === "heart_beat" && !request ? 0 : this.wireSeq + 1;
+
+      try {
+        // Reserve a server sequence only for this actual send attempt.
+        const raw = this.registry.build(
+          task.cmd,
+          this.ack,
+          wireSeq,
+          task.params,
+        );
+        // 发送前日志（仅标准五段）
+        if (raw && raw.cmd !== "war_ping") {
+          const decodedBody = this.decodeBodyForLog(raw.body);
+          wsLogger.info("📤 发送报文", {
+            cmd: raw.cmd,
+            hint: raw.hint ?? 0,
+            ack: raw.ack ?? 0,
+            seq: raw.seq ?? 0,
+            time: raw.time,
+            body: decodedBody ?? formatBodyForLog(raw.body),
+          });
+        }
+
+        // 编码并发送
+        const bin = this.registry.encodePacket(raw);
+        if (
+          this.socket !== socket ||
+          !this.connected ||
+          socket.readyState !== WebSocket.OPEN
+        ) {
+          throw new Error("WebSocket 连接已关闭");
+        }
+        if (request) {
+          delete this.promises[request.seq];
+          request.seq = wireSeq;
+          this.promises[wireSeq] = request;
+        }
+        socket.send(bin);
+        if (wireSeq !== 0) this.wireSeq = wireSeq;
+        if (this.showMsg || task.cmd === "heart_beat") {
+          wsLogger.wsMessage("local", task.cmd, false);
+          if (this.showMsg) {
+            wsLogger.verbose("原始数据:", raw);
+            wsLogger.verbose("编码后数据:", bin);
+            wsLogger.verbose(
+              "编码类型:",
+              typeof bin,
+              bin instanceof Uint8Array ? "Uint8Array (加密)" : "String (明文)",
+            );
+            if (bin instanceof Uint8Array && bin.length > 0) {
+              wsLogger.verbose(
+                `加密验证: 前8字节 [${Array.from(bin.slice(0, 8)).join(", ")}]`,
+              );
+            }
+          }
+        }
+
+        // 触发发送回调
+        if (task.onSent) {
+          try {
+            const meta = {
+              respKey: task.respKey,
+              cmd: task.cmd,
+              seq: raw?.seq ?? task.seq,
+              ack: raw?.ack ?? this.ack,
+              time: raw?.time ?? Date.now(),
+            };
+            task.onSent(meta);
+          } catch (error) {
+            wsLogger.warn("发送回调执行失败:", error);
+          }
+        }
+
+        // 可选延时
+        if (task.sleep) await sleep(task.sleep);
+      } catch (error) {
+        if (request) this._rejectRequest(request.seq, error);
+        wsLogger.error(`发送消息失败: ${task.cmd}`, error);
+      }
+    }, 50);
+  }
  
    /** 处理 Promise 响应 */
    _handlePromiseResponse(packet) {
+    const responseId = packet.resp ?? packet?._raw?.resp;
+    const hasSequence = typeof responseId === "number" ||
+      (typeof responseId === "string" && /^\d+$/.test(responseId));
+    if (hasSequence && !this.promises[responseId]) return;
+
      // 优先使用resp字段进行响应匹配（新的正确方式）
-     if (packet.resp !== undefined && this.promises[packet.resp]) {
-       const promiseData = this.promises[packet.resp]
-       delete this.promises[packet.resp]
+     if (responseId !== undefined && this.promises[responseId]) {
+       const promiseData = this.promises[responseId]
+       clearTimeout(promiseData.timer);
+       delete this.promises[responseId]
  
        // 获取响应数据，优先使用 rawData（ProtoMsg 自动解码），然后 decodedBody（手动解码），最后 body
        const responseBody = packet.rawData !== undefined ? packet.rawData :
@@ -672,6 +795,7 @@
      for (const [requestId, promiseData] of Object.entries(this.promises)) {
        // 检查 Promise 是否匹配当前响应的任一原始命令
        if (originalCmds.includes(promiseData.originalCmd)) {
+         clearTimeout(promiseData.timer);
          delete this.promises[requestId]
  
          // 获取响应数据，优先使用 rawData（ProtoMsg 自动解码），然后 decodedBody（手动解码），最后 body
@@ -691,16 +815,42 @@
  
    /** 清理定时器 */
    _clearTimers() {
-     if (this.heartbeatTimer) {
-       clearInterval(this.heartbeatTimer)
-       this.heartbeatTimer = null
-     }
-     if (this.sendQueueTimer) {
-       clearInterval(this.sendQueueTimer)
-       this.sendQueueTimer = null
-     }
-   }
- }
+    this.sendQueue.length = 0;
+    for (const field of [
+      "heartbeatStartTimer",
+      "reconnectTimer",
+      "reconnectResetTimer",
+      "dialogResetTimer",
+    ]) {
+      clearTimeout(this[field]);
+      this[field] = null;
+    }
+    this.isReconnecting = false;
+    this.dialogStatus = false;
+    for (const [id, request] of Object.entries(this.promises)) {
+      clearTimeout(request.timer);
+      delete this.promises[id];
+      request.reject(new Error("WebSocket连接已断开，请重新执行任务"));
+    }
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.sendQueueTimer) {
+      clearInterval(this.sendQueueTimer);
+      this.sendQueueTimer = null;
+    }
+  }
+
+  _rejectRequest(requestSeq, error) {
+    const request = this.promises[requestSeq];
+    if (!request) return;
+    clearTimeout(request.timer);
+    delete this.promises[requestSeq];
+    this.sendQueue = this.sendQueue.filter((task) => task.request !== request);
+    request.reject(error);
+  }
+}
  
  /** 默认导出 */
 export default XyzwLegionWarWebSocketClient

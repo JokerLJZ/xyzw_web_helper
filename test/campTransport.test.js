@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import fs from "node:fs/promises";
 const source = (await fs.readFile(new URL("../src/utils/xyzwWebSocket.js", import.meta.url), "utf8")).replace(/^import .*;$/gm, "");
-const prelude = `const $CacheManager = { getCache: () => ({}) };
+const prelude = `const WebSocket = { OPEN: 1 };
+const $CacheManager = { getCache: () => ({}) };
 const bonProtocol = {}, g_utils = {};
 const wsLogger = new Proxy({}, {get: () => () => {}}), gameLogger = wsLogger;`;
 const { XyzwWebSocketClient } = await import(`data:text/javascript;base64,${Buffer.from(prelude + source).toString("base64")}`);
@@ -10,7 +11,7 @@ const { XyzwWebSocketClient } = await import(`data:text/javascript;base64,${Buff
 test("营地领奖注册发送并按专用响应匹配，服务器时间按连接隔离", async () => {
   const a = new XyzwWebSocketClient({ url: "wss://test-a", utils: {} });
   const b = new XyzwWebSocketClient({ url: "wss://test-b", utils: {} });
-  a.connected = true;
+  a.connected = true; a.socket = { readyState: 1, close() {} };
   const pending = a.sendWithPromise("club_taskclaim", { confId: 5 }, 1000);
   assert.equal(a.sendQueue[0].cmd, "club_taskclaim");
   assert.deepEqual(a.sendQueue[0].params, { confId: 5 });

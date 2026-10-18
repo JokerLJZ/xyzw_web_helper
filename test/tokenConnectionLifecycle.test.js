@@ -29,6 +29,7 @@ function fixture() {
     attemptTokenRefresh: async id => { refreshes.push(id); },
     handleGameMessage: () => {},
     localStorage: { removeItem() {} },
+    clearTimeout() {},
     setTimeout: callback => queueMicrotask(callback),
     XyzwWebSocketClient: class {
       constructor() { clients.push(this); this.connected = false; }
