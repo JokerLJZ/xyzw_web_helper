@@ -122,16 +122,42 @@ export const runBlackMarketPurchase = async ({ send, settings }) => {
     }
   };
 
+  let refreshCount = 0;
+  let refreshExhausted = false;
   await purchaseCurrentRound();
   for (let index = 0; index < normalized.blackMarketRefreshCount; index++) {
-    lastResult = await send("store_refresh", { storeId: 1 });
+    try {
+      lastResult = await send("store_refresh", { storeId: 1 });
+    } catch (error) {
+      const exhausted = !error.interrupted && (Number(error.code ?? error.errorCode) === 1300030 ||
+        /(?:^|\D)1300030(?:\D|$)/.test(error.message || ""));
+      if (!exhausted) throw error;
+      // Never infer completion from a refresh rejection alone: verify current stock.
+      const current = await send("store_goodslist", { storeId: 1 });
+      const goods = current?.goodsList;
+      if (!goods || typeof goods !== "object" || !Object.keys(goods).length ||
+          !BLACK_MARKET_ITEMS.every(item => {
+            const good = goods[item.goodsId];
+            return !good || (normalizeActualDiscount(good.discount) !== null &&
+              Number.isFinite(Number(good.buy_quantity ?? good.buyQuantity ?? 0)) &&
+              Number(good.buy_quantity ?? good.buyQuantity ?? 0) >= 0);
+          }))
+        throw new Error("黑市刷新次数已用完，但商品状态未能确认");
+      if (selectDiscountPurchases(current, normalized).length)
+        throw new Error("黑市刷新次数已用完，但仍有符合折扣设置的商品未购买");
+      lastResult = current;
+      refreshExhausted = true;
+      break;
+    }
+    refreshCount++;
     await purchaseCurrentRound();
   }
 
   return {
     mode: BLACK_MARKET_MODES.DISCOUNT,
     purchases,
-    refreshCount: normalized.blackMarketRefreshCount,
+    refreshCount,
+    ...(refreshExhausted ? { status: "completed", reason: "黑市刷新次数已用完，符合折扣设置的商品均已买完", refreshExhausted: true } : {}),
     result: purchaseResults.at(-1) || lastResult,
   };
 };

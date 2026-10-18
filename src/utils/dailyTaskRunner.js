@@ -447,6 +447,10 @@ export class DailyTaskRunner {
         this.log(`${description || "领取通行证奖励"}：当前没有可领取的奖励，正常跳过`);
         return { status: "skipped", reason: "通行证当前没有可领取的奖励" };
       }
+      if (cmd === "store_refresh" && getServerErrorCode(error) === 1300030) {
+        this.logDetail("黑市刷新次数已用完，继续核对当前商品");
+        throw error;
+      }
       if (description) {
         const token = this.tokenStore.gameTokens.find((t) => t.id === tokenId);
         const tokenName = token?.name || tokenId;

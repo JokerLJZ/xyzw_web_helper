@@ -220,3 +220,58 @@ test("批量旧采购与折扣直购是两个互不切换的任务", async () =>
     { cmd: "store_buy", params: { goodsId: 1 } },
   ]);
 });
+
+test("刷新用尽后复查确认符合阈值商品已购，正常完成且不重发刷新", async () => {
+  const calls = [];
+  let bought = false;
+  const result = await runBlackMarketPurchase({
+    settings: { blackMarketPurchaseMode: "discount", blackMarketRefreshCount: 10 },
+    send: async cmd => {
+      calls.push(cmd);
+      if (cmd === "store_goodslist") return { goodsList: { 1: { discount: 0.5, buy_quantity: bought ? 1 : 0 }, 2: { discount: 0.9 } } };
+      if (cmd === "store_buy") { bought = true; return {}; }
+      throw Object.assign(new Error("服务器错误: 1300030 - 刷新次数超过上限"), { code: 1300030 });
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.refreshCount, 0);
+  assert.deepEqual(calls, ["store_goodslist", "store_buy", "store_refresh", "store_goodslist"]);
+});
+
+test("刷新上限不能掩盖剩余商品、查询失败、未知状态或其他服务器错误", async () => {
+  for (const scenario of ["remaining", "missing", "query", "other", "buy"]) {
+    let reads = 0;
+    await assert.rejects(runBlackMarketPurchase({
+      settings: { blackMarketPurchaseMode: "discount" },
+      send: async cmd => {
+        if (cmd === "store_goodslist") {
+          reads++;
+          if (reads === 2 && scenario === "query") throw new Error("核对超时");
+          if (reads === 2 && scenario === "missing") return {};
+          return { goodsList: { 1: { discount: scenario === "buy" || (reads === 2 && scenario === "remaining") ? 0.5 : 0.9 } } };
+        }
+        if (cmd === "store_buy") throw new Error("购买失败");
+        throw new Error(`服务器错误: ${scenario === "other" ? 200020 : 1300030}`);
+      },
+    }));
+  }
+});
+
+test("日常刷新上限经商品核对后不产生失败日志", async () => {
+  const { DailyTaskRunner } = await import("../src/utils/dailyTaskRunner.js");
+  const runner = new DailyTaskRunner({
+    gameTokens: [{ id: "a", name: "测试账号" }],
+    sendMessageWithPromise: async (_id, cmd) => {
+      if (cmd === "store_refresh") throw new Error("服务器错误: 1300030 - 刷新次数超过上限");
+      return { goodsList: { 1: { discount: 0.5, buy_quantity: 1 } } };
+    },
+  }, { commandDelay: 0 });
+  const logs = [];
+  runner.callbacks = { onLog: entry => logs.push(entry) };
+  const result = await runBlackMarketPurchase({
+    settings: { blackMarketPurchaseMode: "discount" },
+    send: (cmd, params) => runner.executeGameCommand("a", cmd, params, "黑市折扣直购"),
+  });
+  assert.equal(result.status, "completed");
+  assert.ok(logs.every(log => log.type !== "error"));
+});
