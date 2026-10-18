@@ -284,10 +284,21 @@ export async function runRechargeStandard({ send, config, now = Date.now, log = 
       const day = Math.min(rows.length, Math.floor((dayStart(now()) - dayStart(card.start * 1000)) / DAY) + 1);
       if (last < day) {
         active(card);
-        await send("common_claimcardreward", { activityId: card.id });
-        info = commonInfo(await send("activity_get", {}));
-        const updated = Math.max(0, ...rows.filter(row => mapGet(recordsFor(info, card.id), row.id)).map(row => row.dayNum));
-        if (updated <= last) throw new Error("已购福卡权益领取未确认");
+        let notReady = false;
+        try {
+          await send("common_claimcardreward", { activityId: card.id });
+        } catch (error) {
+          const code = Number(error.code ?? error.errorCode) ||
+            Number(String(error.message || "").match(/(?:服务器错误:\s*|服务器返回错误)(\d+)/)?.[1]);
+          if (error.stopped || code !== 4700020) throw error;
+          notReady = true;
+          log("福卡奖励领取时间未到，正常跳过，继续其他免费奖励");
+        }
+        if (!notReady) {
+          info = commonInfo(await send("activity_get", {}));
+          const updated = Math.max(0, ...rows.filter(row => mapGet(recordsFor(info, card.id), row.id)).map(row => row.dayNum));
+          if (updated <= last) throw new Error("已购福卡权益领取未确认");
+        }
       }
     }
     const charge = event.byType(3);

@@ -179,3 +179,27 @@ test("公共预设清单按当前manifest配置生成中文物品、成本和顺
   assert.equal(calls[0][1].cache, "no-store");
   assert.equal(catalog.stock, undefined);
 });
+
+test("福卡4700020未到领取时间正常跳过，继续累计充值免费档；其他错误仍失败", async () => {
+  for (const code of [4700020, 200020]) {
+    const config = base(); config.ActFestivalConf[3] = act(14, 1);
+    config.FuKaActConf = { 1: { id: 401, actId: 14, dayNum: 1 } };
+    config.CumulativeChargeActConf = { 1: { id: 301, actId: 12, chargeAmount: 0 } };
+    const info = { 14: { isBought: true, record: {} }, 12: { record: {} } };
+    const calls = [], logs = [];
+    const result = await runRechargeStandard({ config, now: () => NOW, log: text => logs.push(text),
+      send: async (cmd, params) => {
+        calls.push(cmd);
+        if (cmd === "common_claimcardreward") throw new Error(`服务器错误: ${code} - 福卡奖励的领取时间未到`);
+        if (cmd === "common_claimtotalreward") info[12].record[301] = 1;
+        return { activity: { commonActivityInfo: clone(info) } };
+      },
+    });
+    assert.equal(result.status, code === 4700020 ? "completed" : "failed");
+    assert.equal(calls.filter(cmd => cmd === "common_claimcardreward").length, 1);
+    if (code === 4700020) {
+      assert.ok(calls.includes("common_claimtotalreward"));
+      assert.ok(logs.some(text => text.includes("正常跳过")));
+    }
+  }
+});
