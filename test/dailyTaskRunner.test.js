@@ -19,6 +19,7 @@ const definitions = [
   completeValue,
 }));
 const config = {
+  legionStore: { 5: { coin: 4, itemID: 1019, price: 100 }, 6: { coin: 4, itemID: 1019, price: 40 } },
   tasks: definitions,
   constants: { arenaStarTime: 21600, arenaOverTime: 79200, DailyFreeFishing: 3 },
   bossLoop: Object.fromEntries([1,2,3,4,5,6,7].map(day => [day, { monsters: [9905] }])),
@@ -54,6 +55,7 @@ function fixture(progress = {}) {
   let connected = true;
   let readFailure = false;
   const role = {
+    items: { 1019: { quantity: 100 } },
     dailyTask: {
       dailyTime: 1700000000,
       complete: {
@@ -1175,6 +1177,8 @@ test("业务错误后也保持查询/操作间隔，阵容恢复仍可执行", a
 for (const [cmd, params, code] of [
   ['fight_startlegionboss', {}, 2300070],
   ['legion_signin', {}, 2300070],
+  ['legion_storebuygoods', { id: 5 }, 400000],
+  ['legion_storebuygoods', { id: 6 }, 400000],
   ['legion_storebuygoods', { id: 6 }, 400010],
   ['legion_storebuygoods', { id: 5 }, 400010],
   ['legion_storebuygoods', { id: 6 }, 2300370],
@@ -1197,6 +1201,7 @@ for (const [cmd, params, code] of [
 
 test('unrelated purchase errors and missing club on other commands remain failures', async () => {
   for (const [cmd, params, code] of [
+    ['store_purchase', {}, 400000], ['legion_storebuygoods', { id: 1 }, 400000],
     ['store_purchase', {}, 200020], ['store_buy', {}, 1300050],
     ['legion_storebuygoods', { id: 1 }, 400010], ['role_getroleinfo', {}, 2300070],
   ]) {
@@ -1217,4 +1222,27 @@ test('empty black market procurement excludes pending progress from incomplete r
   assert.equal(result.dailyIncomplete, 0);
   assert.ok(!result.reasons.some(reason => /黑市/.test(reason)));
   assert.ok(!result.planIssues?.some(issue => /黑市/.test(issue.task)));
+});
+
+for (const quantity of [undefined, 0, 99]) {
+  test(`白玉采购盐锭库存${quantity}正常跳过且不发送购买`, async () => {
+    const f = fixture();
+    f.store.sendGetRoleInfo = async () => ({ role: { items: quantity === undefined ? {} : { 1019: { quantity } } } });
+    const result = await f.runner().runWhiteJadePurchase('account-a');
+    assert.equal(result.status, 'skipped');
+    assert.match(result.reason, /盐锭不足/);
+    assert.ok(!f.calls.some(call => call.cmd === 'legion_storebuygoods'));
+  });
+}
+test('盐锭充足时白玉采购400000也正常跳过', async () => {
+  const f = fixture();
+  f.store.sendMessageWithPromise = async () => { throw Object.assign(new Error('物品不存在'), { code: 400000 }); };
+  const result = await f.runner().runWhiteJadePurchase('account-a');
+  assert.equal(result.status, 'skipped');
+  assert.match(result.reason, /400000/);
+});
+test('缺少完整库存时不将未知状态当作盐锭不足', async () => {
+  const f = fixture();
+  f.store.sendGetRoleInfo = async () => ({ role: {} });
+  await assert.rejects(f.runner().runWhiteJadePurchase('account-a'), /库存不完整/);
 });

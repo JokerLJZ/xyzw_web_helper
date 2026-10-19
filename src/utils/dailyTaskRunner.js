@@ -450,6 +450,7 @@ export class DailyTaskRunner {
         if (["fight_startlegionboss", "legion_signin"].includes(cmd) && code === 2300070)
           reason = "角色未加入俱乐部";
         if (cmd === "legion_storebuygoods" && [5, 6].includes(params.id)) {
+          if (code === 400000) reason = "服务器返回物品不存在（400000）";
           if (code === 400010) reason = "购买所需盐锭不足";
           if (code === 2300370) reason = "本周商品购买数量已达上限";
         }
@@ -856,6 +857,26 @@ export class DailyTaskRunner {
   }
 
   async runClubResourcePurchase(tokenId, id, name) {
+    const config = this.taskConfig || await this.loadConfig(this.tokenStore, tokenId);
+    const goods = config.legionStore?.[id];
+    if (!goods || goods.coin !== 4 || !Number.isSafeInteger(goods.itemID) ||
+      !Number.isFinite(goods.price) || goods.price <= 0)
+      throw new Error("俱乐部商品消耗配置无效，无法确认购买条件");
+    // Read a full account snapshot: an omitted item in a patch is not zero stock.
+    const response = await this.sendRequest(tokenId, () =>
+      this.tokenStore.sendGetRoleInfo(tokenId, {}, 2),
+    );
+    const role = response?.role;
+    if (!role?.items || typeof role.items !== "object" || Array.isArray(role.items))
+      throw new Error("角色库存不完整，无法确认购买条件");
+    const quantity = role.items[goods.itemID]?.quantity ?? (role.items[goods.itemID] === undefined ? 0 : NaN);
+    if (!Number.isFinite(quantity) || quantity < 0)
+      throw new Error("购买所需物品库存无效");
+    if (quantity < goods.price) {
+      const reason = `购买所需盐锭不足（${quantity}/${goods.price}）`;
+      this.log(`购买${name}：正常跳过（${reason}）`, "info");
+      return { status: "skipped", reason };
+    }
     const result = await this.executeGameCommand(
       tokenId, "legion_storebuygoods", { id }, `购买${name}`, 5000,
     );
