@@ -15,7 +15,7 @@ for (const [name, format] of [
     assert.match(result.title, /⚠️.*执行结束/);
     assert.match(result.content, /待补账号：日常.*未取得明确完成结果/);
     assert.match(result.content, /停止账号：日常.*任务已停止/);
-    assert.doesNotMatch(result.content, /完成账号/);
+    assert.match(result.content, /本次执行账号清单：\n- 完成账号\n- 待补账号\n- 停止账号/);
     assert.match(result.content, /未完成任务/);
     assert.match(format([{name:"完成账号",status:"completed"}]).title, /✅.*完成/);
   });
@@ -59,7 +59,7 @@ for (const [name, format] of [
     assert.match(report.title, /⚠️.*执行结束/);
     assert.doesNotMatch(report.content, /未达标.*失败/);
   });
-  test(`${name}只展示未完成任务和短原因，不携带日志、堆栈或成功清单`, () => {
+  test(`${name}展示执行账号和短原因，不携带日志或堆栈`, () => {
     const reason = "逐鹿盐山助威与竞猜：领取赛程74队伍A10000037竞猜奖励结果未确认：领取赛程74队伍A10000037竞猜奖励失败：服务器错误: 200020 - 出了点小问题，请尝试重启游戏解决～，已停止，重新执行会先查询状态\n08:01:02 开始自动梦境\n at runAccount (apex.js:172)";
     const report = format([
       { name: "火柴-服务员", status: "completed", warnings: [reason, reason] },
@@ -68,8 +68,8 @@ for (const [name, format] of [
     ]);
     assert.match(report.content, /火柴-服务员：逐鹿盐山助威与竞猜：服务器异常（200020），执行结果未确认/);
     assert.match(report.content, /其他账号：梦境：请求超时，执行结果未确认/);
-    assert.equal(report.content.match(/火柴-服务员/g).length, 1);
-    assert.doesNotMatch(report.content, /正常账号|赛程74|A10000037|重启|6秒|08:01|runAccount|后续日志|开始自动梦境/);
+    assert.equal(report.content.match(/火柴-服务员/g).length, 2);
+    assert.doesNotMatch(report.content, /赛程74|A10000037|重启|6秒|08:01|runAccount|后续日志|开始自动梦境/);
   });
   test(`${name}未知长原因限制长度，保留所有未完成任务`, () => {
     const report = format([{ name: "账号", status: "failed", reasons: ["任务甲：" + "原因".repeat(100), "任务乙：未达到执行条件"] }]);
@@ -79,7 +79,21 @@ for (const [name, format] of [
   });
 }
 
-test("全成功通知仅保留数量，不列出成功账号或调度信息", () => {
+test("全成功通知包含本次账号清单，不列调度信息", () => {
   const report = formatScheduledTaskNotification("日常", [{ name: "完成账号", status: "completed" }], new Date(), [{ name: "后续计划", startTime: new Date() }]);
-  assert.equal(report.content, "成功 1/1 个账号。");
+  assert.equal(report.content, "成功 1/1 个账号。\n\n本次执行账号清单：\n- 完成账号");
+});
+
+
+test("账号清单只列本次结果，保留同名账号且名称换行不破坏列表", () => {
+  const report = formatBatchTaskNotification([
+    { name: "同名", status: "completed" },
+    { name: "同名", status: "failed" },
+    { name: "账号\n备注", status: "skipped" },
+  ]);
+  assert.match(report.content, /本次执行账号清单：\n- 同名\n- 同名\n- 账号 备注$/);
+});
+
+test("空批次不添加虚构账号清单", () => {
+  assert.doesNotMatch(formatBatchTaskNotification([]).content, /本次执行账号清单/);
 });

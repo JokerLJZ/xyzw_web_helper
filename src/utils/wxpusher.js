@@ -225,10 +225,14 @@ function formatTaskReport(taskName, tokenResults, scheduled) {
     if (lines.length === 1) lines.push("", "未完成任务：");
     concise.forEach(reason => lines.push(`- ${String(result.name ?? "未知账号").replace(/[\r\n]+/g, " ")}：${reason}`));
   }
+  if (results.length) {
+    lines.push("", "本次执行账号清单：");
+    results.forEach(result => lines.push(`- ${String(result.name ?? "未知账号").replace(/[\r\n]+/g, " ")}`));
+  }
   return { title, content: lines.join("\n") };
 }
 
-/** 定时结果仅汇总账号、未完成任务和简要原因，不附日志或成功账号清单。 */
+/** 定时结果汇总本次账号清单、未完成任务和简要原因，不附完整日志。 */
 export function formatScheduledTaskNotification(taskName, tokenResults, startTime, upcomingTasks = null) {
   return formatTaskReport(taskName, tokenResults, true);
 }
