@@ -444,6 +444,22 @@ export class DailyTaskRunner {
           [200400, 12400000].includes(getServerErrorCode(error)))) {
         this.transportFailure = error;
       }
+      if (!error.interrupted) {
+        const code = getServerErrorCode(error);
+        let reason;
+        if (["fight_startlegionboss", "legion_signin"].includes(cmd) && code === 2300070)
+          reason = "角色未加入俱乐部";
+        if (cmd === "legion_storebuygoods" && [5, 6].includes(params.id)) {
+          if (code === 400010) reason = "购买所需盐锭不足";
+          if (code === 2300370) reason = "本周商品购买数量已达上限";
+        }
+        if (cmd === "store_purchase" && code === 1300050)
+          reason = "未配置有效的黑市采购清单或采购次数";
+        if (reason) {
+          this.log(`${description || cmd}：正常跳过（${reason}）`, "info");
+          return { status: "skipped", reason };
+        }
+      }
       if (cmd === "activity_recyclewarorderrewardclaim" && getServerErrorCode(error) === 3500020) {
         this.log(`${description || "领取通行证奖励"}：当前没有可领取的奖励，正常跳过`);
         return { status: "skipped", reason: "通行证当前没有可领取的奖励" };
@@ -832,59 +848,21 @@ export class DailyTaskRunner {
   }
 
   async runHolyBeastFragmentPurchase(tokenId) {
-    this.log("开始购买四圣碎片");
-
-    const result = await this.executeGameCommand(
-      tokenId,
-      "legion_storebuygoods",
-      { id: 6 },
-      "购买四圣碎片",
-      5000,
-    );
-
-    if (result?.error) {
-      if (result.error.includes("俱乐部商品购买数量超出上限")) {
-        this.log("本周已购买过四圣碎片，跳过", "info");
-        return;
-      }
-
-      if (result.error.includes("物品不存在")) {
-        this.log("盐锭不足或未加入军团，购买四圣碎片失败", "warning");
-        return;
-      }
-
-      throw new Error(result.error);
-    }
-
-    this.log("四圣碎片购买成功", "success");
+    return this.runClubResourcePurchase(tokenId, 6, "四圣碎片");
   }
 
   async runWhiteJadePurchase(tokenId) {
-    this.log("开始购买白玉");
+    return this.runClubResourcePurchase(tokenId, 5, "白玉");
+  }
 
+  async runClubResourcePurchase(tokenId, id, name) {
     const result = await this.executeGameCommand(
-      tokenId,
-      "legion_storebuygoods",
-      { id: 5 },
-      "购买白玉",
-      5000,
+      tokenId, "legion_storebuygoods", { id }, `购买${name}`, 5000,
     );
-
-    if (result?.error) {
-      if (result.error.includes("俱乐部商品购买数量超出上限")) {
-        this.log("本周已购买过白玉，跳过", "info");
-        return;
-      }
-
-      if (result.error.includes("物品不存在")) {
-        this.log("盐锭不足或未加入军团，购买白玉失败", "warning");
-        return;
-      }
-
-      throw new Error(result.error);
-    }
-
-    this.log("白玉购买成功", "success");
+    if (result?.status === "skipped") return result;
+    if (result?.error) throw new Error(result.error);
+    this.log(`${name}购买成功`, "success");
+    return result;
   }
 
   async runMondayResourcePurchase(tokenId) {

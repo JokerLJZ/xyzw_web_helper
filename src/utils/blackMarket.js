@@ -103,6 +103,7 @@ export const runBlackMarketPurchase = async ({ send, settings }) => {
   const normalized = normalizeBlackMarketSettings(settings);
   if (normalized.blackMarketPurchaseMode === BLACK_MARKET_MODES.LEGACY) {
     const result = await send("store_purchase", {});
+    if (result?.status === "skipped") return result;
     return { mode: BLACK_MARKET_MODES.LEGACY, purchases: [], result };
   }
 

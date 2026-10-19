@@ -1171,3 +1171,50 @@ test("业务错误后也保持查询/操作间隔，阵容恢复仍可执行", a
   await f.runner({ now: () => clock, sleep: async ms => { clock += ms; } }).run("account-a", {}, settings);
   for (let i = 1; i < sent.length; i++) assert.ok(sent[i].time - sent[i-1].time >= 500, `${sent[i-1].cmd} → ${sent[i].cmd}`);
 });
+
+for (const [cmd, params, code] of [
+  ['fight_startlegionboss', {}, 2300070],
+  ['legion_signin', {}, 2300070],
+  ['legion_storebuygoods', { id: 6 }, 400010],
+  ['legion_storebuygoods', { id: 5 }, 400010],
+  ['legion_storebuygoods', { id: 6 }, 2300370],
+  ['store_purchase', {}, 1300050],
+]) {
+  test(`${cmd}/${code} returns normal skip without failure logging`, async () => {
+    const f = fixture();
+    f.store.sendMessageWithPromise = async () => { throw new Error(`服务器错误: ${code}`); };
+    const runner = f.runner();
+    const logs = [];
+    runner.log = (message, type) => logs.push({ message, type });
+    const result = cmd === 'legion_storebuygoods'
+      ? await (params.id === 6 ? runner.runHolyBeastFragmentPurchase('account-a') : runner.runWhiteJadePurchase('account-a'))
+      : cmd === 'store_purchase' ? await runner.runBlackMarketTask('account-a')
+      : await runner.executeGameCommand('account-a', cmd, params, '测试步骤');
+    assert.equal(result.status, 'skipped');
+    assert.ok(logs.every(log => log.type !== 'error' && !log.message.includes('购买成功')));
+  });
+}
+
+test('unrelated purchase errors and missing club on other commands remain failures', async () => {
+  for (const [cmd, params, code] of [
+    ['store_purchase', {}, 200020], ['store_buy', {}, 1300050],
+    ['legion_storebuygoods', { id: 1 }, 400010], ['role_getroleinfo', {}, 2300070],
+  ]) {
+    const f = fixture();
+    f.store.sendMessageWithPromise = async () => { throw Object.assign(new Error('business rejection'), { code }); };
+    await assert.rejects(f.runner().executeGameCommand('account-a', cmd, params), /business rejection/);
+  }
+});
+
+test('empty black market procurement excludes pending progress from incomplete results', async () => {
+  const f = fixture({ 12: 0 });
+  const send = f.store.sendMessageWithPromise;
+  f.store.sendMessageWithPromise = async (id, cmd, params) => {
+    if (cmd === 'store_purchase') throw Object.assign(new Error('服务器错误: 1300050'), { code: 1300050 });
+    return send(id, cmd, params);
+  };
+  const result = await f.runner().run('account-a', {}, settings);
+  assert.equal(result.dailyIncomplete, 0);
+  assert.ok(!result.reasons.some(reason => /黑市/.test(reason)));
+  assert.ok(!result.planIssues?.some(issue => /黑市/.test(issue.task)));
+});
