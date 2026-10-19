@@ -6350,6 +6350,22 @@ export function createTasksItem(deps) {
           type: "info",
         });
       }
+      await waitForSmartBoxAction();
+      await runSmartBoxOperation(
+        token.name,
+        "领取宝箱周完成后的宝箱积分",
+        () => tokenStore.sendMessageWithPromise(
+          tokenId,
+          "item_batchclaimboxpointreward",
+          {},
+          HELPER_COMMAND_TIMEOUT_MS,
+        ),
+      );
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${token.name} ${description}完成后宝箱积分领取成功`,
+        type: "success",
+      });
       return claimResult;
     };
 

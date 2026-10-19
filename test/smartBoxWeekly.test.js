@@ -21,6 +21,8 @@ const createSmartBoxScenario = ({
   autoAdvanceRoundAt8000 = false,
   rejectSmallOpenWhenStockAtLeast10 = false,
   claimStateDelayQueries = 0,
+  finalPointError,
+  mailError,
 }) => {
   const tokenId = "token-1";
   const token = { id: tokenId, name: "测试账号" };
@@ -138,7 +140,9 @@ const createSmartBoxScenario = ({
         }
       }
 
+      if (cmd === "mail_claimallattachment" && mailError) throw mailError;
       if (cmd === "item_batchclaimboxpointreward") {
+        if (finalPointError && getCurrentCycleClaimCount() > completedRounds) throw finalPointError;
         const reward = claimRewards[rewardIndex++] || 0;
         items.set(2003, (items.get(2003) || 0) + reward);
       }
@@ -209,7 +213,7 @@ test("起始达到剩余分数一半的门槛后，直接开到8000分", async (
 
   await scenario.run();
 
-  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 0);
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 1);
   assert.equal(
     scenario.logs.some((entry) => entry.message.includes("服务器进度8000/8000")),
     true,
@@ -232,7 +236,7 @@ test("库存不足时先开完，再领取积分和邮件继续开到8000分", a
 
   await scenario.run();
 
-  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 2);
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 3);
   assert.equal(
     scenario.logs.some((entry) => entry.message.includes("选中宝箱积分2880")),
     true,
@@ -373,7 +377,7 @@ test("补足8000后服务端自动进入下一轮时立即领奖且不继续开�
     .reduce((total, item) => total + item.params.number, 0);
   assert.equal(openedCount, 60);
   assert.equal(countCommands(scenario.commands, "activity_claimweekactreward"), 1);
-  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 0);
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 1);
   assert.equal(
     scenario.logs.some((entry) =>
       entry.message.includes("立即领取并结束本轮"),
@@ -423,7 +427,7 @@ test("当前进度8000时不再开箱并领取当前轮奖励", async () => {
   await scenario.run();
 
   assert.equal(countCommands(scenario.commands, "item_openbox"), 0);
-  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 1);
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 2);
   const rewardCommand = scenario.commands.find(
     (item) => item.cmd === "activity_claimweekactreward",
   );
@@ -693,3 +697,33 @@ for (const rewardChoice of [1, 2, 3, 4, 5, 6]) {
     assert.equal(scenario.tokenStatus.value["token-1"], "completed");
   });
 }
+
+
+test("直接完成宝箱周后依次领取大奖、邮件和宝箱积分，不继续开箱", async () => {
+  const scenario = createSmartBoxScenario({ inventory: { 2004: 160 } });
+  await scenario.run();
+  const end = scenario.commands.findIndex(item => item.cmd === "activity_claimweekactreward");
+  const claims = scenario.commands.slice(end).filter(item => [
+    "activity_claimweekactreward", "mail_claimallattachment", "item_batchclaimboxpointreward", "item_openbox",
+  ].includes(item.cmd));
+  assert.deepEqual(claims.map(item => item.cmd), [
+    "activity_claimweekactreward", "mail_claimallattachment", "item_batchclaimboxpointreward",
+  ]);
+  assert.deepEqual(claims[2].params, {});
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
+
+test("宝箱周收尾积分领取失败不能报告完成，不盲目重试", async () => {
+  const scenario = createSmartBoxScenario({ inventory: { 2004: 160 }, finalPointError: new Error("请求超时") });
+  await scenario.run();
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 1);
+  assert.equal(scenario.tokenStatus.value["token-1"], "failed");
+  assert.ok(!scenario.logs.some(entry => entry.message.includes("完成后宝箱积分领取成功")));
+});
+
+test("宝箱周完成邮件无附件时仍领取宝箱积分", async () => {
+  const scenario = createSmartBoxScenario({ inventory: { 2004: 160 }, mailError: new Error("没有可领取的邮件附件") });
+  await scenario.run();
+  assert.equal(countCommands(scenario.commands, "item_batchclaimboxpointreward"), 1);
+  assert.equal(scenario.tokenStatus.value["token-1"], "completed");
+});
