@@ -1414,6 +1414,7 @@ export class DailyTaskRunner {
           : "WebSocket 已断开，停止执行并等待重新查询服务器状态",
       );
       error.interrupted = true;
+      error.connectionLost = !stopped;
       throw error;
     }
   }

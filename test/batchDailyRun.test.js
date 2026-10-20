@@ -240,3 +240,25 @@ test("补跑仍失败保留最终原因且不会开启第三轮", async () => {
   assert.match(f.state.notification.content, /失败第2次/);
   assert.doesNotMatch(f.state.notification.content, /失败第1次/);
 });
+
+for (const connectionLost of [true, false]) {
+  test(`实际批量入口：${connectionLost ? '断线进入补跑' : '主动停止不补跑'}`, async () => {
+    const f = fixture();
+    const ids = ['a', 'b', 'c', 'd'];
+    f.context.selectedTokens.value = ids;
+    f.context.tokens.value = ids.map(id => ({ id, name: id }));
+    const attempts = {};
+    f.context.DailyTaskRunner = class {
+      async run(id) {
+        attempts[id] = (attempts[id] || 0) + 1;
+        if (id === 'a' && attempts[id] === 1)
+          throw Object.assign(new Error(connectionLost ? 'WebSocket 已断开' : '用户停止'), { interrupted: true, connectionLost });
+        return { planIncomplete: 0 };
+      }
+    };
+    await f.startBatch();
+    assert.deepEqual(attempts, { a: connectionLost ? 2 : 1, b: 1, c: 1, d: 1 });
+    assert.equal(f.context.tokenStatus.value.a, connectionLost ? 'completed' : 'stopped');
+    if (connectionLost) assert.doesNotMatch(f.state.notification.content, /账号连接异常/);
+  });
+}

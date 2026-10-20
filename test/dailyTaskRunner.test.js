@@ -1263,3 +1263,12 @@ for (const code of [undefined, 200020]) {
     assert.equal(result.normalSkippedTasks, 1);
   });
 }
+
+test('断线中断与用户主动停止保留不同原因', () => {
+  const f = fixture();
+  const runner = f.runner();
+  f.disconnect();
+  assert.throws(() => runner.throwIfInterrupted('account-a'), error => error.interrupted === true && error.connectionLost === true);
+  runner.callbacks = { shouldStop: () => true };
+  assert.throws(() => runner.throwIfInterrupted('account-a'), error => error.interrupted === true && error.connectionLost === false);
+});

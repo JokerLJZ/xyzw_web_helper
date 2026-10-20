@@ -6652,8 +6652,8 @@ const executeScheduledTask = async (task) => {
             }
           } catch (error) {
             accountReasons.push(...(error.dailyReasons || [`${taskLabel(taskName)}：${error.message}`]));
-            accountTaskStatuses.push(error.interrupted ? "stopped" : "failed");
-            tokenStatus.value[tokenId] = error.interrupted ? "stopped" : "failed";
+            accountTaskStatuses.push(error.interrupted && !error.connectionLost ? "stopped" : "failed");
+            tokenStatus.value[tokenId] = error.interrupted && !error.connectionLost ? "stopped" : "failed";
             addLog({
               time: new Date().toLocaleTimeString(),
               message: `${tokenName} 任务 ${taskLabel(taskName)} 失败: ${error.message}`,
@@ -8511,8 +8511,8 @@ const startBatch = async () => {
       tokenTaskReasons.value[tokenId] = result.reasons || [];
     } catch (error) {
       tokenTaskReasons.value[tokenId] = error.dailyReasons || [`日常任务：${error.message}`];
-      tokenStatus.value[tokenId] = error.interrupted ? "stopped" : "failed";
-      addLog({ time: new Date().toLocaleTimeString(), message: `${token.name}: ${error.message}`, type: error.interrupted ? "warning" : "error" });
+      tokenStatus.value[tokenId] = error.interrupted && !error.connectionLost ? "stopped" : "failed";
+      addLog({ time: new Date().toLocaleTimeString(), message: `${token.name}: ${error.message}`, type: error.interrupted && !error.connectionLost ? "warning" : "error" });
     } finally {
       // 定时执行继续交给账号会话统一清理；普通执行只清理本次取得的连接。
       if (ownsSlot && !isScheduledTokenSession(tokenId)) {

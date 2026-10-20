@@ -83,3 +83,22 @@ test("用户停止或待继续不触发失败账号重跑", () => {
   assert.deepEqual(getBatchRetryTokenIds(["a", "b", "c", "d"], { a: "failed", b: "completed", c: "completed", d: "completed" }, true), []);
   assert.deepEqual(getBatchRetryTokenIds(["a", "b", "c", "d"], { a: "pending", b: "stopped", c: "completed", d: "completed" }), []);
 });
+
+for (const connectionLost of [true, false]) {
+  test(`定时子任务抛出中断：${connectionLost ? '断线补跑' : '主动停止不补跑'}`, async () => {
+    const f = fixture();
+    const ids = ['a', 'b', 'c', 'd'];
+    f.context.tokens.value = ids.map(id => ({ id, name: id }));
+    const attempts = {};
+    f.context.getScheduledTaskFunction = () => async () => {
+      const id = f.context.selectedTokens.value[0];
+      attempts[id] = (attempts[id] || 0) + 1;
+      if (id === 'a' && attempts[id] === 1)
+        throw Object.assign(new Error(connectionLost ? 'WebSocket 已断开' : '用户停止'), { interrupted: true, connectionLost });
+      f.context.tokenStatus.value[id] = 'completed';
+    };
+    await f.context.execute({ id: 'disconnect', name: '断线计划', selectedTokens: ids, selectedTasks: ['startBatch'], legacyExcludedTokens: [] });
+    assert.deepEqual(attempts, { a: connectionLost ? 2 : 1, b: 1, c: 1, d: 1 });
+    assert.equal(f.context.tokenStatus.value.a, connectionLost ? 'completed' : 'stopped');
+  });
+}
