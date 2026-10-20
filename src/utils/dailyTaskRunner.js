@@ -454,6 +454,8 @@ export class DailyTaskRunner {
           if (code === 400010) reason = "购买所需盐锭不足";
           if (code === 2300370) reason = "本周商品购买数量已达上限";
         }
+        if (cmd === "store_purchase" && code === 200020)
+          reason = "黑市采购返回200020，按设置正常跳过";
         if (cmd === "store_purchase" && code === 1300050)
           reason = "未配置有效的黑市采购清单或采购次数";
         if (reason) {
@@ -2297,6 +2299,11 @@ export class DailyTaskRunner {
     }
     await this.refreshServerRole(tokenId);
     const serverTasks = getDailyTaskStates(this.roleData, this.taskConfig);
+    // Black-market progress may stay at 0/1; the user treats this as a normal skip.
+    if (serverTasks.some(task => task.condition === 12 && task.status === "pending")) {
+      skippedConditions.add(12);
+      this.log("黑市购买：服务器进度尚未完成，正常跳过，不计入异常", "info");
+    }
     for (const state of serverTasks) {
       if (
         (attemptedConditions.has(state.condition) &&

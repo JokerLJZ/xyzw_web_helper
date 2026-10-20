@@ -1183,6 +1183,7 @@ for (const [cmd, params, code] of [
   ['legion_storebuygoods', { id: 5 }, 400010],
   ['legion_storebuygoods', { id: 6 }, 2300370],
   ['store_purchase', {}, 1300050],
+  ['store_purchase', {}, 200020],
 ]) {
   test(`${cmd}/${code} returns normal skip without failure logging`, async () => {
     const f = fixture();
@@ -1202,7 +1203,7 @@ for (const [cmd, params, code] of [
 test('unrelated purchase errors and missing club on other commands remain failures', async () => {
   for (const [cmd, params, code] of [
     ['store_purchase', {}, 400000], ['legion_storebuygoods', { id: 1 }, 400000],
-    ['store_purchase', {}, 200020], ['store_buy', {}, 1300050],
+    ['store_buy', {}, 200020], ['store_buy', {}, 1300050],
     ['legion_storebuygoods', { id: 1 }, 400010], ['role_getroleinfo', {}, 2300070],
   ]) {
     const f = fixture();
@@ -1246,3 +1247,19 @@ test('缺少完整库存时不将未知状态当作盐锭不足', async () => {
   f.store.sendGetRoleInfo = async () => ({ role: {} });
   await assert.rejects(f.runner().runWhiteJadePurchase('account-a'), /库存不完整/);
 });
+
+for (const code of [undefined, 200020]) {
+  test(`黑市进度0/1及采购${code ?? '成功'}不计入日常异常`, async () => {
+    const f = fixture({ 12: 0 });
+    const send = f.store.sendMessageWithPromise;
+    f.store.sendMessageWithPromise = async (...args) => {
+      if (args[1] === 'store_purchase' && code) throw Object.assign(new Error('服务器异常（200020）'), { code });
+      return send(...args);
+    };
+    const result = await f.runner().run('account-a', {}, settings);
+    assert.equal(result.dailyIncomplete, 0);
+    assert.ok(!result.reasons.some(reason => /黑市/.test(reason)));
+    assert.ok(!result.planIssues?.some(issue => /黑市/.test(issue.task)));
+    assert.equal(result.normalSkippedTasks, 1);
+  });
+}
