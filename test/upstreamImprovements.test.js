@@ -138,6 +138,7 @@ test("批量怪异塔在零能量时也补领奖，领奖失败时不会发战�
   for (const failure of [false, true]) {
     const { deps, calls, statuses } = storeScenario();
     deps.currentSettings = { towerFormation: 1 };
+    deps.loadWeirdTowerConfig = async () => ({});
     deps.message.success = () => {};
     deps.tokenStore.sendMessageWithPromise = async (_id, cmd, params) => {
       calls.push({ cmd, params });
@@ -147,7 +148,7 @@ test("批量怪异塔在零能量时也补领奖，领奖失败时不会发战�
       assert.fail(`不应该执行 ${cmd}`);
     };
     await createTasksTower(deps).climbWeirdTower();
-    assert.deepEqual(calls.map(item => item.cmd), ["presetteam_getinfo", "evotower_getinfo", "evotower_claimreward"]);
+    assert.deepEqual(calls.map(item => item.cmd), failure ? ["evotower_getinfo", "evotower_claimreward", "evotower_getinfo"] : ["evotower_getinfo", "evotower_claimreward"]);
     assert.equal(statuses.a, failure ? "failed" : "completed");
   }
 });
@@ -155,12 +156,15 @@ test("批量怪异塔在零能量时也补领奖，领奖失败时不会发战�
 test("自动怪异塔使用公用爬塔次数，达到配置后即使仍有体力也停止", async () => {
   const { deps, calls } = storeScenario();
   deps.batchSettings.weirdTowerClimbCount = 2;
+  deps.loadWeirdTowerConfig = async () => ({});
+  let towerId = 1;
   deps.currentSettings = { towerFormation: 1 };
   deps.message.success = () => {};
   deps.tokenStore.sendMessageWithPromise = async (_id, cmd, params) => {
     calls.push({ cmd, params });
     if (cmd === "presetteam_getinfo") return { presetTeamInfo: { useTeamId: 1 } };
-    if (cmd === "evotower_getinfo") return { evoTower: { towerId: 1, rewardTowerId: 0, energy: 100 } };
+    if (cmd === "evotower_getinfo") return { evoTower: { towerId, rewardTowerId: 0, energy: 100 } };
+    if (cmd === "evotower_fight") towerId++;
     return {};
   };
   await createTasksTower(deps).climbWeirdTower();

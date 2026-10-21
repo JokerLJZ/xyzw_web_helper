@@ -109,3 +109,26 @@ test("竞猜奖励按赛程和队伍发送，并匹配竞猜领取独立响应",
   client._handlePromiseResponse({cmd:"apex_guessclaimresp",body:{apexRoleInfo:{guessClaimMap:{124:{winner:true}}}}});
   assert.equal((await promise).apexRoleInfo.guessClaimMap[124].winner,true);client._clearTimers();
 });
+
+test("怪异塔新增领奖指令按真实注册器编码并匹配各自响应", async () => {
+  const cases = [
+    ["evotower_claimlegiontask", { taskId: 4 }, "evotower_claimlegiontaskresp", { evoTower: { legionTaskClaimMap: { 4: 1 } } }],
+    ["evotower_getshareinfo", {}, "evotower_getshareinforesp", { shareTask: { shareTaskMap: {} } }],
+    ["evotower_claimsharetaskreward", { taskId: 5 }, "evotower_claimsharetaskrewardresp", { shareTask: { shareTaskMap: { 2: { claimedProgress: 1 } } } }],
+    ["evotower_claimorderpassdailyreward", {}, "evotower_claimorderpassdailyrewardresp", { evoTower: { orderPassReward: { 261021: 1 } } }],
+    ["role_asyncclaimrewardv2", { type: "evoTowerShop", isAll: true, rewardId: "" }, "role_asyncclaimrewardv2resp", { type: "evoTowerShop", isAll: true }],
+    ["activity_battlepassrewardclaim", { battlePassId: 1003 }, "activity_battlepassrewardclaimresp", { activity: { warOrderActivityInfo: {} } }],
+  ];
+  for (const [cmd, params, responseCmd, body] of cases) {
+    const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+    client.connected = true; client.socket = { readyState: 1, close() {} };
+    try {
+      assert.deepEqual(client.registry.build(cmd, 0, 1, params).body, params);
+      const pending = client.sendWithPromise(cmd, params, 1000);
+      client.sendQueue.shift();
+      client._handlePromiseResponse({ cmd: responseCmd, body });
+      assert.deepEqual(await pending, body);
+      assert.equal(Object.keys(client.promises).length, 0);
+    } finally { client._clearTimers(); }
+  }
+});

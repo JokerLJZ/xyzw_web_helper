@@ -292,6 +292,12 @@ export function registerDefaultCommands(reg) {
     .register("mergebox_claimcostprogress", { actType: 1 })
     .register("mergebox_claimmergeprogress", { actType: 1 })
     .register("evotower_claimtask", { taskId: 1 })
+    .register("evotower_claimlegiontask")
+    .register("evotower_getshareinfo")
+    .register("evotower_claimsharetaskreward")
+    .register("evotower_claimorderpassdailyreward")
+    .register("role_asyncclaimrewardv2")
+    .register("activity_battlepassrewardclaim")
     .register("evotower_buyenergy", { energy: 1 })
     .register("tower_buyenergy", { buyNum: 1 })
 
@@ -1347,6 +1353,8 @@ export class XyzwWebSocketClient {
       fight_starttowerresp: "fight_starttower",
       evotowerinforesp: "evotower_getinfo",
       evotower_fightresp: "evotower_fight",
+      evotower_readyfightresp: "evotower_readyfight",
+      evotower_claimrewardresp: "evotower_claimreward",
       evotower_getlegionjoinmembersresp: "evotower_getlegionjoinmembers",
       mergeboxinforesp: "mergebox_getinfo",
       mergebox_claimfreeenergyresp: "mergebox_claimfreeenergy",
@@ -1356,6 +1364,12 @@ export class XyzwWebSocketClient {
       mergebox_claimcostprogressresp: "mergebox_claimcostprogress",
       mergebox_claimmergeprogressresp: "mergebox_claimmergeprogress",
       evotower_claimtaskresp: "evotower_claimtask",
+      evotower_claimlegiontaskresp: "evotower_claimlegiontask",
+      evotower_getshareinforesp: "evotower_getshareinfo",
+      evotower_claimsharetaskrewardresp: "evotower_claimsharetaskreward",
+      evotower_claimorderpassdailyrewardresp: "evotower_claimorderpassdailyreward",
+      role_asyncclaimrewardv2resp: "role_asyncclaimrewardv2",
+      activity_battlepassrewardclaimresp: "activity_battlepassrewardclaim",
       item_openpackresp: "item_openpack",
       equipment_quenchresp: "equipment_quench",
       rank_getserverrankresp: "rank_getserverrank",
