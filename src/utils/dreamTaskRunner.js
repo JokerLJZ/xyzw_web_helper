@@ -29,31 +29,17 @@ export function getDreamHeroes(dungeon) {
     .sort((a, b) => Number(b.attack || 0) - Number(a.attack || 0));
 }
 
-/** 通关后服务端会清空层数，但仍保留本期梦境商店。 */
+/** 官方 DungeonModule.isDungeonFinished：本期有效的负数 id 表示通关。 */
 export function isDreamCompleted(dungeon, period) {
   if (!dungeon || Number(dungeon.beginTime) !== Number(period)) return false;
+  const raw = dungeon.id;
+  if (typeof raw !== "number" && (typeof raw !== "string" || !raw.trim())) return false;
+  const floor = Number(raw);
+  return Number.isInteger(floor) && floor < 0;
+}
 
-  const rawFloor = dungeon.id;
-  const floor = Number(rawFloor);
-  // 部分已通关账号仍保留 id=200，但角色信息里的 merchant 可能会延迟到
-  // 下一次查询才出现。达到最终层本身已经足够证明通关。
-  if (Number.isInteger(floor) && floor >= DREAM_FINAL_FLOOR) return true;
-
-  // 抓包中 maxId 是已完成进度（例如 id=153、maxId=152）。
-  // 通关后当前挑战 id 可被重置为 0，仍应根据 maxId 转入采购。
-  const maxFloor = Number(dungeon.maxId);
-  if (Number.isInteger(maxFloor) && maxFloor >= DREAM_FINAL_FLOOR) return true;
-
-  // 服务端清空层数时，以仍保留的本期商店作为通关标记，避免把尚未
-  // 初始化的新期梦境误判为已通关。
-  if (!dungeon.merchant) return false;
-  return (
-    rawFloor === undefined ||
-    rawFloor === null ||
-    rawFloor === "" ||
-    !Number.isInteger(floor) ||
-    floor < 0
-  );
+export function formatDreamResult(result) {
+  return `自动梦境：${result.reason}${result.completed ? "" : `，当前层数 ${result.floor ?? "未知"}`}`;
 }
 
 /** 自动推层：只使用吕布，不消耗复活道具。 */
@@ -102,15 +88,29 @@ export async function runDreamAutoPush({
   };
   let role = initialRole?.dungeon ? initialRole : await fetchRole();
   let dungeon = role.dungeon;
+  const refreshUnknownFloor = async () => {
+    const raw = dungeon.id;
+    const valid = (typeof raw === "number" || (typeof raw === "string" && raw.trim()))
+      && Number.isInteger(Number(raw));
+    if (Number(dungeon.beginTime) === period && !valid) {
+      role = await fetchRole();
+      dungeon = role.dungeon;
+      const refreshed = dungeon.id;
+      if (refreshed == null || String(refreshed).trim() === "" ||
+          !["number", "string"].includes(typeof refreshed) || !Number.isInteger(Number(refreshed))) {
+        throw new Error("梦境层数无效");
+      }
+    }
+  };
+  const completedResult = (battles = 0, initialFloor = DREAM_FINAL_FLOOR) => ({
+    status: "stopped", completed: true,
+    reason: "梦境已通关，跳过推层，继续采购",
+    initialFloor, floor: DREAM_FINAL_FLOOR, battles,
+    merchant: dungeon.merchant || null,
+  });
+  await refreshUnknownFloor();
   if (isDreamCompleted(dungeon, period)) {
-    return {
-      status: "stopped",
-      reason: "梦境已通关，跳过推层，继续采购",
-      initialFloor: DREAM_FINAL_FLOOR,
-      floor: DREAM_FINAL_FLOOR,
-      battles: 0,
-      merchant: dungeon.merchant || null,
-    };
+    return completedResult();
   }
   if (Number(dungeon.beginTime) !== period || !Object.values(dungeon.battleTeam || {}).some((h) => h?.heroId)) {
     const battleTeam = { 0: DREAM_HERO_ID };
@@ -125,8 +125,10 @@ export async function runDreamAutoPush({
     dungeon = role.dungeon;
   }
   if (Number(dungeon.beginTime) !== period) throw new Error("服务端梦境期次尚未更新，停止推层");
+  await refreshUnknownFloor();
+  if (isDreamCompleted(dungeon, period)) return completedResult();
   const initialFloor = Number(dungeon.id);
-  if (!Number.isInteger(initialFloor) || initialFloor < 0) throw new Error("梦境层数无效");
+  if (dungeon.id == null || String(dungeon.id).trim() === "" || !Number.isInteger(initialFloor) || initialFloor < 0) throw new Error("梦境层数无效");
   const failures = new Map();
   let battles = 0;
   const result = (reason, floor = Number(dungeon.id)) => ({
@@ -169,15 +171,13 @@ export async function runDreamAutoPush({
         return result("服务器持续限频，无法核对战斗结果，停止推层并继续采购");
       }
       dungeon = role.dungeon;
+      await refreshUnknownFloor();
       if (isDreamCompleted(dungeon, period)) {
-        return result(
-          "梦境已通关，结束推层，继续采购",
-          DREAM_FINAL_FLOOR,
-        );
+        return completedResult(battles, initialFloor);
       }
       if (Number(dungeon.beginTime) !== period) throw new Error("梦境期次发生变化，停止推层");
       const floor = Number(dungeon.id);
-      if (!Number.isInteger(floor) || floor < before.floor) throw new Error("梦境层数异常，停止推层");
+      if (dungeon.id == null || String(dungeon.id).trim() === "" || !Number.isInteger(floor) || floor < before.floor) throw new Error("梦境层数异常，停止推层");
       const advanced = floor > before.floor || dungeon.currMonsterId !== before.monster;
       if (fightError && !advanced) {
         const code = errorCode(fightError);

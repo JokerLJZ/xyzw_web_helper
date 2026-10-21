@@ -10,6 +10,7 @@ import {
   isDreamEnabled,
   runDreamAutoPush,
   runAutomaticDream,
+  formatDreamResult,
 } from "../src/utils/dreamTaskRunner.js";
 import { createTasksDungeon } from "../src/utils/batch/tasksDungeon.js";
 
@@ -137,163 +138,71 @@ test("195层可连续向后推层，采购严格晚于全部战斗", async () =>
   assert.equal(f.calls.at(-1).cmd, "purchase");
 });
 
-test("200关通关后层数字段消失时按已通关处理并继续采购", async () => {
-  const f = fixture();
-  delete f.role.dungeon.id;
-  f.role.dungeon.merchant = { 1: [5] };
-  let purchased = 0;
-
-  assert.equal(
-    isDreamCompleted(f.role.dungeon, getDreamPeriod(now())),
-    true,
-  );
-  const result = await runAutomaticDream({
-    ...f,
-    purchase: async () => {
-      purchased++;
-    },
-  });
-
-  assert.equal(result.floor, DREAM_FINAL_FLOOR);
-  assert.equal(result.battles, 0);
-  assert.match(result.reason, /已通关/);
-  assert.equal(purchased, 1);
-  assert.equal(
-    f.calls.some((call) => call.cmd === "fight_startdungeon"),
-    false,
-  );
+test("本期负数为通关标记，不依赖商店、阵容或最高层", async () => {
+  for (const id of [-1, "-1", -2]) {
+    const f = fixture();
+    f.role.dungeon.id = id;
+    f.role.dungeon.battleTeam = {};
+    let purchased = 0;
+    const result = await runAutomaticDream({ ...f, purchase: async () => purchased++ });
+    assert.equal(result.completed, true);
+    assert.doesNotMatch(formatDreamResult(result), /未知|异常|当前层数/);
+    assert.equal(result.pushError, undefined);
+    assert.equal(result.battles, 0);
+    assert.equal(purchased, 1);
+    assert.deepEqual(f.calls.map(c => c.cmd), ["role_getroleinfo"]);
+  }
 });
 
-test("已达到200层且服务端保留层数字段时跳过战斗并继续采购", async () => {
+test("第200层仍可挑战，最后一战负数才通关", async () => {
   const f = fixture();
-  f.role.dungeon.id = DREAM_FINAL_FLOOR;
-  f.role.dungeon.merchant = { 1: [5] };
-  let purchased = 0;
-
-  assert.equal(
-    isDreamCompleted(f.role.dungeon, getDreamPeriod(now())),
-    true,
-  );
-  const result = await runAutomaticDream({
-    ...f,
-    purchase: async () => {
-      purchased++;
-    },
-  });
-
-  assert.equal(result.floor, DREAM_FINAL_FLOOR);
-  assert.equal(result.battles, 0);
-  assert.match(result.reason, /已通关/);
-  assert.equal(purchased, 1);
-  assert.equal(
-    f.calls.some((call) => call.cmd === "fight_startdungeon"),
-    false,
-  );
-});
-
-test("已达到200层但首次角色信息暂缺商店时仍按已通关处理", async () => {
-  const f = fixture();
-  f.role.dungeon.id = DREAM_FINAL_FLOOR;
-  delete f.role.dungeon.merchant;
-  let purchaseContext;
-
-  assert.equal(
-    isDreamCompleted(f.role.dungeon, getDreamPeriod(now())),
-    true,
-  );
-  const result = await runAutomaticDream({
-    ...f,
-    initialRole: structuredClone(f.role),
-    purchase: async (context) => {
-      purchaseContext = context;
-    },
-  });
-
-  assert.equal(result.battles, 0);
-  assert.equal(purchaseContext.merchant, null);
-  assert.equal(
-    f.calls.some((call) => call.cmd === "fight_startdungeon"),
-    false,
-  );
-});
-
-test("已通关时采购直接复用首次角色信息的商店快照", async () => {
-  const f = fixture();
-  f.role.dungeon.id = DREAM_FINAL_FLOOR;
-  f.role.dungeon.merchant = { 1: [5] };
-  let merchant;
-
-  await runAutomaticDream({
-    ...f,
-    initialRole: structuredClone(f.role),
-    purchase: async (context) => {
-      merchant = context.merchant;
-    },
-  });
-
-  assert.deepEqual(merchant, { 1: [5] });
-  assert.equal(
-    f.calls.filter((call) => call.cmd === "role_getroleinfo").length,
-    0,
-  );
-});
-
-test("最后一战通关导致层数字段消失时结束推层并继续采购", async () => {
-  const f = fixture();
-  f.role.dungeon.id = 199;
-  f.role.dungeon.merchant = { 1: [5] };
+  f.role.dungeon.id = 200;
   const send = async (cmd, params) => {
     const response = await f.send(cmd, params);
-    if (cmd === "fight_startdungeon") delete f.role.dungeon.id;
+    if (cmd === "fight_startdungeon") f.role.dungeon.id = -1;
     return response;
   };
   let purchased = 0;
-
-  const result = await runAutomaticDream({
-    ...f,
-    send,
-    purchase: async () => {
-      purchased++;
-    },
-  });
-
-  assert.equal(result.floor, DREAM_FINAL_FLOOR);
+  const result = await runAutomaticDream({ ...f, send, purchase: async () => purchased++ });
+  assert.equal(result.completed, true);
   assert.equal(result.battles, 1);
-  assert.match(result.reason, /已通关/);
   assert.equal(purchased, 1);
 });
 
-test("最后一战达到200层且服务端保留层数字段时结束推层并继续采购", async () => {
+test("初始化后读取到负数直接通关，不再校验为异常", async () => {
+  const f = fixture({ fresh: true });
+  const send = async (cmd, params) => {
+    const response = await f.send(cmd, params);
+    if (cmd === "dungeon_selecthero") f.role.dungeon.id = -1;
+    return response;
+  };
+  const result = await runDreamAutoPush({ ...f, send });
+  assert.equal(result.completed, true);
+  assert.equal(result.battles, 0);
+});
+
+test("缺字段即使有商店也需重新查询，仍缺失则报告异常", async () => {
   const f = fixture();
-  f.role.dungeon.id = DREAM_FINAL_FLOOR - 1;
+  delete f.role.dungeon.id;
   f.role.dungeon.merchant = { 1: [5] };
-  let purchased = 0;
-
-  const result = await runAutomaticDream({
-    ...f,
-    purchase: async () => {
-      purchased++;
-    },
-  });
-
-  assert.equal(result.floor, DREAM_FINAL_FLOOR);
-  assert.equal(result.battles, 1);
-  assert.match(result.reason, /已通关/);
-  assert.equal(purchased, 1);
-  assert.equal(
-    f.calls.filter((call) => call.cmd === "fight_startdungeon").length,
-    1,
-  );
+  const result = await runAutomaticDream({ ...f, purchase: async () => {} });
+  assert.match(result.pushError, /层数无效/);
+  assert.equal(result.completed, undefined);
+  assert.equal(f.calls.filter(c => c.cmd === "role_getroleinfo").length, 2);
+  f.role.dungeon.id = -1;
+  const stale = structuredClone(f.role);
+  delete stale.dungeon.id;
+  assert.equal((await runDreamAutoPush({ ...f, initialRole: stale })).completed, true);
 });
 
-test("已完成200关且当前层数重置时批量任务实际发出梦境购买请求", async (t) => {
+test("负数通关后批量任务实际发出梦境购买请求", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: now() });
   const calls = [];
   const role = {
     levelId: 3999,
     dungeon: {
       beginTime: getDreamPeriod(now()),
-      id: 0,
+      id: -1,
       maxId: 200,
       merchant: { 1: [5] },
       activeHeroId: 106,
@@ -586,26 +495,12 @@ test("批量梦境和独立购买遵守Token开关，不连接、不购买、不
 });
 
 
-test("已完成200关且当前层数重置为0时跳过选将和战斗，继续采购", async () => {
-  const f = fixture();
-  f.role.dungeon.id = 0;
-  f.role.dungeon.maxId = 200;
-  f.role.dungeon.battleTeam = {};
-  f.role.dungeon.merchant = { 1: [5] };
-  let purchased = 0;
-  const result = await runAutomaticDream({
-    ...f,
-    purchase: async ({ merchant }) => {
-      assert.deepEqual(merchant, { 1: [5] });
-      purchased++;
-    },
-  });
-  assert.equal(result.floor, DREAM_FINAL_FLOOR);
-  assert.equal(result.battles, 0);
-  assert.equal(purchased, 1);
-  assert.deepEqual(f.calls.map(({ cmd }) => cmd), ["role_getroleinfo"]);
-  assert.equal(isDreamCompleted({ ...f.role.dungeon, beginTime: 0 }, getDreamPeriod(now())), false);
-  assert.equal(isDreamCompleted({ ...f.role.dungeon, maxId: 0 }, getDreamPeriod(now())), false);
+test("旧期负数、当前第200层、历史最高层、缺失字段均不能独立证明本期通关", () => {
+  const period = getDreamPeriod(now());
+  assert.equal(isDreamCompleted({ beginTime: period - 86400, id: -1 }, period), false);
+  for (const id of [0, 200, undefined, null, "", " ", false, NaN]) {
+    assert.equal(isDreamCompleted({ beginTime: period, id, maxId: 200, merchant: {} }, period), false);
+  }
 });
 
 test("爬层失败仍独立采购，主动停止或跨期时不采购", async () => {
@@ -673,4 +568,22 @@ test("日常和批量入口在选将失败后实际购买最新商店，不使�
       ], `${mode}/${state}应购买最新商店`);
     }
   }
+});
+
+test("日常入口本期通关不返回失败且日志不显示未知层数", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: now() });
+  const { DailyTaskRunner } = await import("../src/utils/dailyTaskRunner.js");
+  const runner = new DailyTaskRunner({
+    sendMessageWithPromise: () => assert.fail("已通关且未配置采购不应请求"),
+  }, { commandDelay: 0, taskDelay: 0 });
+  runner.roleSnapshots.set("t", { dungeon: { beginTime: getDreamPeriod(now()), id: -1 } });
+  runner.loadDreamPurchaseList = () => [];
+  const logs = [];
+  runner.log = (message) => logs.push(message);
+  const result = await runner.runDreamTask("t");
+  assert.equal(result.completed, true);
+  assert.notEqual(result.status, "failed");
+  assert.equal(result.pushError, undefined);
+  assert.ok(logs.some(message => /自动梦境：梦境已通关/.test(message)));
+  assert.ok(logs.every(message => !/未知|层数无效/.test(message)));
 });

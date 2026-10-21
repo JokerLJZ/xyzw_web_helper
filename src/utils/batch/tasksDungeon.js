@@ -3,6 +3,7 @@ import {
   DREAM_PUSH_INTERVAL_MS,
   isDreamEnabled,
   runAutomaticDream,
+  formatDreamResult,
 } from "@/utils/dreamTaskRunner.js";
 
 // 消耗活动每类任务固定为 20 档，missionId 按任务类型连续分组：
@@ -583,7 +584,7 @@ export function createTasksDungeon(deps) {
         });
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 自动梦境：${result.reason}，当前层数 ${result.floor ?? "未知"}`,
+          message: `${token.name} ${formatDreamResult(result)}`,
           type: "info",
         });
         if (shouldStop.value || result.status === "skipped") return;

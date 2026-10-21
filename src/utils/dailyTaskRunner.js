@@ -8,6 +8,7 @@ import {
   DREAM_PUSH_INTERVAL_MS,
   isDreamEnabled,
   runAutomaticDream,
+  formatDreamResult,
 } from "@/utils/dreamTaskRunner.js";
 import { goldItemsConfig, merchantConfig } from "@/utils/dreamConstants";
 import {
@@ -1341,7 +1342,7 @@ export class DailyTaskRunner {
       pause: () => sleep(DREAM_PUSH_INTERVAL_MS),
       log: (text) => this.log(text),
     });
-    this.log(`自动梦境：${result.reason}，当前层数 ${result.floor ?? "未知"}`);
+    this.log(formatDreamResult(result));
     return result.pushError ? { ...result, status: "failed" } : result;
   }
 
