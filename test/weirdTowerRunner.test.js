@@ -319,11 +319,24 @@ test("完整查询省略空默认实例时按官方模型恢复，错误结构�
   await assert.rejects(f.run({ mode: "claim", send: async () => ({ unexpected: true }) }), /未取得怪异塔状态/);
 });
 
-test("连续合成复用删除列表和格子增量，正常响应不重复查棋盘", async () => {
+test("手动合成按组批量配对，每轮仅刷新一次棋盘", async () => {
   const f = fixture();
   for (let x = 1; x <= 4; x++) f.state.box.gridMap[x] = { 1: { gridType: 2, gridItemId: 1 } };
   const result = await f.run({ mode: "merge" });
   assert.equal(result.merged, 2);
-  assert.equal(f.calls.filter(c => c.cmd === "mergebox_getinfo").length, 1);
+  assert.equal(result.mergeRounds, 1);
+  assert.equal(f.calls.filter(c => c.cmd === "mergebox_getinfo").length, 2);
+  assert.deepEqual(f.pauses, [300, 300, 500]);
   assert.equal(f.state.box.taskClaimMap[777], 1);
+});
+
+test("智能合成每轮一次，20轮后仍有物品时停止并保留未完成原因", async () => {
+  const f = fixture();
+  f.state.box.taskMap[777] = 1;
+  f.state.box.taskClaimMap[777] = 1;
+  for (let x = 1; x <= 42; x++) f.state.box.gridMap[x] = { 1: { gridType: 2, gridItemId: 1 } };
+  await assert.rejects(f.run({ mode: "merge" }), /20轮上限.*仍有可合成/);
+  assert.equal(f.calls.filter(c => c.cmd === "mergebox_automergeitem").length, 20);
+  assert.equal(f.calls.filter(c => c.cmd === "mergebox_getinfo").length, 21);
+  assert.deepEqual(f.pauses, Array.from({ length: 20 }, () => [1500, 500]).flat());
 });

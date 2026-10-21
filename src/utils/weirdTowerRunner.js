@@ -33,7 +33,7 @@ export async function runWeirdTowerAccount({
   maxActions = 10000,
 }) {
   let tower, box, role, activity, share;
-  let actId, actions = 0, climbed = 0, used = 0, merged = 0;
+  let actId, actions = 0, climbed = 0, used = 0, merged = 0, mergeRounds = 0;
   const failures = [];
   const date = weirdTowerDate(now());
   const schedule = rows(config.EvoTowerScheduleConf).find(row => row.evoGachaStart * 1000 <= now() && now() <= row.evoGachaEnd * 1000);
@@ -280,19 +280,40 @@ export async function runWeirdTowerAccount({
     }
     return null;
   };
+  // 沿用旧策略：每轮按物品ID分组并两两配对，轮次内不处理新生成的物品。
   const mergeOnce = async () => {
-    const pair = mergePair();
-    if (!pair) return false;
-    const before = JSON.stringify(box.gridMap);
+    if (!mergePair()) return false;
+    if (mergeRounds >= 20) throw new Error("合成已达到20轮上限，仍有可合成物品，请再次执行");
+    mergeRounds++;
+    await claimMergeRewards();
     const conf = board();
     const auto = Number(conf.quickMergeCondition) === 0 || Number(mapGet(box.taskMap, conf.quickMergeCondition) || 0) > 0;
     const position = tile => ({ gridX: tile.x, gridY: tile.y });
-    await write(auto ? "mergebox_automergeitem" : "mergebox_mergeitem", auto ? { actType: 1 } : {
-      actType: 1, sourcePos: position(pair[0]), targetPos: position(pair[1]),
-    }, () => JSON.stringify(box.gridMap) !== before, getBox, auto ? 10000 : 1000);
-    // apply已按delPosList删除旧棋子、按gridMap替换变化格子；仅核对不足时补查。
-    merged++;
-    await pause(auto ? 1500 : 300);
+    const combine = async pair => {
+      check();
+      const before = JSON.stringify(box.gridMap);
+      await write(auto ? "mergebox_automergeitem" : "mergebox_mergeitem", auto ? { actType: 1 } : {
+        actType: 1, sourcePos: position(pair[0]), targetPos: position(pair[1]),
+      }, () => JSON.stringify(box.gridMap) !== before, getBox, auto ? 10000 : 1000);
+      merged++;
+      await pause(auto ? 1500 : 300);
+    };
+    if (auto) await combine(mergePair());
+    else {
+      const groups = new Map();
+      for (const tile of tiles()) {
+        const item = mapGet(config.ActMergeItemConf, tile.gridItemId);
+        if (Number(tile.gridType ?? 1) !== 2 || Number(tile.gridConfId || 0) !== 0 || tile.isLock || !item || Number(item.nextLevelMergeItemId || 0) <= 0) continue;
+        const group = groups.get(tile.gridItemId) || [];
+        group.push(tile);
+        groups.set(tile.gridItemId, group);
+      }
+      for (const group of groups.values()) {
+        while (group.length >= 2) await combine([group.shift(), group.shift()]);
+      }
+    }
+    // 维持旧版每轮刷新一次棋盘，确认结果后再开始下一轮。
+    await getBox();
     await claimMergeRewards();
     await pause(500);
     return true;
@@ -356,9 +377,9 @@ export async function runWeirdTowerAccount({
       await claimMergeRewards();
     }
     if (failures.length) throw new Error(failures.join("；"));
-    return { status: "completed", climbed, used, merged };
+    return { status: "completed", climbed, used, merged, mergeRounds };
   } catch (error) {
-    if (error.stopped) return { status: "stopped", climbed, used, merged };
+    if (error.stopped) return { status: "stopped", climbed, used, merged, mergeRounds };
     throw error;
   }
 }
