@@ -209,12 +209,31 @@ function briefTaskReason(value, fallbackTask) {
   return `${compact(task || fallbackTask)}：${compact(reason)}`;
 }
 
-function formatTaskReport(taskName, tokenResults, scheduled) {
+function formatTaskReport(taskName, tokenResults, scheduled, startTime, upcomingTasks) {
   const results = tokenResults.map(result => ({ ...result, status: normalizeTaskResultStatus(result.status) }));
   const completed = results.filter(result => result.status === "completed").length;
   const allCompleted = results.length > 0 && completed === results.length;
   const title = `${allCompleted ? "✅" : "⚠️"} ${scheduled ? "定时任务" : "批量日常任务"}${allCompleted ? "完成" : "执行结束"}${scheduled ? `: ${taskName}` : ""} (${completed}/${results.length})`;
-  const lines = [`成功 ${completed}/${results.length} 个账号。`];
+  const finishedAt = new Date();
+  const startedAt = new Date(startTime);
+  const elapsed = Number.isFinite(startedAt.getTime())
+    ? Math.max(0, Math.floor((finishedAt - startedAt) / 1000)) : null;
+  const countStatus = status => results.filter(result => result.status === status).length;
+  const lines = [
+    `成功 ${completed}/${results.length} 个账号。`,
+    "",
+    "| 项目 | 数值 |",
+    "|------|------|",
+    `| 总账号 | ${results.length} |`,
+    `| 成功 | ${completed} |`,
+    `| 失败 | ${countStatus("failed")} |`,
+    `| 待继续 | ${countStatus("pending")} |`,
+    `| 已停止 | ${countStatus("stopped")} |`,
+    `| 已跳过 | ${countStatus("skipped")} |`,
+    `| 耗时 | ${elapsed === null ? "未知" : `${Math.floor(elapsed / 60)}分${elapsed % 60}秒`} |`,
+    `| 完成时间 | ${formatNotificationTime(finishedAt)} |`,
+  ];
+  let hasReasons = false;
   for (const result of results) {
     const reasons = [...(result.reasons || []), ...(result.warnings || [])];
     if (!["completed", "skipped"].includes(result.status) && !reasons.length) {
@@ -222,24 +241,31 @@ function formatTaskReport(taskName, tokenResults, scheduled) {
     }
     if (!reasons.length) continue;
     const concise = [...new Set(reasons.map(reason => briefTaskReason(reason, taskName)))];
-    if (lines.length === 1) lines.push("", "未完成任务：");
+    if (!hasReasons) lines.push("", "未完成任务：");
+    hasReasons = true;
     concise.forEach(reason => lines.push(`- ${String(result.name ?? "未知账号").replace(/[\r\n]+/g, " ")}：${reason}`));
   }
   if (results.length) {
     lines.push("", "本次执行账号清单：");
     results.forEach(result => lines.push(`- ${String(result.name ?? "未知账号").replace(/[\r\n]+/g, " ")}`));
   }
+  if (scheduled && Array.isArray(upcomingTasks) && upcomingTasks.length) {
+    lines.push("", "## 后续批量任务", "", "| 序号 | 任务名称 | 启动时间 |", "|------|----------|----------|");
+    upcomingTasks.forEach((task, index) => lines.push(
+      `| ${index + 1} | ${escapeMarkdownTableCell(String(task.name ?? "未知任务").replace(/[\r\n]+/g, " "))} | ${formatNotificationTime(task.startTime)} |`,
+    ));
+  }
   return { title, content: lines.join("\n") };
 }
 
-/** 定时结果汇总本次账号清单、未完成任务和简要原因，不附完整日志。 */
+/** 定时结果汇总执行统计、本次账号、简要原因和后续启动时间。 */
 export function formatScheduledTaskNotification(taskName, tokenResults, startTime, upcomingTasks = null) {
-  return formatTaskReport(taskName, tokenResults, true);
+  return formatTaskReport(taskName, tokenResults, true, startTime, upcomingTasks);
 }
 
 /** 手动批量与定时计划使用相同的简洁结果格式。 */
 export function formatBatchTaskNotification(tokenResults, startTime) {
-  return formatTaskReport("日常任务", tokenResults, false);
+  return formatTaskReport("日常任务", tokenResults, false, startTime);
 }
 
 /**

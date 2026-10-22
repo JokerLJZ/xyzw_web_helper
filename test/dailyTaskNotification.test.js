@@ -75,13 +75,19 @@ for (const [name, format] of [
     const report = format([{ name: "账号", status: "failed", reasons: ["任务甲：" + "原因".repeat(100), "任务乙：未达到执行条件"] }]);
     assert.match(report.content, /任务甲：原因.*…/);
     assert.match(report.content, /任务乙：未达到执行条件/);
-    assert.ok(report.content.length < 180);
+    assert.ok(report.content.length < 500);
   });
 }
 
-test("全成功通知包含本次账号清单，不列调度信息", () => {
+test("全成功通知恢复统计和后续调度信息", () => {
   const report = formatScheduledTaskNotification("日常", [{ name: "完成账号", status: "completed" }], new Date(), [{ name: "后续计划", startTime: new Date() }]);
-  assert.equal(report.content, "成功 1/1 个账号。\n\n本次执行账号清单：\n- 完成账号");
+  assert.match(report.content, /\| 总账号 \| 1 \|/);
+  assert.match(report.content, /\| 成功 \| 1 \|/);
+  assert.match(report.content, /\| 失败 \| 0 \|/);
+  assert.match(report.content, /耗时/);
+  assert.match(report.content, /完成时间/);
+  assert.match(report.content, /后续批量任务/);
+  assert.match(report.content, /\| 1 \| 后续计划 \|/);
 });
 
 
@@ -96,4 +102,17 @@ test("账号清单只列本次结果，保留同名账号且名称换行不破�
 
 test("空批次不添加虚构账号清单", () => {
   assert.doesNotMatch(formatBatchTaskNotification([]).content, /本次执行账号清单/);
+});
+
+test("耗时按开始时间计算，无开始时间不虚构耗时，空调度不展示表格", () => {
+  const report = formatBatchTaskNotification([], new Date(Date.now() - 654000));
+  assert.match(report.content, /耗时 \| 10分54秒/);
+  assert.match(formatBatchTaskNotification([]).content, /耗时 \| 未知/);
+  assert.doesNotMatch(report.content, /后续批量任务/);
+  assert.doesNotMatch(formatScheduledTaskNotification("空计划", [], new Date(), []).content, /后续批量任务/);
+});
+
+test("后续调度转义任务名，异常时间保留未知提示", () => {
+  const report = formatScheduledTaskNotification("日常", [], new Date(), [{name: "任务|甲\n备注", startTime: "invalid"}]);
+  assert.ok(report.content.includes("任务\\|甲 备注 | 未知"));
 });
