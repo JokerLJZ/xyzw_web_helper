@@ -340,3 +340,30 @@ test("智能合成每轮一次，20轮后仍有物品时停止并保留未完成
   assert.equal(f.calls.filter(c => c.cmd === "mergebox_getinfo").length, 21);
   assert.deepEqual(f.pauses, Array.from({ length: 20 }, () => [1500, 500]).flat());
 });
+
+
+test("无钥匙或无可用宝箱正常完成，批量入口不记录失败", async () => {
+  for (const mode of ["use", "all"]) {
+    for (const scenario of ["noKeys", "missing", "locked", "exhausted"]) {
+      const f = fixture();
+      f.state.tower.lotteryLeftCnt = scenario === "noKeys" ? 0 : 1;
+      if (scenario === "missing") f.state.box.gridMap = {};
+      if (scenario === "locked") f.state.box.gridMap[4][5].isLock = true;
+      if (scenario === "exhausted") f.state.box.gridMap[4][5].openCnt = 500;
+      const logs = [];
+      const result = await f.run({ mode, log: (message, type = "info") => logs.push({ message, type }) });
+      assert.equal(result.status, "completed");
+      assert.equal(result.used, 0);
+      assert.equal(f.calls.some(c => c.cmd === "mergebox_openbox"), false);
+      assert.equal(logs.some(item => item.type === "error"), false);
+      if (scenario !== "noKeys") assert.ok(logs.some(item => /跳过使用钥匙/.test(item.message)));
+    }
+  }
+  const f = fixture();
+  f.state.tower.lotteryLeftCnt = 1;
+  f.state.box.gridMap = {};
+  const deps = batchDeps({ a: f });
+  await createTasksTower(deps).batchWeirdTower();
+  assert.equal(deps.statuses.a, "completed");
+  assert.equal(deps.logs.some(item => item.type === "error"), false);
+});

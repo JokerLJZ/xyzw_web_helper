@@ -327,7 +327,10 @@ export async function runWeirdTowerAccount({
     if (number(tower.lotteryLeftCnt, "钥匙库存") < cost) return false;
     const launch = tiles().find(tile => !tile.isLock && Number(tile.gridType ?? 1) === 1 &&
       Number(tile.openCnt || 0) < Number(mapGet(config.ActMergeBoxConf, tile.gridItemId)?.useTimes || 0));
-    if (!launch) throw new Error("没有可用的钥匙宝箱，停止使用");
+    if (!launch) {
+      log("没有可用的钥匙宝箱，跳过使用钥匙，继续后续任务");
+      return false;
+    }
     const before = number(box.costTotalCnt, "累计使用");
     await write("mergebox_openbox", { actType: 1, pos: { gridX: launch.x, gridY: launch.y } },
       () => Number(box.costTotalCnt) > before, async () => { await getBox(); await getTower(); });
