@@ -367,3 +367,86 @@ test("无钥匙或无可用宝箱正常完成，批量入口不记录失败", as
   assert.equal(deps.statuses.a, "completed");
   assert.equal(deps.logs.some(item => item.type === "error"), false);
 });
+
+
+test("官方怪异木箱型号及省略默认字段仍按实际坐标使用钥匙", async () => {
+  // 2026-10-23 配置58b91ed6c8：木箱boxId及useTimes，不按名称或固定位置猜测。
+  for (const [boxId, useTimes] of [[1, 50], [4, 75], [7, 100], [10001, 2]]) {
+    const f = fixture();
+    f.state.tower.lotteryLeftCnt = 1;
+    f.state.box.gridMap = { 7: { 3: { gridItemId: boxId } } };
+    const cfg = snapshot(config);
+    cfg.ActMergeBoxConf = { [boxId]: { boxId, name: "怪异木箱", useTimes } };
+    const send = async (cmd, params) => {
+      if (cmd === "mergebox_openbox") {
+        f.calls.push({ cmd, params });
+        assert.deepEqual(params, { actType: 1, pos: { gridX: 7, gridY: 3 } });
+        f.state.tower.lotteryLeftCnt = 0;
+        f.state.box.costTotalCnt++;
+        return { mergeBox: { costTotalCnt: f.state.box.costTotalCnt } };
+      }
+      return f.send(cmd, params);
+    };
+    const result = await f.run({ mode: "use", config: cfg, send });
+    assert.equal(result.used, 1);
+    assert.equal(result.status, "completed");
+    assert.equal(f.calls.filter(c => c.cmd === "mergebox_openbox").length, 1);
+  }
+});
+
+test("未知格子类型按官方配置恢复箱子，物品配置优先防止同ID误开", async () => {
+  for (const itemExists of [true, false]) {
+    const f = fixture(); f.state.tower.lotteryLeftCnt = 1;
+    f.state.box.gridMap[4][5].gridType = 0;
+    const cfg = snapshot(config);
+    if (itemExists) cfg.ActMergeItemConf[9] = { mergeItemId: 9, nextLevelMergeItemId: 0 };
+    const result = await f.run({ mode: "use", config: cfg });
+    assert.equal(result.used, itemExists ? 0 : 1);
+  }
+});
+
+test("未找到箱子只读核对一次，使用刷新后的真实坐标", async () => {
+  const f = fixture(); f.state.tower.lotteryLeftCnt = 1;
+  let reads = 0;
+  const send = async (cmd, params) => {
+    if (cmd === "mergebox_getinfo" && ++reads === 1) {
+      f.calls.push({ cmd, params });
+      return { mergeBox: { ...snapshot(f.state.box), gridMap: {} } };
+    }
+    return f.send(cmd, params);
+  };
+  assert.equal((await f.run({ mode: "use", send })).used, 1);
+  assert.equal(reads, 2);
+  assert.deepEqual(f.calls.find(c => c.cmd === "mergebox_openbox").params.pos, { gridX: 4, gridY: 5 });
+});
+
+test("箱子消失后按返回棋盘使用替换木箱，不沿用旧坐标", async () => {
+  const f = fixture(); f.state.tower.lotteryLeftCnt = 2;
+  const positions = [];
+  const send = async (cmd, params) => {
+    if (cmd === "mergebox_openbox") {
+      positions.push(params.pos);
+      f.state.tower.lotteryLeftCnt--;
+      f.state.box.costTotalCnt++;
+      return { mergeBox: { costTotalCnt: f.state.box.costTotalCnt,
+        gridMap: positions.length === 1 ? { 6: { 3: { gridItemId: 9 } } } : {} },
+        delPosList: [params.pos] };
+    }
+    // 本用例只检查替换，不产生累计奖励返还。
+    return f.send(cmd, params);
+  };
+  const cfg = snapshot(config); cfg.ActMergeItemCostProgressConf = {};
+  assert.equal((await f.run({ mode: "use", send, config: cfg })).used, 2);
+  assert.deepEqual(positions, [{ gridX: 4, gridY: 5 }, { gridX: 6, gridY: 3 }]);
+});
+
+test("不可用箱子日志包含具体木箱、坐标和排除原因，刷新有界", async () => {
+  const f = fixture(); f.state.tower.lotteryLeftCnt = 1;
+  f.state.box.gridMap[4][5].isLock = true;
+  const cfg = snapshot(config); cfg.ActMergeBoxConf[9].name = "怪异木箱";
+  const logs = [];
+  const result = await f.run({ mode: "use", config: cfg, log: text => logs.push(text) });
+  assert.equal(result.status, "completed");
+  assert.equal(f.calls.filter(c => c.cmd === "mergebox_getinfo").length, 2);
+  assert.ok(logs.some(text => /怪异木箱.*坐标4,5.*未解锁/.test(text)));
+});

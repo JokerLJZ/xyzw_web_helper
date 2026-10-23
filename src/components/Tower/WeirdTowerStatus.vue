@@ -133,6 +133,8 @@
 </template>
 
 <script setup>
+import { runWeirdTowerAccount } from "@/utils/weirdTowerRunner.js";
+import { loadRechargeConfig } from "@/utils/rechargeActivity.js";
 import { claimPendingEvoTowerRewards } from "@/utils/evoTowerRewards.js";
 // 停止批量爬塔操作
 let stopFlag = false;
@@ -362,77 +364,16 @@ const startUseItems = async () => {
   try {
     const tokenId = tokenStore.selectedToken.id;
 
-    // 1. 获取活动信息
-    const infoRes = await tokenStore.sendMessageWithPromise(
-      tokenId,
-      "mergebox_getinfo",
-      { actType: 1 },
-      5000
-    );
-
-    // 获取怪异塔信息以读取剩余道具数量
-    const towerInfoRes = await tokenStore.sendMessageWithPromise(
-      tokenId,
-      "evotower_getinfo",
-      {},
-      5000
-    );
-
-    if (!infoRes || !infoRes.mergeBox) {
-      throw new Error("获取活动信息失败");
-    }
-
-    let costTotalCnt = infoRes.mergeBox.costTotalCnt || 0;
-    let lotteryLeftCnt = towerInfoRes?.evoTower?.lotteryLeftCnt || 0;
-
-    if (lotteryLeftCnt <= 0) {
-      message.info("没有剩余道具可使用");
-      isUsingItems.value = false;
-      if (itemTimeout.value) clearTimeout(itemTimeout.value);
-      return;
-    }
-
-    message.success(`开始使用道具，剩余：${lotteryLeftCnt}，已用：${costTotalCnt}`);
-    let processedCount = 0;
-
-    while (lotteryLeftCnt > 0 && !stopItemFlag) {
-      let pos = {};
-      if (costTotalCnt < 2) {
-        pos = { gridX: 4, gridY: 5 };
-      } else if (costTotalCnt < 102) {
-        pos = { gridX: 7, gridY: 3 };
-      } else {
-        pos = { gridX: 6, gridY: 3 };
-      }
-
-      // 2. 使用道具
-      await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "mergebox_openbox",
-        {
-          actType: 1,
-          pos: pos
-        },
-        5000
-      );
-
-      costTotalCnt++;
-      lotteryLeftCnt--;
-      processedCount++;
-
-      await new Promise((res) => setTimeout(res, 500));
-    }
-
-    // 领取累计奖励
-    await tokenStore.sendMessageWithPromise(
-      tokenId,
-      "mergebox_claimcostprogress",
-      { actType: 1 },
-      5000
-    ).catch(() => {});
-
-    message.success(`已使用道具 ${processedCount} 次`);
-    // 刷新一下
+    const send = (cmd, params = {}, timeout = 5000) =>
+      tokenStore.sendMessageWithPromise(tokenId, cmd, params, timeout);
+    const config = await loadRechargeConfig(send);
+    const result = await runWeirdTowerAccount({
+      send, config, mode: "use",
+      now: () => tokenStore.getWebSocketClient?.(tokenId)?.getServerTime?.() ?? Date.now(),
+      stopped: () => stopItemFlag,
+      log: text => message.info(text),
+    });
+    if (result.status !== "stopped") message.success(`已使用钥匙 ${result.used} 次`);
     await getTowerInfo();
 
   } catch (error) {

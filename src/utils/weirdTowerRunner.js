@@ -23,6 +23,16 @@ function fullField(data, key, label) {
   if (data[key] === undefined && Object.keys(data).every(name => name === "_originalCmd")) return {};
   throw new Error(`未取得${label}`);
 }
+// 与客户端MPTileData一致：默认类型为箱子；未知类型先按物品配置，再按箱子配置恢复。
+function normalizeTile(value, config) {
+  const tile = { gridConfId: 0, gridItemId: 0, gridType: 1, openCnt: 0, isLock: false, ...record(value) };
+  tile.gridType = Number(tile.gridType);
+  if (tile.gridType !== 1 && tile.gridType !== 2) {
+    if (mapGet(config.ActMergeItemConf, tile.gridItemId)) tile.gridType = 2;
+    else if (mapGet(config.ActMergeBoxConf, tile.gridItemId)) tile.gridType = 1;
+  }
+  return tile;
+}
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const timedOut = error => /timeout|timed out|超时/i.test(error?.message || "");
 
@@ -53,7 +63,7 @@ export async function runWeirdTowerAccount({
       }
       for (const [x, column] of mapEntries(patch.gridMap)) {
         grid[x] ||= {};
-        for (const [y, tile] of mapEntries(column)) grid[x][y] = { gridConfId: 0, gridItemId: 0, gridType: 1, openCnt: 0, isLock: false, ...tile };
+        for (const [y, tile] of mapEntries(column)) grid[x][y] = normalizeTile(tile, config);
       }
       box = merge(box || {}, { ...patch, gridMap: undefined });
       box.gridMap = grid;
@@ -269,7 +279,7 @@ export async function runWeirdTowerAccount({
     if (!conf || Number(conf.actMergeFestivalType) !== 1) throw new Error("当前怪异塔棋盘配置不完整");
     return conf;
   };
-  const tiles = () => mapEntries(box.gridMap).flatMap(([x, column]) => mapEntries(column).filter(([, item]) => item).map(([y, item]) => ({ x: Number(x), y: Number(y), ...item })));
+  const tiles = () => mapEntries(box.gridMap).flatMap(([x, column]) => mapEntries(column).filter(([, item]) => item).map(([y, item]) => ({ x: Number(x), y: Number(y), ...normalizeTile(item, config) })));
   const mergePair = () => {
     const seen = new Map();
     for (const tile of tiles()) {
@@ -325,10 +335,24 @@ export async function runWeirdTowerAccount({
     const cost = number(costs[0].value, "钥匙消耗");
     if (cost <= 0) throw new Error("钥匙消耗配置异常");
     if (number(tower.lotteryLeftCnt, "钥匙库存") < cost) return false;
-    const launch = tiles().find(tile => !tile.isLock && Number(tile.gridType ?? 1) === 1 &&
-      Number(tile.openCnt || 0) < Number(mapGet(config.ActMergeBoxConf, tile.gridItemId)?.useTimes || 0));
+    const findLaunch = () => tiles().find(tile => !tile.isLock && tile.gridType === 1 &&
+      Number(tile.openCnt) < Number(mapGet(config.ActMergeBoxConf, tile.gridItemId)?.useTimes || 0));
+    let launch = findLaunch();
     if (!launch) {
-      log("没有可用的钥匙宝箱，跳过使用钥匙，继续后续任务");
+      // 通知可能滞后：只读刷新一次，再决定跳过，不重发消费请求。
+      await getBox();
+      await getTower();
+      if (number(tower.lotteryLeftCnt, "钥匙库存") < cost) return false;
+      launch = findLaunch();
+    }
+    if (!launch) {
+      const boxes = tiles().filter(tile => tile.gridType === 1);
+      const detail = boxes.map(tile => {
+        const conf = mapGet(config.ActMergeBoxConf, tile.gridItemId);
+        const reason = !conf ? "配置缺失" : tile.isLock ? "未解锁" : "次数已耗尽";
+        return `${conf?.name || "箱子"}(ID=${tile.gridItemId}，坐标${tile.x},${tile.y}，已用${tile.openCnt}/${conf?.useTimes ?? "未知"}，${reason})`;
+      }).join("；");
+      log(`棋盘暂无可用宝箱，跳过使用钥匙，继续后续任务；剩余钥匙${tower.lotteryLeftCnt}；${detail || "未识别到箱子"}`);
       return false;
     }
     const before = number(box.costTotalCnt, "累计使用");
