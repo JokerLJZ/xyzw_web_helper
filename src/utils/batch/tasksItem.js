@@ -812,6 +812,27 @@ export function createTasksItem(deps) {
           throw new Error(`未获取到${heroName}的完整四件装备信息`);
         }
 
+        const lordLevel = Number(role.lord?.level);
+        const equipmentLevels = parts.map((part) => Number(part.level));
+        if (
+          !Number.isSafeInteger(lordLevel) || lordLevel < 1 ||
+          equipmentLevels.some((level) => !Number.isSafeInteger(level) || level < 1)
+        ) {
+          throw new Error("主公等级或装备等级信息缺失或无效");
+        }
+
+        // 官方 canOneLevelUp 先检查最低装备等级；阶段上限仍允许突破。
+        const minimumEquipmentLevel = Math.min(...equipmentLevels);
+        if (minimumEquipmentLevel >= lordLevel) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${heroName}最低装备等级${minimumEquipmentLevel}已达到主公等级${lordLevel}，当前没有可升级的装备，跳过升级`,
+            type: "info",
+          });
+          return;
+        }
+
         const upgradeCosts = parts
           .map((part) => getEquipmentIronCost(part.level))
           .filter((cost) => Number.isFinite(cost));
