@@ -1,3 +1,31 @@
+import { loadSignupCheerConfig } from "./tasksSignupCheer.js";
+
+/** 是否至少产出一份残卷；produceSpeed 与 hangUpBeginTime 均以毫秒计算。 */
+export function getLegacyClaimEligibility(state, config, serverTime) {
+  const beginTime = Number(state?.hangUpBeginTime);
+  if (state?.hangUpBeginTime == null || !Number.isFinite(beginTime) || beginTime < 0) {
+    throw new Error("功法探索开始时间缺失或无效");
+  }
+  if (beginTime === 0) return { canClaim: false, reason: "尚未开始探索，当前可领取功法残卷为0" };
+  const rows = Object.values(config?.LegacyDreamDustConf || {});
+  const row = rows.find((item) => Number(item.levelId) === Number(state.produceLevelId));
+  const speed = Number(row?.produceSpeed);
+  const baseMaxTime = Number(row?.produceTimeMax) * 1000;
+  const minCollectTime = Number(config?.LegacyConstant?.minDreamDustCollect) * 1000;
+  if (!Number.isFinite(speed) || speed <= 0 || !Number.isFinite(baseMaxTime) || baseMaxTime < speed ||
+      !Number.isFinite(minCollectTime) || minCollectTime < 0) {
+    throw new Error("功法残卷产出配置缺失或无效");
+  }
+  if (!Number.isFinite(serverTime) || serverTime <= 0) throw new Error("未获取到有效服务器时间");
+  // 特权只延长产出上限，不影响是否产出第一份；无需推测特权状态。
+  const elapsed = Math.max(0, serverTime - beginTime);
+  if (Math.floor(Math.min(elapsed, baseMaxTime) / speed) === 0) {
+    return { canClaim: false, reason: "当前可领取功法残卷为0" };
+  }
+  if (elapsed < minCollectTime) return { canClaim: false, reason: "尚未达到功法残卷最短领取时间" };
+  return { canClaim: true };
+}
+
 /**
  * 功法类任务
  * 包含: batchLegacyClaim, batchLegacyBeginHangUp, batchLegacyClaimChargeReward, batchLegacyGiftSendEnhanced
@@ -8,7 +36,7 @@
  * @param {Object} deps - 依赖项
  * @returns {Object} 任务函数集合
  */
-export function createTasksLegacy(deps) {
+export function createTasksLegacy(deps, { loadConfig = loadSignupCheerConfig } = {}) {
   const {
     selectedTokens,
     tokens,
@@ -119,13 +147,34 @@ export function createTasksLegacy(deps) {
       tokenStatus.value[tokenId] = "running";
 
       const token = tokens.value.find((t) => t.id === tokenId);
+      const tokenName = token?.name || tokenId;
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始领取功法残卷: ${token.name} ===`,
+          message: `=== 开始领取功法残卷: ${tokenName} ===`,
           type: "info",
         });
         await ensureConnection(tokenId);
+
+        const send = (command, params = {}) => tokenStore.sendMessageWithPromise(tokenId, command, params, 5000);
+        const config = await loadConfig(send);
+        const info = await send("legacy_getinfo");
+        const body = info?._raw?.body || info?.body || info?.data || info;
+        const serverTime = tokenStore.getWebSocketClient(tokenId)?.getServerTime?.();
+        const eligibility = getLegacyClaimEligibility(body?.roleLegacy, config, serverTime);
+        if (!eligibility.canClaim) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `=== ${tokenName} ${eligibility.reason}，跳过领取 ===`,
+            type: "info",
+          });
+          return;
+        }
+        if (shouldStop.value) {
+          tokenStatus.value[tokenId] = "stopped";
+          return;
+        }
 
         const LegacyClaimHangUpResp = await tokenStore.sendMessageWithPromise(
           tokenId,
@@ -133,10 +182,25 @@ export function createTasksLegacy(deps) {
           {},
           5000,
         );
+        const rewards = LegacyClaimHangUpResp?.reward;
+        if (!Array.isArray(rewards)) {
+          throw new Error("领取响应缺少奖励列表，无法确认领取结果");
+        }
+        // 官方直接展示整个 reward 列表；无奖励也是有效的成功响应。
+        const fragments = rewards.filter((reward) => Number(reward?.itemId) === 37007);
+        const values = fragments.map((reward) => Number(reward.value));
+        if (values.some((value) => !Number.isFinite(value) || value < 0)) {
+          throw new Error("领取响应中的残卷数量无效");
+        }
+        const quantity = values.reduce((sum, value) => sum + value, 0);
+        const total = LegacyClaimHangUpResp?.role?.items?.[37007]?.quantity;
+        const totalText = total == null ? "" : `，共有${total}个`;
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 成功领取功法残卷${LegacyClaimHangUpResp.reward[0].value}，共有${LegacyClaimHangUpResp.role.items[37007].quantity}个`,
-          type: "success",
+          message: quantity === 0
+            ? `=== ${tokenName} 当前可领取功法残卷为0，正常结束 ===`
+            : `=== ${tokenName} 成功领取功法残卷${quantity}${totalText}`,
+          type: quantity === 0 ? "info" : "success",
         });
         tokenStatus.value[tokenId] = "completed";
       } catch (error) {
@@ -144,7 +208,7 @@ export function createTasksLegacy(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 领取功法残卷失败: ${error.message || "未知错误"}`,
+          message: `=== ${tokenName} 领取功法残卷失败: ${error.message || "未知错误"}`,
           type: "error",
         });
       } finally {
@@ -152,7 +216,7 @@ export function createTasksLegacy(deps) {
         releaseConnectionSlot();
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          message: `${tokenName} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
           type: "info",
         });
       }
