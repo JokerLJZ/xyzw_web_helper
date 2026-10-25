@@ -16,13 +16,13 @@ test('请求串行并按上次响应完成补足800ms，包含初始化与配置
   assert.deepEqual(sent, [['role_getroleinfo', 0], ['system_getdatabundlever', 1000], ['evotower_getinfo', 2000]]);
 });
 
-test('800ms战后等待不再叠加请求间隔', async () => {
+test('500ms战后等待不再叠加请求间隔', async () => {
   const t = timer(), sent = [];
   const request = createWeirdTowerRequester({ ...t, send: async cmd => { sent.push([cmd, t.now()]); return {}; } });
   await request('evotower_fight');
-  await t.pause(800);
+  await t.pause(500);
   await request('evotower_getinfo');
-  assert.deepEqual(sent, [['evotower_fight', 0], ['evotower_getinfo', 800]]);
+  assert.deepEqual(sent, [['evotower_fight', 0], ['evotower_getinfo', 500]]);
   assert.equal(t.waits.length, 1);
 });
 
@@ -77,13 +77,14 @@ test('账号错峰等待可停止，排队账号不再启动', async () => {
   assert.equal(t.now(), 100);
 });
 
-test('准备战斗响应后500ms发送战斗，其他请求仍等待800ms', async () => {
+test('爬塔三步间隔500ms，独立查询仍等待800ms', async () => {
   const t = timer(), sent = [];
   const request = createWeirdTowerRequester({ ...t, send: async cmd => { sent.push([cmd, t.now()]); t.advance(200); return {}; } });
   await request('evotower_readyfight');
   await request('evotower_fight');
-  await t.pause(800);
+  await t.pause(500);
   await request('evotower_getinfo');
   await request('evotower_readyfight');
-  assert.deepEqual(sent, [['evotower_readyfight', 0], ['evotower_fight', 700], ['evotower_getinfo', 1700], ['evotower_readyfight', 2700]]);
+  await request('evotower_getinfo');
+  assert.deepEqual(sent, [['evotower_readyfight', 0], ['evotower_fight', 700], ['evotower_getinfo', 1400], ['evotower_readyfight', 2100], ['evotower_getinfo', 3100]]);
 });

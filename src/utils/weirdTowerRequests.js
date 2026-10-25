@@ -25,11 +25,12 @@ async function wait(ms, pause, stopped, allowStopped = false) {
  * Never retries a request or introduces rate-limit cooldowns.
  */
 export function createWeirdTowerRequester({ send, intervalMs = 800, now = clock, pause = sleep, stopped = () => false, activeCount = () => 1 }) {
-  let lastCompleted = null, lastStarted = null, pending = Promise.resolve();
+  let lastCompleted = null, lastStarted = null, lastCommand = null, pending = Promise.resolve();
   return (cmd, params = {}, timeout = 5000, { phase = "初始化", allowStopped = false, beforeSend } = {}) => {
     const run = async () => {
-      // 战斗准备完成后500ms即可发送结算，其他指令保持原间隔。
-      const requestInterval = cmd === "evotower_fight" ? Math.min(intervalMs, 500) : intervalMs;
+      // 爬塔三步使用500ms间隔，独立查询和领奖保持原间隔。
+      const requestInterval = (cmd === "evotower_fight" || cmd === "evotower_readyfight" ||
+        (cmd === "evotower_getinfo" && lastCommand === "evotower_fight")) ? Math.min(intervalMs, 500) : intervalMs;
       await wait(lastCompleted === null ? 0 : Math.max(0, requestInterval - (now() - lastCompleted)), pause, stopped, allowStopped);
       beforeSend?.();
       const started = now();
@@ -44,7 +45,7 @@ export function createWeirdTowerRequester({ send, intervalMs = 800, now = clock,
         const error = new Error(`${cause?.message || "请求失败"}（阶段=${phase}，指令=${cmd}，错误码=${code ?? "无"}，请求间隔=${gap === null ? "首次" : `${gap}ms`}，活跃账号=${activeCount()}）`);
         Object.assign(error, { code, cmd, phase, requestGapMs: gap, stopped: cause?.stopped, interrupted: cause?.interrupted });
         throw error;
-      } finally { lastCompleted = now(); }
+      } finally { lastCompleted = now(); lastCommand = cmd; }
     };
     const result = pending.then(run);
     pending = result.catch(() => {});
