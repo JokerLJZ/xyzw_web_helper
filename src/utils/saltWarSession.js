@@ -1,6 +1,8 @@
 import { bon } from "./bonProtocol.js";
 import { entries, get } from "./saltWarMap.js";
 export const saltBody = response => response?.rawData ?? response?.decodedBody ?? response?._raw?.decodedBody ?? response?._raw?.body ?? response?.body ?? response;
+const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Uint8Array);
+const fieldCollections = ["roles", "buildingData", "legions", "marches", "teamMap", "constant", "bIntent"];
 const clone = value => {
   if (value instanceof Map) return Object.fromEntries(entries(value).map(([k, v]) => [k, clone(v)]));
   if (Array.isArray(value)) return value.map(clone);
@@ -57,14 +59,26 @@ export class SaltWarSession {
   }
   async absorb(raw, cmd = "") {
     if (!raw || typeof raw !== "object" || this.seen.has(raw)) return;
-    const body = await inflateSaltEntry(raw);
+    let body;
+    try { body = await inflateSaltEntry(raw); }
+    catch { throw new Error("盐场进场/更新数据解压或BON解码失败，停止操作"); }
+    if (!isRecord(body)) throw new Error("盐场响应不是有效对象，停止操作");
     this.seen.add(raw);
     if (body.battlefieldId !== undefined && String(body.battlefieldId) !== String(this.info.battlefieldId)) return;
     if (body.battlefield?.id !== undefined && String(body.battlefield.id) !== String(this.info.battlefieldId)) return;
     if (body.battlefield) {
-      if (!this.battlefield) this.battlefield = {};
+      if (!isRecord(body.battlefield)) throw new Error("盐场战场对象格式无效，停止操作");
+      // Restore collection defaults once, as GDBattlefield does. Never apply
+      // snapshot defaults to subsequent sparse notifications.
+      if (!this.battlefield) this.battlefield = Object.fromEntries(fieldCollections.map(key => [key, {}]));
       const patch = { ...body.battlefield };
       if (patch.roles) {
+        const ownId = get(body.roleMap, this.mainRoleId)?.cId ?? this.selfCodeId;
+        const ownEntry = entries(patch.roles).find(([id]) => ownId && String(id) === String(ownId));
+        if (ownEntry) {
+          this.watchingSelf = null;
+          this.selfRemoved = ownEntry[1] === null;
+        }
         patch.roles = Object.fromEntries(entries(patch.roles).map(([id, role]) => [id,
           role && !get(this.battlefield.roles, id) ? newSaltRole(id, role) : role]));
       }
@@ -72,10 +86,10 @@ export class SaltWarSession {
     }
     if (body.roleMap) mergeSaltPatch(this.roleMap, body.roleMap);
     const mappedId = this.mainRoleId !== undefined ? get(this.roleMap, this.mainRoleId)?.cId : null;
-    if (mappedId) this.selfCodeId = mappedId;
+    if (this.selfCodeId && Number(mappedId) > 0 && String(mappedId) !== String(this.selfCodeId)) throw new Error("盐场本人映射冲突，停止操作");
+    this.selfCodeId = Number(mappedId) > 0 ? mappedId : null;
     if (body.role) mergeSaltPatch(this.role, body.role);
     if (body.battleList) mergeSaltPatch(this.battles, body.battleList);
-    if (body.roleCodeId && !this.selfCodeId && String(cmd).toLowerCase().includes("enterbattlefield")) this.selfCodeId = body.roleCodeId;
     if (body.battleInfo?.id !== undefined) this.battles[body.battleInfo.id] = clone(body.battleInfo);
     if (String(cmd).toLowerCase() === "war_endattackbuildingnotify") {
       this.ends.set(String(body.battleId), clone(body));
@@ -103,15 +117,48 @@ export class SaltWarSession {
     this.check();
     return saltBody(result);
   }
+  initializeSelf(mainRole) {
+    if (!this.selfRemoved && !this.self() && String(this.selfCodeId) === String(this.mainRoleId) && mainRole && Number(mainRole.legionId) > 0 && get(this.battlefield?.legions, mainRole.legionId)) {
+      this.watchingSelf = newSaltRole(this.mainRoleId, { legionID: Number(mainRole.legionId) });
+    }
+  }
+  entryProblem() {
+    if (!this.battlefield) return "未取得战场对象";
+    if (!this.selfCodeId) return "本人映射缺失";
+    if (!isRecord(this.battlefield.roles)) return "角色集合无效或缺失";
+    if (!this.self()) return "本人条目缺失，无法确认匿名角色";
+    if (!isRecord(this.battlefield.buildingData) || !entries(this.battlefield.buildingData).length) return "建筑数据为空或缺失";
+    return null;
+  }
+  entryDiagnostic(retried) {
+    const count = key => isRecord(this.battlefield?.[key]) ? entries(this.battlefield[key]).length : "缺失";
+    return `${this.entryShape || ""}，阶段=进场，补查=${retried ? "已执行" : "未执行"}，角色数=${count("roles")}，建筑数=${count("buildingData")}，军团数=${count("legions")}，本人映射=${this.selfCodeId ? "命中" : "未命中"}`;
+  }
   async enter(roleId, mainRole) {
     this.mainRoleId = roleId;
-    await this.send("war_enterbattlefield", { useGzip: false });
-    this.selfCodeId = get(this.roleMap, roleId)?.cId ?? this.selfCodeId;
-    if (!this.battlefield?.roles || !this.battlefield?.buildingData || !this.selfCodeId) throw new Error("盐场快照缺少本人或地图信息，停止操作");
-    // BattleField.setServerData creates a watching role from ROLE only when
-    // the declared identity still equals the main role ID. Never guess an anonymous code.
-    if (!this.self() && String(this.selfCodeId) === String(roleId) && mainRole && Number(mainRole.legionId) > 0 && get(this.battlefield.legions, mainRole.legionId)) {
-      this.watchingSelf = { codeIdV2: roleId, legionID: Number(mainRole.legionId), state: "watching", position: { x: 0, y: 0 }, energy: 0, lordWeaponId: 0, petUId: "" };
+    const response = await this.send("war_enterbattlefield", { useGzip: false });
+    const body = await inflateSaltEntry(response);
+    this.entryShape = `压缩=${response?.data ? "是" : "否"}，原始角色集合=${body?.battlefield?.roles === undefined ? "省略" : "已提供"}，原始建筑集合=${body?.battlefield?.buildingData === undefined ? "省略" : "已提供"}`;
+    if ((body?.battlefieldId !== undefined && String(body.battlefieldId) !== String(this.info.battlefieldId)) ||
+        (body?.battlefield?.id !== undefined && String(body.battlefield.id) !== String(this.info.battlefieldId))) {
+      throw new Error("盐场进场响应战场ID不一致，停止操作");
+    }
+    // Only the matched request response can provide this consistency check.
+    // A broadcast for another player must never establish our identity.
+    const checkIdentity = () => {
+      if (Number(body?.roleCodeId) > 0 && this.selfCodeId && String(body.roleCodeId) !== String(this.selfCodeId)) {
+        throw new Error("盐场进场响应与本人映射冲突，停止操作");
+      }
+    };
+    checkIdentity();
+    this.initializeSelf(mainRole);
+    if (this.entryProblem()) {
+      try { await this.refresh(); }
+      catch (error) { throw new Error(`盐场进场补查失败：${error.message}（${this.entryDiagnostic(true)}）`); }
+      checkIdentity();
+      this.initializeSelf(mainRole);
+      const problem = this.entryProblem();
+      if (problem) throw new Error(`盐场${problem}，停止操作（${this.entryDiagnostic(true)}）`);
     }
     this.startPing();
     return this;

@@ -207,15 +207,162 @@ test('已占领盐田中心的周围格是客户端强制通行点，不是封�
   assert.ok(route.length > 0); assert.ok(route.some(p => p.x === 3));
 });
 
-test('未出战缺少本人条目时仅按客户端已确认身份生成watching展示，匿名编号不猜测', async () => {
-  for (const codeId of [100, 11]) {
-    const client = { connected: true, subscribePackets: () => () => {}, send() {}, sendWithPromise: async () => ({ battlefieldId: 'bf', roleCodeId: codeId, roleMap: { 100: { cId: codeId } }, battlefield: { roles: {}, buildingData: {}, legions: { 1: { id: 1 } } } }) };
-    const session = new SaltWarSession({ client, info: { battlefieldId: 'bf' } });
-    await session.enter(100, { roleId: 100, legionId: 1 });
-    if (codeId === 100) { assert.equal(session.self().state, 'watching'); assert.equal(session.self().legionID, 1); }
-    else assert.equal(session.self(), undefined);
-    session.close();
+// These are model-based fixtures from c501f, not live account captures.
+function entryCase(response, refreshResponse = response) {
+  let listener;
+  const commands = [], waits = [];
+  const client = { connected: true, subscribePackets(fn) { listener = fn; return () => {}; }, send() {},
+    async sendWithPromise(cmd) {
+      commands.push(cmd);
+      if (cmd === 'war_enterbattlefield') return response;
+      if (cmd === 'war_getbattlefieldinfo') {
+        if (refreshResponse instanceof Error) throw refreshResponse;
+        return refreshResponse;
+      }
+      throw new Error(`进场阶段不应写入: ${cmd}`);
+    } };
+  const session = new SaltWarSession({ client, info: { battlefieldId: 'bf' }, now: () => 1000, sleep: async ms => { waits.push(ms); } });
+  return { session, commands, waits, emit: packet => listener(packet), enter: () => session.enter(100, { roleId: 100, legionId: 1 }) };
+}
+const entrySnapshot = () => ({ battlefieldId: 'bf', roleCodeId: 100, roleMap: { 100: { cId: 100 } },
+  battlefield: { id: 'bf', buildingData: { '1_1': { id: '1_1', position: { x: 1, y: 1 } } }, legions: { 1: { id: 1 } } } });
+
+test('省略空roles与显式空roles均按模型生成watching本人，不进行多余查询', async () => {
+  for (const explicit of [false, true]) {
+    const body = entrySnapshot();
+    if (explicit) body.battlefield.roles = {};
+    const c = entryCase(body);
+    try {
+      await c.enter();
+      assert.equal(c.session.self().state, 'watching');
+      assert.equal(c.session.self().legionID, 1);
+      assert.deepEqual(c.session.battlefield.roles, {});
+      assert.deepEqual(c.commands, ['war_enterbattlefield']);
+      await c.session.absorb({ battlefield: { roles: { 100: { state: 'idle', energy: 50 } } } });
+      assert.equal(c.session.self().state, 'idle');
+      await c.session.absorb({ battlefield: { roles: { 100: { energy: 40 } } } });
+      assert.equal(c.session.self().state, 'idle');
+      await c.session.absorb({ battlefield: { marches: { 1: { id: 1 } } } });
+      await c.session.absorb({ battlefield: { marches: { 1: null } } });
+      await c.session.absorb({ battlefield: { roles: { 100: { energy: 30 } } } });
+      assert.deepEqual(c.session.battlefield.marches, {});
+    } finally { c.session.close(); }
   }
+});
+
+test('本人真实条目出现后删除不能复用旧watching展示', async () => {
+  const c = entryCase(entrySnapshot());
+  try {
+    await c.enter();
+    await c.session.absorb({ battlefield: { roles: { 100: { state: 'idle' } } } });
+    await c.session.absorb({ battlefield: { roles: { 100: null } } });
+    assert.equal(c.session.self(), undefined);
+    await c.session.absorb({ battlefield: { marches: {} } });
+    assert.equal(c.session.self(), undefined);
+  } finally { c.session.close(); }
+});
+
+test('压缩BON进场快照省略空roles也能初始化', async () => {
+  const bytes = bon.encode(entrySnapshot());
+  const data = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer());
+  const c = entryCase({ data });
+  try { await c.enter(); assert.equal(c.session.self().state, 'watching'); assert.equal(c.commands.length, 1); }
+  finally { c.session.close(); }
+});
+
+test('匿名编号有真实本人条目时正常进入，无条目时仅补查一次且不猜测', async () => {
+  for (const present of [true, false]) {
+    const body = entrySnapshot(); body.roleMap[100].cId = 11; body.roleCodeId = 11;
+    if (present) body.battlefield.roles = { 11: { legionID: 1 } };
+    const c = entryCase(body);
+    try {
+      if (present) { await c.enter(); assert.equal(c.session.selfCodeId, 11); assert.equal(c.session.self().state, 'watching'); }
+      else { await assert.rejects(c.enter(), /本人条目缺失/); assert.equal(c.session.self(), undefined); assert.equal(c.commands.length, 2); }
+    } finally { c.session.close(); }
+  }
+});
+
+test('本人映射缺失时不使用roleCodeId猜测，补查后日志不含角色或认证数据', async () => {
+  const body = entrySnapshot(); delete body.roleMap;
+  body.token = 'SECRET_TOKEN'; body.url = 'wss://host?p=SECRET';
+  const c = entryCase(body);
+  try {
+    await assert.rejects(c.enter(), error => /本人映射缺失/.test(error.message) && /原始角色集合=省略/.test(error.message) && !/SECRET|100|wss:/.test(error.message));
+    assert.equal(c.session.selfCodeId, null);
+    assert.deepEqual(c.commands, ['war_enterbattlefield', 'war_getbattlefieldinfo']);
+    assert.deepEqual(c.waits, [500]);
+  } finally { c.session.close(); }
+});
+
+test('补查才取得本人映射时仍核对初次进场响应编号', async () => {
+  const initial = entrySnapshot(); delete initial.roleMap; initial.roleCodeId = 11;
+  const c = entryCase(initial, entrySnapshot());
+  try { await assert.rejects(c.enter(), /本人映射冲突/); assert.equal(c.commands.length, 2); }
+  finally { c.session.close(); }
+});
+
+test('建筑集合省略、空集合或null均不能通过进场执行条件', async () => {
+  for (const value of [undefined, {}, null]) {
+    const body = entrySnapshot();
+    if (value === undefined) delete body.battlefield.buildingData;
+    else body.battlefield.buildingData = value;
+    const c = entryCase(body);
+    try { await assert.rejects(c.enter(), /建筑数据为空或缺失/); assert.equal(c.commands.length, 2); }
+    finally { c.session.close(); }
+  }
+});
+
+test('信息缺失仅补查一次，可接收补查期间通知补全后继续', async () => {
+  const body = entrySnapshot(); delete body.battlefield.buildingData;
+  const c = entryCase(body, { battlefieldId: 'bf' });
+  c.session.sleep = async ms => {
+    c.waits.push(ms);
+    c.emit({ cmd: 'war_buildingchangenotify', rawData: { battlefieldId: 'bf', battlefield: { buildingData: entrySnapshot().battlefield.buildingData } } });
+  };
+  try { await c.enter(); assert.equal(c.session.self().state, 'watching'); assert.equal(c.commands.length, 2); assert.deepEqual(c.waits, [500]); }
+  finally { c.session.close(); }
+});
+
+test('未取得战场对象时不凭默认字段伪造快照', async () => {
+  const c = entryCase({ battlefieldId: 'bf', roleMap: { 100: { cId: 100 } } });
+  try { await assert.rejects(c.enter(), /未取得战场对象/); assert.equal(c.session.battlefield, null); assert.equal(c.commands.length, 2); }
+  finally { c.session.close(); }
+});
+
+test('进场场次错误或身份冲突立即停止，不进行补查或写入', async () => {
+  for (const problem of ['field', 'identity']) {
+    const body = entrySnapshot();
+    if (problem === 'field') body.battlefieldId = 'other';
+    else body.roleCodeId = 11;
+    const c = entryCase(body);
+    try { await assert.rejects(c.enter(), problem === 'field' ? /战场ID不一致/ : /本人映射冲突/); assert.equal(c.commands.length, 1); }
+    finally { c.session.close(); }
+  }
+});
+
+test('其他玩家进场通知不决定本人身份，错误场次通知不污染快照', async () => {
+  const body = entrySnapshot(); delete body.roleMap;
+  const c = entryCase(body);
+  c.emit({ cmd: 'war_enterbattlefieldresp', rawData: { battlefieldId: 'bf', roleCodeId: 11 } });
+  c.emit({ cmd: 'war_enterbattlefieldresp', rawData: { battlefieldId: 'other', roleMap: { 100: { cId: 11 } } } });
+  try { await assert.rejects(c.enter(), /本人映射缺失/); assert.equal(c.session.selfCodeId, null); }
+  finally { c.session.close(); }
+});
+
+test('补查失败保留明确错误，补查前停止则不发送查询', async () => {
+  for (const stop of [false, true]) {
+    const body = entrySnapshot(); delete body.battlefield.buildingData;
+    const c = entryCase(body, new Error('服务器错误: 123456'));
+    if (stop) c.session.sleep = async () => { c.session.shouldStop = () => true; };
+    try { await assert.rejects(c.enter(), stop ? /已停止/ : /123456/); assert.equal(c.commands.length, stop ? 1 : 2); }
+    finally { c.session.close(); }
+  }
+});
+
+test('损坏压缩数据明确报告解压或解码失败', async () => {
+  const c = entryCase({ data: new Uint8Array([1, 2, 3]) });
+  try { await assert.rejects(c.enter(), /解压或BON解码失败/); assert.equal(c.commands.length, 1); }
+  finally { c.session.close(); }
 });
 
 test('原始响应省略默认watching仍复制主线并提交出战，不跳过布阵', async () => {
