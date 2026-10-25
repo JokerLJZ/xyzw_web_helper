@@ -86,7 +86,7 @@ test("长程爬塔每层仅一次战后查询，任务只在3/6/10次达标时�
   assert.equal(result.climbed, 12);
   assert.equal(f.calls.filter(c => c.cmd === "evotower_getinfo").length, 13);
   assert.deepEqual(f.calls.filter(c => c.cmd === "evotower_claimtask").map(c => c.params.taskId), [1, 2, 3]);
-  assert.deepEqual(f.pauses, Array(12).fill(1500));
+  assert.deepEqual(f.pauses, Array(12).fill(800));
   assert.equal(f.calls.filter(c => c.cmd === "evotower_readyfight").length, 12);
 });
 
@@ -486,15 +486,15 @@ test("初始化角色可复用，领奖使库存可能变化时仍重新核对",
   assert.equal(g.calls.filter(c => c.cmd === 'role_getroleinfo').length, 1);
 });
 
-test("整个执行器的连续领奖与readyFight/fight使用同一节流，保留原有长等待", async () => {
+test("整个执行器的战斗间隔500ms、战后等待800ms，领奖仍为800ms", async () => {
   const f = fixture(); f.state.tower.energy = 3;
   let time = 0; const sent = [];
   const result = await f.run({ mode: 'climb', maxClimbs: 3, requestIntervalMs: 800,
     requestNow: () => time, pause: async ms => { time += ms; },
     send: async (cmd, params) => { sent.push({ cmd, time }); return f.send(cmd, params); } });
   assert.equal(result.climbed, 3);
-  for (let i = 1; i < sent.length; i++) assert.ok(sent[i].time - sent[i - 1].time >= 800, sent[i].cmd);
-  for (let i = 0; i < sent.length - 1; i++) if (sent[i].cmd === 'evotower_fight') assert.equal(sent[i + 1].time - sent[i].time, 1500);
+  for (let i = 1; i < sent.length; i++) assert.ok(sent[i].time - sent[i - 1].time >= (sent[i].cmd === 'evotower_fight' ? 500 : 800), sent[i].cmd);
+  for (let i = 0; i < sent.length - 1; i++) if (sent[i].cmd === 'evotower_fight') assert.equal(sent[i + 1].time - sent[i].time, 800);
   assert.equal(sent.filter(c => c.cmd === 'evotower_claimtask').length, 1);
 });
 

@@ -261,7 +261,7 @@ export async function runWeirdTowerAccount({
         try { apply(await request("evotower_fight", { battleNum: 1, winNum: 1 }, 10000)); }
         catch (error) { if (!timedOut(error) || error.stopped) throw error; fightError = error; }
         // 保留战后等待；统一请求入口只补足剩余间隔，不进行错误退避。
-        await pause(1500);
+        await pause(800);
         await getTower();
         if (Number(tower.towerId) <= before.towerId && Number(tower.energy) >= before.energy) {
           throw new Error(`怪异塔战斗进度未确认${fightError ? `：${fightError.message}` : ""}`);

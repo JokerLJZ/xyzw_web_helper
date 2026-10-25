@@ -28,7 +28,9 @@ export function createWeirdTowerRequester({ send, intervalMs = 800, now = clock,
   let lastCompleted = null, lastStarted = null, pending = Promise.resolve();
   return (cmd, params = {}, timeout = 5000, { phase = "初始化", allowStopped = false, beforeSend } = {}) => {
     const run = async () => {
-      await wait(lastCompleted === null ? 0 : Math.max(0, intervalMs - (now() - lastCompleted)), pause, stopped, allowStopped);
+      // 战斗准备完成后500ms即可发送结算，其他指令保持原间隔。
+      const requestInterval = cmd === "evotower_fight" ? Math.min(intervalMs, 500) : intervalMs;
+      await wait(lastCompleted === null ? 0 : Math.max(0, requestInterval - (now() - lastCompleted)), pause, stopped, allowStopped);
       beforeSend?.();
       const started = now();
       const gap = lastStarted === null ? null : Math.max(0, Math.round(started - lastStarted));
