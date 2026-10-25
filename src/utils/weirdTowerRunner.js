@@ -1,3 +1,4 @@
+import { createWeirdTowerRequester } from "./weirdTowerRequests.js";
 import { activityBody, mapEntries, mapGet } from "./rechargeActivity.js";
 import { claimPendingEvoTowerRewards, normalizeWeirdTowerClimbCount } from "./evoTowerRewards.js";
 
@@ -40,9 +41,11 @@ const timedOut = error => /timeout|timed out|超时/i.test(error?.message || "")
 export async function runWeirdTowerAccount({
   send, config, mode = "all", maxClimbs, formation,
   now = Date.now, stopped = () => false, log = () => {}, pause = sleep,
-  maxActions = 10000,
+  maxActions = 10000, requestIntervalMs = 800, requestNow, pacedSend, initialRole,
 }) {
-  let tower, box, role, activity, share;
+  let tower, box, role = initialRole, activity, share;
+  let phase = "读取状态", towerReads = 0, keysDirty = false, roleDirty = false;
+  const paced = pacedSend || createWeirdTowerRequester({ send, intervalMs: requestIntervalMs, now: requestNow, pause, stopped });
   let actId, actions = 0, climbed = 0, used = 0, merged = 0, mergeRounds = 0;
   const failures = [];
   const date = weirdTowerDate(now());
@@ -76,13 +79,15 @@ export async function runWeirdTowerAccount({
   const request = async (cmd, params = {}, timeout = 5000) => {
     check();
     if (++actions > maxActions) throw new Error("怪异塔达到安全操作上限，尚未完成");
-    const response = activityBody(await send(cmd, params, timeout));
+    const response = activityBody(await paced(cmd, params, timeout, { phase, beforeSend: check }));
     if (response?.code) throw new Error(`${cmd} 服务器错误: ${response.code}`);
     check();
     return response;
   };
   const getTower = async () => {
     const data = await request("evotower_getinfo");
+    towerReads++;
+    keysDirty = false;
     const snapshot = fullField(data, "evoTower", "怪异塔状态");
     tower = merge({ towerId: 0, rewardTowerId: 0, energy: 0, lotteryLeftCnt: 0,
       taskMap: {}, taskClaimMap: {}, legionTaskMap: {}, legionTaskClaimMap: {}, orderPassReward: {} }, snapshot);
@@ -102,6 +107,7 @@ export async function runWeirdTowerAccount({
     const data = await request("role_getroleinfo");
     if (!data?.role) throw new Error("未取得怪异塔角色状态");
     role = data.role;
+    roleDirty = false;
   };
   const getActivity = async () => {
     const data = await request("activity_get");
@@ -114,6 +120,11 @@ export async function runWeirdTowerAccount({
   // 写超时仅核对一次，不能证明成功就停止；不盲目重发写请求。
   const write = async (cmd, params, confirmed, refresh, timeout = 5000) => {
     let error;
+    // Reward writes may update inventory through a separate global notify.
+    if (/^(evotower_claim|mergebox_claim|activity_battlepassrewardclaim|role_asyncclaimrewardv2)/.test(cmd)) {
+      keysDirty = true;
+      roleDirty = true;
+    }
     try { apply(await request(cmd, params, timeout)); }
     catch (caught) {
       if (!timedOut(caught) || caught.stopped) throw caught;
@@ -199,7 +210,7 @@ export async function runWeirdTowerAccount({
   const collect = async ({ external = false } = {}) => {
     await claimTower();
     if (external) {
-      await getRole();
+      if (!role || roleDirty) await getRole();
       if (Number(role.legionId || 0) > 0) {
         for (const task of rows(config.EvoTowerTaskConf)) {
           if (Number(task.evoTowerTaskType) !== 2 || Number(mapGet(tower.legionTaskMap, task.Id) || 0) < Number(task.taskPara) || mapGet(tower.legionTaskClaimMap, task.Id)) continue;
@@ -249,7 +260,7 @@ export async function runWeirdTowerAccount({
         let fightError;
         try { apply(await request("evotower_fight", { battleNum: 1, winNum: 1 }, 10000)); }
         catch (error) { if (!timedOut(error) || error.stopped) throw error; fightError = error; }
-        // 保持现有战后1500ms等待，不增加间隔、退避或并发限制。
+        // 保留战后等待；统一请求入口只补足剩余间隔，不进行错误退避。
         await pause(1500);
         await getTower();
         if (Number(tower.towerId) <= before.towerId && Number(tower.energy) >= before.energy) {
@@ -266,7 +277,7 @@ export async function runWeirdTowerAccount({
       if (switched) {
         // 即便主动停止也尝试恢复阵容。
         try {
-          const restored = activityBody(await send("presetteam_saveteam", { teamId: previousFormation }, 5000));
+          const restored = activityBody(await paced("presetteam_saveteam", { teamId: previousFormation }, 5000, { phase: "恢复阵容", allowStopped: true }));
           if (restored?.code) throw new Error(`服务器错误: ${restored.code}`);
         } catch (error) {
           throw new Error(`${climbError ? `${climbError.message}；` : ""}恢复阵容失败：${error.message}`);
@@ -356,10 +367,11 @@ export async function runWeirdTowerAccount({
       return false;
     }
     const before = number(box.costTotalCnt, "累计使用");
+    const readsBefore = towerReads;
     await write("mergebox_openbox", { actType: 1, pos: { gridX: launch.x, gridY: launch.y } },
       () => Number(box.costTotalCnt) > before, async () => { await getBox(); await getTower(); });
     // 钥匙可能仅在全局通知中更新；查询该账号服务器库存，不自行减库存推算返还。
-    await getTower();
+    if (towerReads === readsBefore) await getTower();
     used++;
     await pause(500);
     await claimMergeRewards();
@@ -368,23 +380,36 @@ export async function runWeirdTowerAccount({
 
   try {
     await getTower();
-    if (mode === "climb") await climb();
+    if (mode === "climb") { phase = "爬塔"; await climb(); }
     else {
       await getBox();
+      phase = "初始领奖";
       await collect({ external: true });
       if (mode === "all") {
+        phase = "爬塔";
+        const climbedFrom = climbed;
         try { await climb(); }
         catch (error) {
           if (error.stopped) throw error;
           failures.push(`爬塔：${error.message}`);
           log(`爬塔未完成：${error.message}；核对状态后继续领取和使用钥匙`, "warning");
         }
-        await getTower();
-        await getBox();
-        await collect({ external: true });
+        phase = "战后领奖";
+        // Each completed fight already refreshed the tower. On an interrupted
+        // climb, query before moving to the independent rewards/key stage.
+        if (failures.length) await getTower();
+        if (climbed > climbedFrom || failures.length) {
+          await getBox();
+          // Club/share rewards can change while fighting. Preserve their
+          // checks; only skip the whole second pass when no fight ran.
+          role = null;
+          await collect({ external: true });
+        }
       }
       if (mode === "use" || mode === "all") {
-        await getTower();
+        phase = "使用钥匙";
+        // Earlier reward writes may grant keys via a separate notification.
+        if (keysDirty) await getTower();
         // 每次返还后重新读取库存；单次点击不循环重查俱乐部/邀请/通行证。
         while (true) {
           check();
@@ -399,6 +424,7 @@ export async function runWeirdTowerAccount({
           if (!await useOne()) break;
         }
       } else if (mode === "merge") {
+        phase = "合成";
         while (await mergeOnce()) check();
       }
       await claimMergeRewards();

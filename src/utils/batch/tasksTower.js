@@ -1,3 +1,4 @@
+import { createWeirdTowerRequester, createWeirdTowerStartGate } from "../weirdTowerRequests.js";
 import { runWeirdTowerAccount } from "../weirdTowerRunner.js";
 /**
  * 爬塔类任务
@@ -51,6 +52,9 @@ export function createTasksTower(deps) {
     currentSettings,
     loadSettings,
   } = deps;
+
+  const weirdRequestOptions = deps.weirdTowerRequestOptions || {};
+  const startWeirdAccount = createWeirdTowerStartGate({ ...deps.weirdTowerStartOptions, stopped: () => shouldStop.value });
 
   /**
    * 爬塔
@@ -309,32 +313,49 @@ export function createTasksTower(deps) {
       shouldStop.value = false;
       tokenIds.forEach(id => { tokenStatus.value[id] = "waiting"; });
     }
+    let failed = 0, completed = 0, stoppedCount = 0;
     try {
       await Promise.all(tokenIds.map(async tokenId => {
         if (shouldStop.value) return;
         const token = tokens.value.find(item => item.id === tokenId);
         const name = token?.name || tokenId;
-        let connected = false;
+        let connected = false, started = false;
         if (manageState) tokenStatus.value[tokenId] = "running";
         const log = (text, type = "info") => addLog({ time: new Date().toLocaleTimeString(), message: `${name} ${text}`, type });
         try {
-          if (manageConnection) { await ensureConnection(tokenId); connected = true; }
+          const paced = createWeirdTowerRequester({
+            ...weirdRequestOptions,
+            send: (cmd, params, timeout) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, timeout),
+            stopped: () => shouldStop.value,
+            activeCount: () => connectionQueue?.active ?? Object.values(tokenStatus.value).filter(status => status === "running").length,
+          });
+          const start = async () => { if (!started) { await startWeirdAccount(); started = true; } };
+          let initial;
+          if (manageConnection) {
+            initial = await ensureConnection(tokenId, 2, null, { readOnly: true, beforeConnect: start,
+              request: (cmd, params, timeout) => paced(cmd, params, timeout, { phase: "连接初始化" }) });
+            connected = true;
+          }
           if (shouldStop.value) { if (manageState) tokenStatus.value[tokenId] = "stopped"; return; }
-          const send = (cmd, params = {}, timeout = 5000) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, timeout);
+          // Reused/scheduled connections skip beforeConnect but still stagger.
+          await start();
+          const send = (cmd, params = {}, timeout = 5000) => paced(cmd, params, timeout, { phase: "读取配置" });
           // 配置按版本共用缓存，账号库存、任务和棋盘始终保存在各自的调用内。
           const config = await (deps.loadWeirdTowerConfig || loadRechargeConfig)(send);
           const settings = loadSettings?.(tokenId) || currentSettings;
-          const result = await runWeirdTowerAccount({ send, config, mode,
+          const result = await runWeirdTowerAccount({ send, pacedSend: paced, config, mode, initialRole: initial?.role,
             maxClimbs: batchSettings.weirdTowerClimbCount, formation: settings?.towerFormation,
             now: () => tokenStore.getWebSocketClient?.(tokenId)?.getServerTime?.() ?? Date.now(),
             stopped: () => shouldStop.value, log,
           });
           if (manageState) tokenStatus.value[tokenId] = result.status;
+          if (result.status === "stopped") stoppedCount++; else completed++;
           log(result.status === "stopped" ? "怪异塔已停止" : `怪异塔完成：爬塔${result.climbed}次，使用钥匙${result.used}次，合成${result.merged}次`, result.status === "stopped" ? "warning" : "success");
           return result;
         } catch (error) {
-          if (manageState) tokenStatus.value[tokenId] = "failed";
-          log(`怪异塔失败：${error.message}`, "error");
+          if (error.stopped || error.interrupted) stoppedCount++; else failed++;
+          if (manageState) tokenStatus.value[tokenId] = error.stopped || error.interrupted ? "stopped" : "failed";
+          log(`怪异塔${error.stopped || error.interrupted ? "已停止" : "失败"}：${error.message}`, error.stopped || error.interrupted ? "warning" : "error");
           if (throwOnError) throw error;
         } finally {
           if (connected) { tokenStore.closeWebSocketConnection(tokenId); releaseConnectionSlot(); }
@@ -343,7 +364,11 @@ export function createTasksTower(deps) {
     } finally {
       if (manageState) { isRunning.value = false; currentRunningTokenId.value = null; }
     }
-    if (showMessage) message.success("怪异塔批量处理结束");
+    if (showMessage) {
+      const summary = `怪异塔批量处理结束：完成${completed}，失败${failed}${stoppedCount || shouldStop.value ? "，存在已停止账号" : ""}`;
+      if (failed || stoppedCount || shouldStop.value) message.warning?.(summary);
+      else message.success(summary);
+    }
   };
   const climbWeirdTower = options => runWeirdTowerBatch("climb", options);
   const batchClaimFreeEnergy = options => runWeirdTowerBatch("claim", options);

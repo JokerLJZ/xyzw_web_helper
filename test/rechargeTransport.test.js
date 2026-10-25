@@ -87,3 +87,16 @@ test("竞猜领奖实际BON报文保留数字赛程和完整字符串队伍ID", 
   assert.deepEqual(bon.decode(packet.body), {scheduleId:124,teamId:"A10000037"});
   assert.equal(packet.hint, undefined);
 });
+
+test('服务器错误在编号匹配与命令匹配路径均保留code和原始cmd', async () => {
+  for (const numbered of [true, false]) {
+    const client = new XyzwWebSocketClient({ url: 'wss://test', utils: {} });
+    client.connected = true; client.socket = { readyState: 1, close() {} };
+    const pending = client.sendWithPromise('evotower_readyfight', {}, 1000);
+    const packet = { cmd: 'evotower_readyfightresp', code: 400340, body: {} };
+    if (numbered) packet.resp = Number(Object.keys(client.promises)[0]);
+    client._handlePromiseResponse(packet);
+    await assert.rejects(pending, error => error.code === 400340 && error.cmd === 'evotower_readyfight' && /操作过快/.test(error.message));
+    client.disconnect();
+  }
+});

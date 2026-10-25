@@ -76,7 +76,7 @@ function fixture() {
     }
     assert.fail(`未预期的请求${cmd}`);
   };
-  const run = options => runWeirdTowerAccount({ send, config, now: () => NOW, pause: async ms => pauses.push(ms), ...options });
+  const run = options => runWeirdTowerAccount({ send, config, requestIntervalMs: 0, now: () => NOW, pause: async ms => pauses.push(ms), ...options });
   return { state, calls, send, run, pauses };
 }
 
@@ -200,6 +200,7 @@ function batchDeps(accounts) {
   return { selectedTokens: { value: Object.keys(accounts) }, tokens: { value: Object.keys(accounts).map(id => ({ id, name: id })) },
     tokenStatus: { value: statuses }, isRunning: { value: false }, shouldStop: { value: false }, currentRunningTokenId: { value: null },
     batchSettings: { weirdTowerClimbCount: 1, maxActive: 2 }, currentSettings: { towerFormation: 1 },
+    weirdTowerRequestOptions: { intervalMs: 0 }, weirdTowerStartOptions: { intervalMs: 0 },
     loadWeirdTowerConfig: async () => config, ensureConnection: async id => connections.push(id), releaseConnectionSlot: () => releases.push(1),
     tokenStore: { sendMessageWithPromise: (id, ...args) => accounts[id].send(...args), getWebSocketClient: () => ({ getServerTime: () => NOW }), closeWebSocketConnection: () => {} },
     message: { success() {} }, addLog: value => logs.push(value), connections, releases, statuses, logs };
@@ -449,4 +450,98 @@ test("不可用箱子日志包含具体木箱、坐标和排除原因，刷新�
   assert.equal(result.status, "completed");
   assert.equal(f.calls.filter(c => c.cmd === "mergebox_getinfo").length, 2);
   assert.ok(logs.some(text => /怪异木箱.*坐标4,5.*未解锁/.test(text)));
+});
+
+test("开箱结果核对已读取库存时不再紧接重复查询，同样使用真实库存", async () => {
+  for (const timeout of [false, true]) {
+    const f = fixture(); f.state.tower.lotteryLeftCnt = 1;
+    const result = await f.run({ mode: 'use', send: async (cmd, params) => {
+      const result = await f.send(cmd, params);
+      if (cmd === 'mergebox_openbox') {
+        if (timeout) throw new Error('timeout');
+        return {}; // sparse write response requires a single state refresh
+      }
+      return result;
+    } });
+    assert.equal(result.used, 1);
+    assert.equal(f.calls.filter(c => c.cmd === 'mergebox_openbox').length, 1);
+    assert.equal(f.calls.filter(c => c.cmd === 'evotower_getinfo').length, 2); // initial + confirmation
+  }
+});
+
+test("无能量一键流程复用已确认状态，不重复全量读取奖励来源", async () => {
+  const f = fixture();
+  await f.run();
+  for (const cmd of ['evotower_getinfo', 'mergebox_getinfo', 'role_getroleinfo', 'evotower_getshareinfo', 'activity_get']) {
+    assert.equal(f.calls.filter(c => c.cmd === cmd).length, 1, cmd);
+  }
+});
+
+test("初始化角色可复用，领奖使库存可能变化时仍重新核对", async () => {
+  const f = fixture();
+  await f.run({ mode: 'claim', initialRole: snapshot(f.state.role) });
+  assert.equal(f.calls.filter(c => c.cmd === 'role_getroleinfo').length, 0);
+  const g = fixture(); g.state.tower.towerId = 10;
+  await g.run({ mode: 'claim', initialRole: snapshot(g.state.role) });
+  assert.equal(g.calls.filter(c => c.cmd === 'role_getroleinfo').length, 1);
+});
+
+test("整个执行器的连续领奖与readyFight/fight使用同一节流，保留原有长等待", async () => {
+  const f = fixture(); f.state.tower.energy = 3;
+  let time = 0; const sent = [];
+  const result = await f.run({ mode: 'climb', maxClimbs: 3, requestIntervalMs: 800,
+    requestNow: () => time, pause: async ms => { time += ms; },
+    send: async (cmd, params) => { sent.push({ cmd, time }); return f.send(cmd, params); } });
+  assert.equal(result.climbed, 3);
+  for (let i = 1; i < sent.length; i++) assert.ok(sent[i].time - sent[i - 1].time >= 800, sent[i].cmd);
+  for (let i = 0; i < sent.length - 1; i++) if (sent[i].cmd === 'evotower_fight') assert.equal(sent[i + 1].time - sent[i].time, 1500);
+  assert.equal(sent.filter(c => c.cmd === 'evotower_claimtask').length, 1);
+});
+
+test("批量初始化与配置共用节流入口，并要求只读初始化及启动错峰", async () => {
+  const f = fixture(), deps = batchDeps({ a: f });
+  let time = 0; const sent = [];
+  deps.weirdTowerRequestOptions = { now: () => time, pause: async ms => { time += ms; } };
+  deps.tokenStore.sendMessageWithPromise = async (_id, cmd, params) => { sent.push([cmd, time]); return f.send(cmd, params); };
+  deps.ensureConnection = async (_id, _retries, _slot, options) => {
+    assert.equal(options.readOnly, true);
+    await options.beforeConnect();
+    return options.request('role_getroleinfo', {}, 5000);
+  };
+  deps.loadWeirdTowerConfig = async send => { await send('evotower_getinfo'); return config; };
+  await createTasksTower(deps).batchWeirdTower();
+  assert.equal(deps.statuses.a, 'completed');
+  assert.equal(sent.filter(([cmd]) => cmd === 'role_getroleinfo').length, 1);
+  assert.equal(sent.some(([cmd]) => cmd === 'fight_startlevel'), false);
+  for (let i = 1; i < sent.length; i++) assert.ok(sent[i][1] - sent[i - 1][1] >= 800);
+});
+
+test("业务400340不重新连接或刷新Token，失败汇总使用警告", async () => {
+  const f = fixture(), deps = batchDeps({ a: f });
+  const notices = [];
+  deps.message = { success: text => notices.push(['success', text]), warning: text => notices.push(['warning', text]) };
+  deps.tokenStore.refreshTokenCredentials = () => assert.fail('业务限频不刷新Token');
+  deps.tokenStore.sendMessageWithPromise = async (_id, cmd, params) => {
+    if (cmd === 'evotower_getinfo') throw Object.assign(new Error('服务器错误: 400340 - 操作过快'), { code: 400340 });
+    return f.send(cmd, params);
+  };
+  await createTasksTower(deps).batchWeirdTower();
+  assert.deepEqual(deps.connections, ['a']); assert.equal(deps.releases.length, 1);
+  assert.equal(deps.statuses.a, 'failed');
+  assert.match(deps.logs.at(-1).message, /a 怪异塔失败.*阶段=读取状态.*指令=evotower_getinfo.*400340/);
+  assert.equal(notices[0][0], 'warning'); assert.match(notices[0][1], /失败1/);
+});
+
+test("节流等待跨日期后不发送原日期的写请求", async () => {
+  const f = fixture(); f.state.tower.energy = 1;
+  let time = NOW, requestTime = 0;
+  const send = async (cmd, params) => {
+    const result = await f.send(cmd, params);
+    if (cmd === 'evotower_readyfight') time = Date.parse('2026-10-22T00:00:00+08:00') - 50;
+    return result;
+  };
+  await assert.rejects(f.run({ mode: 'climb', requestIntervalMs: 800, now: () => time,
+    requestNow: () => requestTime,
+    pause: async ms => { requestTime += ms; time += ms; }, send }), /周期已变化/);
+  assert.equal(f.calls.some(c => c.cmd === 'evotower_fight'), false);
 });

@@ -25,6 +25,7 @@ const errorCodeMap = {
   7500100: "密码输入错误",
   7500120: "密码输入错误次数已达上限",
   200400: "操作太快，请稍后再试",
+  400340: "操作过快，请稍后重试",
   200760: "您当前看到的界面已发生变化，请重新登录",
   2300190: "今天已经签到过了",
   2300370: "俱乐部商品购买数量超出上限",
@@ -1265,7 +1266,7 @@ export class XyzwWebSocketClient {
           (typeof packet.error === "string" && packet.error) || packet.hint || errorCodeMap[packet.code] || "未知错误";
 
         promiseData.reject(
-          new Error(`服务器错误: ${packet.code} - ${errorDesc}`),
+          Object.assign(new Error(`服务器错误: ${packet.code} - ${errorDesc}`), { code: packet.code, cmd: promiseData.originalCmd }),
         );
       }
       return;
@@ -1545,7 +1546,7 @@ export class XyzwWebSocketClient {
             (typeof packet.error === "string" && packet.error) || packet.hint || errorCodeMap[packet.code] || "未知错误";
 
           promiseData.reject(
-            new Error(`服务器错误: ${packet.code} - ${errorDesc}`),
+            Object.assign(new Error(`服务器错误: ${packet.code} - ${errorDesc}`), { code: packet.code, cmd: promiseData.originalCmd }),
           );
         }
         break;

@@ -7973,10 +7973,11 @@ const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null, op
 
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `正在连接... (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+      message: `${latestToken.name || tokenId} 正在连接... (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
       type: "info",
     });
 
+    await options.beforeConnect?.();
     connected = await connectWithTokenRefresh({
       tokenId,
       getToken: (id) => tokens.value.find((token) => token.id === id),
@@ -7985,19 +7986,21 @@ const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null, op
       maxRetries,
       reconnectDelay: batchSettings.reconnectDelay,
       shouldStop: () => shouldStop.value,
-      log: (text, type) => addLog({ time: new Date().toLocaleTimeString(), message: text, type }),
+      log: (text, type) => addLog({ time: new Date().toLocaleTimeString(), message: `${latestToken.name || tokenId} ${text}`, type }),
     });
   }
 
+  // Reused connections also pass the task's startup gate before initialization.
+  await options.beforeConnect?.();
   // 连接成功，槽位保持占用，直到任务完成后手动释放
 
   // Initialize Game Data (Critical for Battle Version and Session)
   let mainLevelResult = null;
   let initialRoleResult = null;
+  const initializeRequest = options.request || ((cmd, params, timeout) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, timeout));
   try {
     // Fetch Role Info first (Standard flow)
-    initialRoleResult = await tokenStore.sendMessageWithPromise(
-      tokenId,
+    initialRoleResult = await initializeRequest(
       "role_getroleinfo",
       {},
       5000,
@@ -8006,8 +8009,7 @@ const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null, op
     // Read-only tasks do not start a main-level battle.
     if (!options.readOnly) {
       // Fetch Battle Version
-      const res = await tokenStore.sendMessageWithPromise(
-        tokenId,
+      const res = await initializeRequest(
         "fight_startlevel",
         {},
         5000,
@@ -8021,7 +8023,7 @@ const ensureConnection = async (tokenId, maxRetries = 2, onSlotChange = null, op
     if (options.readOnly) throw e;
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `初始化数据失败: ${e.message}`,
+      message: `${latestToken.name || tokenId} 初始化数据失败: ${e.message}`,
       type: "warning",
     });
   }
