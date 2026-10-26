@@ -151,3 +151,27 @@ test("protocol defaults initialize first piece, explicit invalid structures are 
   assert.throws(() => photoState({ activity: { photoActivityInfo: { 80: { num: null } } } }, event, pieces), /格式异常/);
   assert.throws(() => photoState({ activity: { photoActivityInfo: { 80: { pieceId: 999 } } } }, event, pieces), /不匹配/);
 });
+
+test("公共闲来入镜清单包含两种商店，不查询任何账号库存", async () => {
+  const { loadPhotoExchangeCatalog } = await import("../src/utils/photoActivity.js");
+  const calls = [], c = config();
+  const catalog = await loadPhotoExchangeCatalog(async (url, options) => {
+    calls.push([url, options]);
+    return { ok: true, json: async () => url.includes("/login/manifest")
+      ? { body: { dataBundleVer: "photo-public-catalog-test" } }
+      : url.endsWith("config.json") ? c : {} };
+  }, NOW);
+  assert.deepEqual(catalog.shops.map(shop => [shop.activityId, shop.rows[0].id]), [[100, 101], [110, 111]]);
+  assert.equal(catalog.stock, undefined);
+  assert.equal(catalog.shops[0].rows[0].max, undefined);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(([url]) => url.startsWith("https://")));
+});
+
+test("公共清单执行时库存不足跳过商品，仍继续处理后续选项", async () => {
+  const account = server({ stock: 3 }), c = config();
+  const preview = { shops: [{ activityId: 100 }, { activityId: 110 }] };
+  await exchangePhotoItems({ ...account, config: c, preview, now: () => NOW, skipUnavailable: true,
+    selection: [{ activityId: 100, goodsId: 101, quantity: 2 }, { activityId: 100, goodsId: 101, quantity: 1 }] });
+  assert.deepEqual(account.calls.filter(([cmd]) => cmd === "activity_exchange"), [["activity_exchange", { activityId: 100, goodsId: 101, quantity: 1 }]]);
+});

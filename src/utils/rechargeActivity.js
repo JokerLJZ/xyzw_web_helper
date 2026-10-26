@@ -29,7 +29,7 @@ export async function loadRechargeConfig(send, fetcher = globalThis.fetch) {
 }
 
 /** 公共配置清单，不查询或连接任何账号。 */
-export async function loadRechargeExchangeCatalog(fetcher = globalThis.fetch, now = Date.now()) {
+export async function loadPublicActivityConfig(fetcher = globalThis.fetch) {
   const response = await fetcher("https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=0.36.0-android", {
     method: "POST", headers: { "Content-Type": "application/json;charset=UTF-8", Accept: "application/json,text/plain,*/*" },
     body: "", cache: "no-store", signal: AbortSignal.timeout(30000),
@@ -37,7 +37,11 @@ export async function loadRechargeExchangeCatalog(fetcher = globalThis.fetch, no
   if (!response.ok) throw new Error("活动配置版本加载失败");
   const manifest = await response.json();
   const body = typeof manifest.body === "string" ? JSON.parse(manifest.body) : manifest.body;
-  const config = await loadRechargeConfig(async () => ({ dataBundleVer: body?.dataBundleVer }), fetcher);
+  return loadRechargeConfig(async () => ({ dataBundleVer: body?.dataBundleVer }), fetcher);
+}
+
+export async function loadRechargeExchangeCatalog(fetcher = globalThis.fetch, now = Date.now()) {
+  const config = await loadPublicActivityConfig(fetcher);
   const event = findRechargeActivity(config, now);
   const activity = event?.byType(2);
   if (!activity) throw new Error("当前没有可识别的充值兑换活动");

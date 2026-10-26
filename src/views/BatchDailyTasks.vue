@@ -993,7 +993,7 @@
 
     <!-- Settings Modal -->
     <RechargeExchangeDialog v-model:show="rechargeExchangeOpen" :preset="true" :previews="rechargeExchangePreviews" @execute="batchRechargeExchange" />
-    <RechargeExchangeDialog v-model:show="photoExchangeOpen" title="闲来入镜商店兑换" :previews="photoExchangePreviews" @execute="batchPhotoExchange" />
+    <RechargeExchangeDialog v-model:show="photoExchangeOpen" preset title="闲来入镜商店兑换" :previews="photoExchangePreviews" @execute="batchPhotoExchange" />
     <n-modal
       v-model:show="showSettingsModal"
       preset="card"
@@ -3787,7 +3787,7 @@ import { DEFAULT_SALT_BATTLE_SETTINGS } from "@/utils/saltWarRunner.js";
 import { connectWithTokenRefresh } from "@/utils/batch/connectWithTokenRefresh.js";
 import RechargeExchangeDialog from "@/components/RechargeExchangeDialog.vue";
 import { createTasksRecharge } from "@/utils/batch/tasksRecharge.js";
-import { queryPhotoExchange, exchangePhotoItems, runPhotoStandard } from "@/utils/photoActivity.js";
+import { loadPhotoExchangeCatalog, exchangePhotoItems, runPhotoStandard } from "@/utils/photoActivity.js";
 import { DEFAULT_WEIRD_TOWER_CLIMB_COUNT, normalizeWeirdTowerClimbCount } from "@/utils/evoTowerRewards.js";
 import {
   blackMarketItemCatalog, createBlackMarketPurchaseEntry,
@@ -8290,7 +8290,7 @@ const confirmUpgradeLordTo6000 = () => {
 };
 
 const { batchRechargeStandard, queryRechargeExchangeItems, batchRechargeExchange, rechargeExchangeOpen, rechargeExchangePreviews } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession });
-const { batchRechargeStandard: batchPhotoStandard, queryRechargeExchangeItems: queryPhotoExchangeItems, batchRechargeExchange: batchPhotoExchange, rechargeExchangeOpen: photoExchangeOpen, rechargeExchangePreviews: photoExchangePreviews } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession }, { label: "闲来入镜", queryExchange: queryPhotoExchange, exchangeItems: exchangePhotoItems, runStandard: runPhotoStandard });
+const { batchRechargeStandard: batchPhotoStandard, queryRechargeExchangeItems: queryPhotoExchangeItems, batchRechargeExchange: batchPhotoExchange, rechargeExchangeOpen: photoExchangeOpen, rechargeExchangePreviews: photoExchangePreviews } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession }, { label: "闲来入镜", loadCatalog: loadPhotoExchangeCatalog, exchangeItems: exchangePhotoItems, runStandard: runPhotoStandard });
 const tasksDungeon = createTasksDungeon(createTaskDeps());
 const {
   batchmengjing,

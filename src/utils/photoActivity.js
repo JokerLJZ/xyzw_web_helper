@@ -1,4 +1,4 @@
-import { activityBody, activityText, mapGet, mapEntries, queryActivityExchange, exchangeRechargeItems } from "./rechargeActivity.js";
+import { activityBody, activityText, mapGet, mapEntries, queryActivityExchange, exchangeRechargeItems, loadPublicActivityConfig, rewardText } from "./rechargeActivity.js";
 import { extractRolePatch } from "./roleSnapshot.js";
 
 /** 玩法配置关联同组、同期商店；不固定本期日期编码。 */
@@ -9,6 +9,21 @@ export function findPhotoActivity(config, now = Date.now()) {
   if (!photo) return null;
   const related = rows.filter(row => row.actGroup === photo.actGroup && row.start === photo.start && row.end === photo.end && row.name === photo.name);
   return { code: photo.id, name: activityText(config, photo.name), photo, missions: related.find(row => Number(row.actType) === 37), shops: related.filter(row => Number(row.actType) === 2).sort((a, b) => a.id - b.id) };
+}
+
+/** 公共商品清单：打开弹窗不连接账号、不查询库存。 */
+export async function loadPhotoExchangeCatalog(fetcher = globalThis.fetch, now = Date.now()) {
+  const config = await loadPublicActivityConfig(fetcher);
+  const event = findPhotoActivity(config, now);
+  if (!event?.shops.length) throw new Error("当前没有可识别的闲来入镜商店");
+  const shops = event.shops.map(shop => ({
+    eventName: event.name, activityId: shop.id, configVersion: config.version,
+    itemName: rewardText(config, 3, shop.itemId),
+    rows: mapEntries(config.ExchangeActConf).map(([, row]) => row)
+      .filter(row => row.actId === shop.id).sort((a, b) => a.rank - b.rank)
+      .map(row => ({ ...row, name: rewardText(config, row.resourceType, row.rewardId) })),
+  }));
+  return { ...shops[0], shops };
 }
 
 export async function queryPhotoExchange(send, config, now = Date.now(), shopId) {
