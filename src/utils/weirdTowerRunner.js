@@ -94,6 +94,33 @@ export async function runWeirdTowerAccount({
     for (const key of ["towerId", "rewardTowerId", "energy", "lotteryLeftCnt"]) tower[key] = number(tower[key], `怪异塔${key}`);
     return tower;
   };
+  const ensureClubPrivilege = async () => {
+    phase = "俱乐部特权";
+    const levels = rows(config.EvoTowerClubPrivilegeConf);
+    if (!levels.length) throw new Error("未取得怪异塔俱乐部特权配置");
+    const members = fullField(await request("evotower_getlegionjoinmembers"), "memberScores", "俱乐部参与人数");
+    const target = levels.filter(conf => mapEntries(members).length >= number(conf.memberNeed, "特权参与人数")).length;
+    const readLevel = async () => {
+      const data = await request("evotower_getlegionprivilege");
+      const privileges = fullField(data, "legionPrivilege", "俱乐部特权状态");
+      tower.legionPrivilege = privileges;
+      return Math.max(0, ...mapEntries(privileges).map(([key]) => number(key, "特权等级")));
+    };
+    let level = await readLevel();
+    if (level >= target) {
+      log(`俱乐部特权已检查：已激活${level}档，当前可激活${target}档`);
+      return;
+    }
+    while (level < target) {
+      let uncertain;
+      try { apply(await request("evotower_claimlegionprivilege")); }
+      catch (error) { if (!timedOut(error)) throw error; uncertain = error; }
+      const next = await readLevel();
+      if (next <= level) throw new Error(`俱乐部特权激活未确认${uncertain ? "（请求超时，复查仍未生效）" : ""}，停止后续动作`);
+      level = next;
+    }
+    log(`俱乐部特权激活已确认：${level}档`, "success");
+  };
   const getBox = async () => {
     const data = await request("mergebox_getinfo", { actType: 1 });
     if (!data?.mergeBox) throw new Error("未取得怪异塔合成状态");
@@ -380,6 +407,7 @@ export async function runWeirdTowerAccount({
 
   try {
     await getTower();
+    await ensureClubPrivilege();
     if (mode === "climb") { phase = "爬塔"; await climb(); }
     else {
       await getBox();

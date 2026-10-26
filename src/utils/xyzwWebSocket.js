@@ -283,6 +283,8 @@ export function registerDefaultCommands(reg) {
     .register("evotower_getinfo")
     .register("evotower_fight")
     .register("evotower_getlegionjoinmembers")
+    .register("evotower_getlegionprivilege")
+    .register("evotower_claimlegionprivilege")
     .register("evotower_readyfight")
     .register("evotower_claimreward")
     .register("mergebox_getinfo")
@@ -1357,6 +1359,8 @@ export class XyzwWebSocketClient {
       evotower_readyfightresp: "evotower_readyfight",
       evotower_claimrewardresp: "evotower_claimreward",
       evotower_getlegionjoinmembersresp: "evotower_getlegionjoinmembers",
+      evotower_getlegionprivilegeresp: "evotower_getlegionprivilege",
+      evotower_claimlegionprivilegeresp: "evotower_claimlegionprivilege",
       mergeboxinforesp: "mergebox_getinfo",
       mergebox_claimfreeenergyresp: "mergebox_claimfreeenergy",
       mergebox_openboxresp: "mergebox_openbox",

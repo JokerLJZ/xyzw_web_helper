@@ -7,6 +7,7 @@ const NOW = Date.parse("2026-10-21T10:00:00+08:00");
 const date = weirdTowerDate(NOW);
 const task = (Id, type, para) => ({ Id, evoTowerTaskType: type, taskPara: para });
 const config = {
+  EvoTowerClubPrivilegeConf: { 1: { memberNeed: 10 }, 2: { memberNeed: 15 }, 3: { memberNeed: 20 }, 4: { memberNeed: 25 } },
   EvoTowerTaskConf: { 1: task(1, 1, 3), 2: task(2, 1, 6), 3: task(3, 1, 10), 4: task(4, 2, 5) },
   EvoTowerShareTasks: { 5: { Id: 5, evoTowerShareTaskGroup: 2, taskPara: 1 } },
   ActMergeBoardConf: { 888: { actId: 888, actMergeFestivalType: 1, column: 7, row: 9, quickMergeCondition: 777,
@@ -19,6 +20,7 @@ const config = {
 const snapshot = value => structuredClone(value);
 function fixture() {
   const state = {
+    members: {}, privilege: {},
     tower: { towerId: 0, rewardTowerId: 0, energy: 0, lotteryLeftCnt: 0, taskMap: { [date]: {} }, taskClaimMap: { [date]: {} }, legionTaskMap: {}, legionTaskClaimMap: {}, orderPassReward: {} },
     box: { actType: 1, actId: 888, freeEnergy: 0, costTotalCnt: 0, costClaimCnt: 0, taskMap: {}, taskClaimMap: {},
       gridMap: { 4: { 5: { gridType: 1, gridItemId: 9, isLock: false, openCnt: 0 } } } },
@@ -28,6 +30,9 @@ function fixture() {
   let itemX = 1;
   const send = async (cmd, params) => {
     calls.push({ cmd, params });
+    if (cmd === "evotower_getlegionjoinmembers") return { memberScores: snapshot(state.members) };
+    if (cmd === "evotower_getlegionprivilege") return { legionPrivilege: snapshot(state.privilege) };
+    if (cmd === "evotower_claimlegionprivilege") { state.privilege = { 1: 1 }; return {}; }
     if (cmd === "evotower_getinfo") return { evoTower: snapshot(state.tower) };
     if (cmd === "mergebox_getinfo") return { mergeBox: snapshot(state.box) };
     if (cmd === "role_getroleinfo") return { role: snapshot(state.role) };
@@ -544,4 +549,48 @@ test("节流等待跨日期后不发送原日期的写请求", async () => {
     requestNow: () => requestTime,
     pause: async ms => { requestTime += ms; time += ms; }, send }), /周期已变化/);
   assert.equal(f.calls.some(c => c.cmd === 'evotower_fight'), false);
+});
+
+test("怪异塔在后续动作之前激活并复查俱乐部特权", async () => {
+  const f = fixture(); f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0]));
+  await f.run({ mode: "claim" });
+  assert.deepEqual(f.calls.slice(0, 6).map(x => x.cmd), ["evotower_getinfo", "evotower_getlegionjoinmembers", "evotower_getlegionprivilege", "evotower_claimlegionprivilege", "evotower_getlegionprivilege", "mergebox_getinfo"]);
+});
+
+test("已激活或人数不足时不重复激活", async () => {
+  for (const active of [false, true]) {
+    const f = fixture();
+    if (active) { f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0])); f.state.privilege = { 1: 0 }; }
+    await f.run({ mode: "claim" });
+    assert.equal(f.calls.some(x => x.cmd === "evotower_claimlegionprivilege"), false);
+  }
+});
+
+test("激活未生效时停止后续动作", async () => {
+  const f = fixture(); f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0]));
+  await assert.rejects(f.run({ mode: "claim", send: async (cmd, params) => cmd === "evotower_claimlegionprivilege" ? {} : f.send(cmd, params) }), /激活未确认/);
+  assert.equal(f.calls.some(x => x.cmd === "mergebox_getinfo"), false);
+});
+
+test("激活超时先复查，已生效不重复发送，未生效停止", async () => {
+  for (const applied of [true, false]) {
+    const f = fixture(); let writes = 0;
+    f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0]));
+    const run = f.run({ mode: "claim", send: async (cmd, params) => {
+      if (cmd === "evotower_claimlegionprivilege") { writes++; if (applied) f.state.privilege = { 1: 1 }; throw new Error("timeout"); }
+      return f.send(cmd, params);
+    } });
+    if (applied) await run; else await assert.rejects(run, /复查仍未生效/);
+    assert.equal(writes, 1);
+  }
+});
+
+test("更高档位按参与人数升级，复查后才继续", async () => {
+  const f = fixture(); f.state.members = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [i, 0])); f.state.privilege = new Map([[1, 1]]);
+  let claims = 0;
+  await f.run({ mode: "claim", send: async (cmd, params) => {
+    if (cmd === "evotower_claimlegionprivilege") { claims++; f.state.privilege = new Map([[3, 1]]); return {}; }
+    return f.send(cmd, params);
+  } });
+  assert.equal(claims, 1);
 });
