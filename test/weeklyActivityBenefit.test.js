@@ -92,16 +92,17 @@ test("招募周未开放时不发送商店领取请求", async () => {
 });
 
 
-test("黑市周从开放商店领取500金砖，不依赖达标进度字段", async () => {
+test("黑市周按金砖回馈标题定位原始下标，不误领500金砖商品", async () => {
   const { commands, status } = await runWeeklyBenefit("黑市周", {
     myTotalInfo: {},
     activity: [{ id: 9, type: 4, name: "金砖商店", data: { goodsList: [
-      { price: 0, rewardList: [{ type: 2, itemId: 2, value: 500, ext: 0 }] },
+      { title: "其他福利", price: 0, rewardList: [{ type: 2, itemId: 2, value: 500 }] },
+      { title: "金砖回馈", price: 0, limit: 1, rewardList: [{ type: 2, itemId: 2, value: 100 }] },
       { price: 600, rewardList: [{ type: 3, itemId: 1001, value: 5 }] },
     ] } }],
   });
   assert.deepEqual(commands[1], {
-    cmd: "activity_buystoregoods", params: { activityId: 9, goodsIndex: 0, buyNum: 1 },
+    cmd: "activity_buystoregoods", params: { activityId: 9, goodsIndex: 1, buyNum: 1 },
   });
   assert.equal(status, "completed");
 });
@@ -117,9 +118,43 @@ test("黑市周没有免费商品时不购买付费商品", async () => {
 });
 
 test("未知服务器错误标记失败，不伪装为已领取", async () => {
-  const { status, logs } = await runWeeklyBenefit("黑市周", {
-    myTotalInfo: { 11: {} },
+  const { status, logs } = await runWeeklyBenefit("宝箱周", {
+    myTotalInfo: { 2: {} },
   }, new Error("服务器错误: -10006 - 未知错误"));
   assert.equal(status, "failed");
   assert.ok(logs.some((entry) => entry.type === "error"));
+});
+
+test("黑市周缺少商店快照时不猜测商品0", async () => {
+  const { commands } = await runWeeklyBenefit("黑市周", { myTotalInfo: { 11: {} } });
+  assert.equal(commands.length, 1);
+});
+
+test("金砖回馈已达领取上限时跳过", async () => {
+  const { commands, logs } = await runWeeklyBenefit("黑市周", {
+    myStoreInfo: { 23: { complete: { 0: 1 } } },
+    activity: [{ id: 23, type: 4, name: "金砖商店", data: { goodsList: [
+      { title: "金砖回馈", price: 0, limit: 1, rewardList: [{ type: 2, value: 100 }] },
+    ] } }],
+  });
+  assert.equal(commands.length, 1);
+  assert.ok(logs.some(x => x.message.includes("金砖回馈已领取")));
+});
+
+test("付费金砖回馈不购买", async () => {
+  const { commands } = await runWeeklyBenefit("黑市周", {
+    activity: [{ id: 9, type: 4, name: "金砖商店", data: { goodsList: [
+      { title: "金砖回馈", price: 100, rewardList: [{ type: 2, value: 500 }] },
+    ] } }],
+  });
+  assert.equal(commands.length, 1);
+});
+
+test("金砖回馈使用当前开放活动编号", async () => {
+  const { commands } = await runWeeklyBenefit("黑市周", {
+    activity: [{ id: 23, type: 4, name: "金砖商店", data: { goodsList: [
+      { title: "金砖回馈", price: 0, rewardList: [{ type: 2, value: 200 }] },
+    ] } }],
+  });
+  assert.deepEqual(commands[1], { cmd: "activity_buystoregoods", params: { activityId: 23, goodsIndex: 0, buyNum: 1 } });
 });

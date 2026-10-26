@@ -290,7 +290,7 @@ export function createTasksItem(deps) {
   /**
    * 领取当前周活动商店的免费福利。
    * 招募周使用“限时商店”(activityId=6)，宝箱周使用活动商店(activityId=7)；
-   * 黑市周使用“金砖商店”(activityId=9)，免费商品均为 goodsIndex=0。
+   * 黑市周从实际开放的“金砖商店”查找免费商品“金砖回馈”。
    */
   const batchClaimWeeklyActivityBenefit = async () => {
     if (selectedTokens.value.length === 0) return;
@@ -385,13 +385,13 @@ export function createTasksItem(deps) {
         );
         const activity = getActivity(activityResult);
         // activity_get 返回实际开放的商店与价格，避免周轮换后使用过期活动编号。
-        // 招募周抓包：type=4/id=6/招募福利；黑市周免费商品为500金砖。
+        // 黑市周以商品标题定位金砖回馈，不依赖奖励数量或固定商品下标。
         const shops = activity?.activity;
         if (Array.isArray(shops) && freeShop) {
           const shop = shops.find((entry) =>
             Number(entry?.type) === 4 &&
             (entry.name === freeShop.shopName ||
-              Number(entry.id) === freeShop.activityId),
+              (weekName !== "黑市周" && Number(entry.id) === freeShop.activityId)),
           );
           const goodsIndex = shop?.data?.goodsList?.findIndex((goods) =>
             Number(goods.price) === 0 &&
@@ -399,13 +399,26 @@ export function createTasksItem(deps) {
               weekName === "招募周"
                 ? Number(reward.itemId) === 1001 && Number(reward.value) === 5
                 : weekName === "黑市周"
-                  ? Number(reward.type) === 2 && Number(reward.value) === 500
+                  ? goods.title === "金砖回馈" && Number(reward.value) > 0
                   : Number(reward.value) > 0,
             ),
           );
           freeShop = shop && goodsIndex >= 0
             ? { activityId: shop.id, goodsIndex, shopName: shop.name }
             : null;
+        }
+        // 黑市周必须由当前账号返回的商店和商品确认，禁止退回固定商品0。
+        if (weekName === "黑市周" && !Array.isArray(shops)) freeShop = null;
+        if (weekName === "黑市周" && freeShop) {
+          const shop = shops.find((entry) => entry.id === freeShop.activityId);
+          const goods = shop.data.goodsList[freeShop.goodsIndex];
+          const purchased = activity?.myStoreInfo?.[freeShop.activityId]?.complete?.[freeShop.goodsIndex] ?? 0;
+          if (Number(goods.limit ?? 1) > 0 && Number(purchased) >= Number(goods.limit ?? 1)) {
+            tokenStatus.value[tokenId] = "completed";
+            addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} 金砖商店金砖回馈已领取，跳过`, type: "info" });
+            return;
+          }
+          freeShop = { ...freeShop, shopName: "金砖商店金砖回馈" };
         }
         const weeklyInfo =
           weeklyInfoId == null
