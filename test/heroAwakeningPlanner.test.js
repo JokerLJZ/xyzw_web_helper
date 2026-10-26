@@ -20,7 +20,8 @@ test("所有红将按已拥有、星级达标且未觉醒规划槽位", () => {
               { active: false },
               { active: true },
             ],
-            awakeSkill: { "-1": true },
+            isActive: true,
+            awakeSkill: {},
           },
           122: {
             heroId: 122,
@@ -63,13 +64,12 @@ test("兼容数组武将和Map觉醒状态", () => {
   );
 });
 
-// api采集/养号/觉醒.txt：吕布主动技能请求 index=-1。
-// api采集/武将/觉醒2.txt：被动技能响应 awakeSkill[0]=true。
+// 当前官方客户端：主动觉醒状态为 isActive，被动觉醒状态为 awakeSkill[0..2]。
 test("22星吕布第一技能使用-1，已觉醒主动技能不重复规划", () => {
   const hero = { heroId: 107, star: 22, awakeSkill: null };
   assert.deepEqual(planHeroAwakenings({ _raw: { body: { role: { heroes: { 107: hero } } } } }, [107]),
     [{ heroId: 107, index: -1, star: 22, threshold: 22 }]);
-  hero.awakeSkill = { "-1": true };
+  hero.isActive = true;
   assert.deepEqual(planHeroAwakenings({ role: { heroes: { 107: hero } } }, [107]), []);
 });
 
@@ -78,4 +78,10 @@ test("被动技能0的采集增量只标记第二技能，四技能编号为-1�
   assert.equal(isHeroAwakeSlot(hero, -1), false);
   assert.equal(isHeroAwakeSlot(hero, 0), true);
   assert.deepEqual(planHeroAwakenings({ role: { heroes: { 107: hero } } }, [107]).map(x => x.index), [-1, 1, 2]);
+});
+
+test("主动状态独立于被动集合，不能以awakeSkill[-1]替代isActive", () => {
+  assert.equal(isHeroAwakeSlot({ isActive: true }, -1), true);
+  assert.equal(isHeroAwakeSlot({ isActive: false, awakeSkill: { "-1": true } }, -1), false);
+  assert.deepEqual(planHeroAwakenings({ heroes: { 107: { star: 22, isActive: true } } }, [107]), []);
 });

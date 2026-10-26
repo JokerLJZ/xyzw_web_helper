@@ -25,7 +25,7 @@ const getSlotValue = (collection, index) => {
 };
 
 export const isHeroAwakeSlot = (hero, index) =>
-  getSlotValue(hero?.awakeSkill, index) === true;
+  (index === -1 ? hero?.isActive : getSlotValue(hero?.awakeSkill, index)) === true;
 
 /**
  * 根据一次角色查询生成技能觉醒计划。所有红将均开放觉醒，只有已拥有、
@@ -42,7 +42,7 @@ export function planHeroAwakenings(roleInfo, selectedHeroIds) {
     const star = Math.max(0, Number(hero.star) || 0);
 
     return HERO_AWAKENING_STAR_THRESHOLDS.flatMap((threshold, slot) => {
-      // 采集：主动技能 index=-1，被动技能依次为 0、1、2。
+      // 请求中主动技能 index=-1；状态在 isActive，被动状态在 awakeSkill[0..2]。
       const index = slot - 1;
       if (star < threshold) return [];
       if (isHeroAwakeSlot(hero, index)) return [];
