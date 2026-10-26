@@ -245,15 +245,15 @@ function formatTaskReport(taskName, tokenResults, scheduled, startTime, upcoming
     hasReasons = true;
     concise.forEach(reason => lines.push(`- ${String(result.name ?? "未知账号").replace(/[\r\n]+/g, " ")}：${reason}`));
   }
-  if (results.length) {
-    lines.push("", "本次执行账号清单：");
-    results.forEach(result => lines.push(`- ${String(result.name ?? "未知账号").replace(/[\r\n]+/g, " ")}`));
-  }
   if (scheduled && Array.isArray(upcomingTasks) && upcomingTasks.length) {
     lines.push("", "## 后续批量任务", "", "| 序号 | 任务名称 | 启动时间 |", "|------|----------|----------|");
     upcomingTasks.forEach((task, index) => lines.push(
       `| ${index + 1} | ${escapeMarkdownTableCell(String(task.name ?? "未知任务").replace(/[\r\n]+/g, " "))} | ${formatNotificationTime(task.startTime)} |`,
     ));
+  }
+  if (results.length) {
+    lines.push("", "本次执行账号清单：");
+    results.forEach(result => lines.push(`- ${String(result.name ?? "未知账号").replace(/[\r\n]+/g, " ")}`));
   }
   return { title, content: lines.join("\n") };
 }

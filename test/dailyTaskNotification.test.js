@@ -88,6 +88,7 @@ test("全成功通知恢复统计和后续调度信息", () => {
   assert.match(report.content, /完成时间/);
   assert.match(report.content, /后续批量任务/);
   assert.match(report.content, /\| 1 \| 后续计划 \|/);
+  assert.ok(report.content.indexOf("后续批量任务") < report.content.indexOf("本次执行账号清单"));
 });
 
 
