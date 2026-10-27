@@ -227,9 +227,6 @@ function formatTaskReport(taskName, tokenResults, scheduled, startTime, upcoming
     `| 总账号 | ${results.length} |`,
     `| 成功 | ${completed} |`,
     `| 失败 | ${countStatus("failed")} |`,
-    `| 待继续 | ${countStatus("pending")} |`,
-    `| 已停止 | ${countStatus("stopped")} |`,
-    `| 已跳过 | ${countStatus("skipped")} |`,
     `| 耗时 | ${elapsed === null ? "未知" : `${Math.floor(elapsed / 60)}分${elapsed % 60}秒`} |`,
     `| 完成时间 | ${formatNotificationTime(finishedAt)} |`,
   ];
