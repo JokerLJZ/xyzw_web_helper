@@ -92,6 +92,13 @@
           </div>
         </div>
 
+        <div class="no-export" style="padding: 12px 16px">
+          <p>手动选择盟友后确认生成：蓝色为盟友，红色为敌对；未选择的俱乐部均视为敌对。</p>
+          <n-select v-model:value="draftAllyIds" multiple filterable
+            :options="sortedLegions.map(legion => ({ label: `[${legion.serverId}]${legion.name}`, value: String(legion.id) }))"
+            placeholder="请选择盟友俱乐部" :disabled="!validData" />
+          <n-button style="margin-top: 8px" type="primary" :disabled="!validData" @click="confirmAllies">确认敌我并重新生成</n-button>
+        </div>
         <!-- 主要内容区：地图 + 侧边栏 -->
         <div class="main-content-layout">
           <!-- 地图区域 -->
@@ -206,6 +213,19 @@ let resizeHandler = null;
 const isJoined = isEntireBattlefield; // alias for compatibility if needed, but we use isEntireBattlefield in template
 
 const exporting = ref(false);
+const draftAllyIds = ref([]);
+const confirmedAllyIds = ref(null);
+const factionColor = (id) => confirmedAllyIds.value === null ? null
+  : confirmedAllyIds.value.includes(String(id)) ? "#2080f0" : "#d03050";
+const confirmAllies = () => {
+  confirmedAllyIds.value = [...draftAllyIds.value];
+  resizeAndRedraw();
+  message.success("已按确认的敌我关系重新生成地图");
+};
+watch(battlefieldId, () => {
+  draftAllyIds.value = [];
+  confirmedAllyIds.value = null;
+});
 
 const exportImage = async () => {
   const element = document.querySelector(
@@ -259,7 +279,8 @@ const sortedLegions = computed(() => {
     return {
       ...legion,
       announcement: detail.announcement || "",
-      alliance: alliance,
+      alliance: confirmedAllyIds.value === null ? alliance : (factionColor(legion.id) === "#2080f0" ? "盟友（蓝色）" : "敌对（红色）"),
+      color: factionColor(legion.id) || allianceColors[alliance],
       redCount: redCount,
     };
   });
@@ -332,7 +353,9 @@ const allianceGroups = computed(() => {
   // 分配俱乐部到对应分组
   sortedLegions.value.forEach((legion) => {
     const alliance = legion.alliance;
-    if (groups[alliance]) {
+    if (confirmedAllyIds.value !== null) {
+      (groups[alliance] ||= []).push(legion);
+    } else if (groups[alliance]) {
       groups[alliance].push(legion);
     } else {
       // 如果有其他未定义的类型，归入未知
@@ -562,6 +585,9 @@ const drawCanvasContent = () => {
         bgColor = "#000000";
       }
 
+      if (validData.value?.legionInfo?.[node.belongsLegionId]) {
+        bgColor = factionColor(node.belongsLegionId) || bgColor;
+      }
       drawHexagon(x, y, bgColor, node.type);
 
       // 绘制标签
@@ -596,7 +622,7 @@ const drawCanvasContent = () => {
             ? allianceincludes(detail.announcement)
             : "未知联盟";
           const allianceColor =
-            allianceColors[alliance] || allianceColors["未知联盟"];
+            factionColor(legion.id) || allianceColors[alliance] || allianceColors["未知联盟"];
 
           // 绘制背景和文字
           ctx.font = "bold 12px Microsoft Yahei";
