@@ -224,7 +224,7 @@ test("失败比例含30%时只补跑失败账号一次，推送使用补跑后�
   }
 });
 
-test("补跑仍失败保留最终原因且不会开启第三轮", async () => {
+test("两轮补跑仍失败保留最终原因且不会开启第四次执行", async () => {
   const f = fixture();
   f.context.selectedTokens.value = ["a", "b", "c", "d"];
   f.context.tokens.value = ["a", "b", "c", "d"].map(id => ({ id, name: id }));
@@ -236,8 +236,8 @@ test("补跑仍失败保留最终原因且不会开启第三轮", async () => {
     }
   };
   await f.startBatch();
-  assert.equal(attempts, 2);
-  assert.match(f.state.notification.content, /失败第2次/);
+  assert.equal(attempts, 3);
+  assert.match(f.state.notification.content, /失败第3次/);
   assert.doesNotMatch(f.state.notification.content, /失败第1次/);
 });
 

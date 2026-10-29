@@ -6687,6 +6687,7 @@ const executeScheduledTask = async (task) => {
       if (shouldStop.value) break;
       await runScheduledAccount(tokenId);
     }
+    for (let retryRound = 1; retryRound <= 2 && !shouldStop.value; retryRound++) {
     const retryIds = getBatchRetryTokenIds(availableTokens, tokenStatus.value, shouldStop.value);
     for (const tokenId of retryIds) {
       if (shouldStop.value) break;
@@ -6697,8 +6698,10 @@ const executeScheduledTask = async (task) => {
       }
       tokenTaskReasons.value[tokenId] = [];
       tokenTaskWarnings.value[tokenId] = [];
-      addLog({ time: new Date().toLocaleTimeString(), message: `${tokens.value.find(t => t.id === tokenId)?.name || tokenId}：失败账号补跑一次所选任务`, type: "info" });
+      addLog({ time: new Date().toLocaleTimeString(), message: `${tokens.value.find(t => t.id === tokenId)?.name || tokenId}：失败账号第${retryRound}/2轮补跑所选任务`, type: "info" });
       await runScheduledAccount(tokenId);
+    }
+
     }
 
     if (aggregatedSaltMasterResults.length > 0) {
@@ -8526,13 +8529,15 @@ const startBatch = async () => {
   try {
     await Promise.all(tokenIds.map(runToken));
     if (!scheduledTaskExecutionActive) {
+      for (let retryRound = 1; retryRound <= 2 && !shouldStop.value; retryRound++) {
       const retryIds = getBatchRetryTokenIds(tokenIds, tokenStatus.value, shouldStop.value);
       for (const id of retryIds) {
         if (shouldStop.value) break;
-        addLog({ time: new Date().toLocaleTimeString(), message: `${tokens.value.find(t => t.id === id)?.name || id}：失败账号补跑一次日常`, type: "info" });
+        addLog({ time: new Date().toLocaleTimeString(), message: `${tokens.value.find(t => t.id === id)?.name || id}：失败账号第${retryRound}/2轮补跑日常`, type: "info" });
         tokenTaskReasons.value[id] = [];
         tokenTaskWarnings.value[id] = [];
         await runToken(id);
+      }
       }
     }
   }
