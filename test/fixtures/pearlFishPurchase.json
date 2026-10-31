@@ -1,0 +1,27 @@
+{
+  "role": {
+    "items": {
+      "1013": {
+        "quantity": 117
+      },
+      "13041": {
+        "itemId": 13041,
+        "quantity": 1,
+        "ext": null
+      }
+    },
+    "activityRecord": {
+      "8304": {
+        "buyQuantity": 2
+      }
+    }
+  },
+  "reward": [
+    {
+      "type": 3,
+      "itemId": 13041,
+      "value": 1,
+      "ext": 0
+    }
+  ]
+}

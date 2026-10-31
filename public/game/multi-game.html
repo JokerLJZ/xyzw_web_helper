@@ -1,0 +1,143 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>鲨鱼之王 - 多账号</title>
+    <meta name="viewport" content="width=device-width,user-scalable=no,initial-scale=1,minimum-scale=1,maximum-scale=1" />
+    <link rel="stylesheet" type="text/css" href="style-mobile.1777a.css" />
+    <link rel="icon" href="favicon.8de18.ico" />
+  </head>
+  <body>
+    <canvas id="GameCanvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>
+    <div id="splash"><div class="progress-bar stripes"><span style="width: 0%"></span></div></div>
+    <script src="multi-game-storage-bridge.js" charset="utf-8"></script>
+    <script>
+      (function loadMultiGameRuntime() {
+        "use strict";
+        if (!window.__MULTI_GAME_BRIDGE_READY__) return;
+        const runtime = [
+          "patch.decrypted_readable.js",
+          "src/settings.da7ef.js",
+          "game-defines.a175e.js",
+          "main.2a00e.js",
+          "cocos2d-js-min.a5841.js",
+          "xh.js",
+          "sh1.js",
+          "diagnose_require.js",
+        ];
+        const loadScript = (src) => new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = src;
+          script.charset = "utf-8";
+          script.onload = resolve;
+          script.onerror = () => reject(new Error(`Unable to load ${src}`));
+          document.head.appendChild(script);
+        });
+        const notify = (type, code) => window.parent.postMessage({
+          channel: "multi-game",
+          version: 1,
+          type,
+          scope: window.__MULTI_GAME_BRIDGE_READY__.scope,
+          ...(code ? { code } : {}),
+        }, window.location.origin);
+        const canvas = document.getElementById("GameCanvas");
+        const inputActions = ["pointerdown", "pointermove", "pointerup"];
+        let lastMoveAt = 0;
+
+        const sendInput = (event) => {
+          if (!canvas || (event.type === "pointermove" && !event.buttons)) return;
+          const rect = canvas.getBoundingClientRect();
+          if (!rect.width || !rect.height) return;
+          if (event.type === "pointermove" && event.timeStamp - lastMoveAt < 16) return;
+          if (event.type === "pointermove") lastMoveAt = event.timeStamp;
+          window.parent.postMessage({
+            channel: "multi-game-input",
+            version: 1,
+            type: "input",
+            action: event.type,
+            x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+            y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+            button: event.button,
+            buttons: event.buttons,
+            pointerId: event.pointerId || 1,
+            pointerType: event.pointerType || "mouse",
+          }, window.location.origin);
+        };
+        inputActions.forEach((action) => canvas?.addEventListener(action, sendInput));
+
+        window.addEventListener("message", (event) => {
+          if (event.origin !== window.location.origin || event.source !== window.parent) return;
+          const payload = event.data;
+          if (
+            payload?.channel !== "multi-game-input" ||
+            payload.version !== 1 ||
+            payload.type !== "input" ||
+            !inputActions.includes(payload.action) ||
+            ![payload.x, payload.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)
+          ) return;
+          const rect = canvas?.getBoundingClientRect();
+          if (!canvas || !rect?.width || !rect?.height) return;
+          const init = {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            clientX: rect.left + payload.x * rect.width,
+            clientY: rect.top + payload.y * rect.height,
+            button: payload.button,
+            buttons: payload.buttons,
+            pointerId: payload.pointerId,
+            pointerType: payload.pointerType,
+          };
+          const mouseAction = {
+            pointerdown: "mousedown",
+            pointermove: "mousemove",
+            pointerup: "mouseup",
+          }[payload.action];
+          const touchAction = {
+            pointerdown: "touchstart",
+            pointermove: "touchmove",
+            pointerup: "touchend",
+          }[payload.action];
+
+          if (
+            payload.pointerType === "touch" &&
+            typeof Touch === "function" &&
+            typeof TouchEvent === "function"
+          ) {
+            const touch = new Touch({
+              identifier: payload.pointerId,
+              target: canvas,
+              clientX: init.clientX,
+              clientY: init.clientY,
+              screenX: init.clientX,
+              screenY: init.clientY,
+              pageX: init.clientX + window.scrollX,
+              pageY: init.clientY + window.scrollY,
+            });
+            const touches = touchAction === "touchend" ? [] : [touch];
+            canvas.dispatchEvent(new TouchEvent(touchAction, {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              touches,
+              changedTouches: [touch],
+            }));
+          } else {
+            canvas.dispatchEvent(new MouseEvent(mouseAction, init));
+          }
+        });
+
+        (async () => {
+          for (const src of runtime) await loadScript(src);
+          window.HtmlIsLoaded = true;
+          document.getElementById("splash").style.display = "none";
+          await window.boot();
+          notify("ready");
+        })().catch(() => {
+          document.getElementById("splash").textContent = "游戏资源加载失败";
+          notify("fatal", "runtime-load-failed");
+        });
+      })();
+    </script>
+  </body>
+</html>

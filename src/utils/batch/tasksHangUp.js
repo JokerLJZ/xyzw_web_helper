@@ -1,7 +1,12 @@
 /**
  * 挂机、答题、签到类任务
- * 包含: claimHangUpRewards, batchAddHangUpTime, batchStudy, batchclubsign
+ * 包含: claimHangUpRewards, batchUpgradeHangUpAndClaimOrderRewards, claimHangUpRewardsFiveTimes, batchAddHangUpTime, batchStudy, batchclubsign
  */
+
+import {
+  claimAvailableHangUpOrderRewards,
+  formatHangUpOrderRewards,
+} from "@/utils/hangUpOrderRewards";
 
 /**
  * 创建挂机、答题、签到类任务执行器
@@ -24,6 +29,191 @@ export function createTasksHangUp(deps) {
     message,
     currentRunningTokenId,
   } = deps;
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const HANG_UP_UPGRADE_ITEM_ID = 1024;
+
+  const getItemQuantity = (roleInfo, itemId) => {
+    const items =
+      roleInfo?.role?.items || roleInfo?.body?.role?.items || roleInfo?.items;
+    if (Array.isArray(items)) {
+      const item = items.find(
+        (entry) => Number(entry?.id ?? entry?.itemId) === Number(itemId),
+      );
+      return Number(item?.quantity ?? item?.num ?? item?.count ?? 0) || 0;
+    }
+    const item = items?.[itemId] ?? items?.[String(itemId)];
+    return Number(item?.quantity ?? item?.num ?? item?.count ?? item ?? 0) || 0;
+  };
+
+  const isRateLimitError = (error) => {
+    const text = String(error?.message || error || "");
+    return text.includes("200400") || text.includes("操作太快");
+  };
+
+  const upgradeHangUpBeforeClaim = async (tokenId, tokenName) => {
+    const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+    let remaining = getItemQuantity(roleInfo, HANG_UP_UPGRADE_ITEM_ID);
+    if (remaining <= 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 当前没有可用知识币，跳过挂机升级`,
+        type: "info",
+      });
+      return 0;
+    }
+
+    const initialQuantity = remaining;
+    let used = 0;
+    while (remaining > 0 && !shouldStop.value) {
+      const upgradeNum = remaining >= 50 ? 50 : remaining >= 10 ? 10 : 1;
+      let succeeded = false;
+      for (let attempt = 0; attempt <= 4; attempt += 1) {
+        try {
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "system_hangupupgrade",
+            { upgradeNum },
+            5000,
+          );
+          succeeded = true;
+          break;
+        } catch (error) {
+          if (!isRateLimitError(error) || attempt >= 4) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} 当前无法继续挂机升级，已使用${used}/${initialQuantity}个知识币：${error.message || error}`,
+              type: "warning",
+            });
+            return used;
+          }
+          await sleep(6000);
+        }
+      }
+      if (!succeeded) break;
+      remaining -= upgradeNum;
+      used += upgradeNum;
+      await sleep(1200);
+    }
+
+    if (used > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 挂机升级完成，共使用${used}个知识币`,
+        type: "success",
+      });
+    }
+    return used;
+  };
+
+  const addHangUpTimeForToken = async (tokenId, tokenName, actionText) => {
+    for (let i = 0; i < 4; i++) {
+      if (shouldStop.value) break;
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} ${actionText} ${i + 1}/4`,
+        type: "info",
+      });
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "system_mysharecallback",
+        { isSkipShareCard: true, type: 2 },
+        5000,
+      );
+      await sleep(500);
+    }
+  };
+
+  const claimHangUpOrderRewards = async (tokenId, tokenName) => {
+    try {
+      const result = await claimAvailableHangUpOrderRewards(tokenStore, tokenId);
+      if (!result.claimed) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 当前没有可领取的整数关卡挂机奖励（已领取至第${result.before.lastClaimedOrder}档）`,
+          type: "info",
+        });
+        return result;
+      }
+
+      const rewardText = formatHangUpOrderRewards(result.rewards);
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 整数关卡挂机奖励领取完成：第${result.before.lastClaimedOrder + 1}-${result.after.lastClaimedOrder}档${rewardText ? `，${rewardText}` : ""}`,
+        type: "success",
+      });
+      return result;
+    } catch (error) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 整数关卡挂机奖励检查或领取失败：${error.message || error}`,
+        type: "warning",
+      });
+      return null;
+    }
+  };
+
+  /**
+   * 小号任务：使用知识币升级挂机收益，并检查、领取整数关卡挂机奖励。
+   */
+  const batchUpgradeHangUpAndClaimOrderRewards = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始挂机升级及整数关卡奖励任务: ${tokenName} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+        await upgradeHangUpBeforeClaim(tokenId, tokenName);
+        if (!shouldStop.value) {
+          await claimHangUpOrderRewards(tokenId, tokenName);
+        }
+        tokenStatus.value[tokenId] = shouldStop.value
+          ? "stopped"
+          : "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 挂机升级及整数关卡奖励任务完成 ===`,
+          type: "success",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 挂机升级及整数关卡奖励任务失败: ${error.message || error}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("挂机升级及整数关卡奖励任务结束");
+  };
 
   /**
    * 领取挂机奖励
@@ -66,24 +256,10 @@ export function createTasksHangUp(deps) {
           {},
           5000,
         );
-        await new Promise((r) => setTimeout(r, 500));
+        await sleep(500);
 
         // 2. Add time 4 times
-        for (let i = 0; i < 4; i++) {
-          if (shouldStop.value) break;
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 挂机加钟 ${i + 1}/4`,
-            type: "info",
-          });
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "system_mysharecallback",
-            { isSkipShareCard: true, type: 2 },
-            5000,
-          );
-          await new Promise((r) => setTimeout(r, 500));
-        }
+        await addHangUpTimeForToken(tokenId, token.name, "挂机加钟");
 
         tokenStatus.value[tokenId] = "completed";
         addLog({
@@ -118,6 +294,91 @@ export function createTasksHangUp(deps) {
   };
 
   /**
+   * 连续领取五次挂机奖励后加钟
+   */
+  const claimHangUpRewardsFiveTimes = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+
+      const token = tokens.value.find((t) => t.id === tokenId);
+      const tokenName = token?.name || tokenId;
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始五次领取挂机: ${tokenName} ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+
+        for (let i = 0; i < 5; i++) {
+          if (shouldStop.value) break;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 领取挂机奖励 ${i + 1}/5`,
+            type: "info",
+          });
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "system_claimhangupreward",
+            {},
+            5000,
+          );
+
+          if (i < 4 && !shouldStop.value) {
+            await sleep(6000);
+          }
+        }
+
+        if (!shouldStop.value) {
+          await addHangUpTimeForToken(tokenId, tokenName, "挂机加钟");
+        }
+
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 五次领取挂机完成 ===`,
+          type: "success",
+        });
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 五次领取挂机失败: ${error.message || "未知错误"}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量五次领取挂机结束");
+  };
+
+  /**
    * 一键加钟
    */
   const batchAddHangUpTime = async () => {
@@ -140,21 +401,7 @@ export function createTasksHangUp(deps) {
           type: "info",
         });
         await ensureConnection(tokenId);
-        for (let i = 0; i < 4; i++) {
-          if (shouldStop.value) break;
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 执行加钟 ${i + 1}/4`,
-            type: "info",
-          });
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "system_mysharecallback",
-            { isSkipShareCard: true, type: 2 },
-            5000,
-          );
-          await new Promise((r) => setTimeout(r, 500));
-        }
+        await addHangUpTimeForToken(tokenId, token.name, "执行加钟");
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -546,6 +793,8 @@ export function createTasksHangUp(deps) {
 
   return {
     claimHangUpRewards,
+    batchUpgradeHangUpAndClaimOrderRewards,
+    claimHangUpRewardsFiveTimes,
     batchAddHangUpTime,
     batchStudy,
     batchclubsign,
