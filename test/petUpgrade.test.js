@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { createPetTasks, getPetUpgradeTargets, getEquippedPetUpgradeTarget } from "../src/utils/batch/tasksPet.js";
 
 function fixture({ quantity = 10, fail = false, stop = false } = {}) {
-  const role = { pet: { petUId: "143-U9U" }, items: { 15001: { quantity } }, petData: { pets: {
+  const role = { levelId: 6500, pet: { petUId: "143-U9U" }, items: { 15001: { quantity } }, petData: { pets: {
     "-1": { uId: "143-U9U", level: 39 },
     0: { uId: "pet-b", level: 1 },
   } } };
@@ -56,7 +56,7 @@ test("缺少唯一编号或合法槽位的增量数据不能作为升级目标",
 
 
 test("仓库宠物等级再高也不升级，未佩戴时不选目标", () => {
-  const role = { pet: { petUId: "equipped" }, petData: { pets: {
+  const role = { levelId: 6500, pet: { petUId: "equipped" }, petData: { pets: {
     0: { uId: "equipped", level: 10 }, 1: { uId: "storage", level: 100 },
   } } };
   assert.deepEqual(getEquippedPetUpgradeTarget(role), [{ slot: 0, uId: "equipped", level: 10 }]);
@@ -105,7 +105,7 @@ test("满级或无法升级导致状态完全未变化时只请求一次", async
 
 test("经验增加但未升一级时仍继续升级，切换佩戴宠物后停止", async () => {
   const f = fixture();
-  const role = { pet: { petUId: "143-U9U" }, items: { 15001: { quantity: 10 } }, petData: { pets: { "-1": { uId: "143-U9U", level: 39, exp: 0 } } } };
+  const role = { levelId: 6500, pet: { petUId: "143-U9U" }, items: { 15001: { quantity: 10 } }, petData: { pets: { "-1": { uId: "143-U9U", level: 39, exp: 0 } } } };
   f.deps.tokenStore.sendGetRoleInfo = async () => ({ role: structuredClone(role) });
   f.deps.tokenStore.sendMessageWithPromise = async (_id, cmd, params) => {
     f.calls.push({ cmd, params });
@@ -121,7 +121,7 @@ test("经验增加但未升一级时仍继续升级，切换佩戴宠物后停�
 test('经验道具耗尽后完整库存省略15001按0处理，整个库存缺失仍视为未知',async()=>{
  for(const missingInventory of [false,true]){
   const f=fixture({quantity:5});let reads=0;const logs=[];
-  const before={pet:{petUId:'143-U9U'},items:{15001:{quantity:5}},petData:{pets:{'-1':{uId:'143-U9U',level:49,exp:0}}}};
+  const before={levelId:6500,pet:{petUId:'143-U9U'},items:{15001:{quantity:5}},petData:{pets:{'-1':{uId:'143-U9U',level:49,exp:0}}}};
   const after={pet:{petUId:'143-U9U'},...(missingInventory?{}:{items:{}}),petData:{pets:{'-1':{uId:'143-U9U',level:49,exp:500}}}};
   f.deps.addLog=l=>logs.push(l.message);
   f.deps.tokenStore.sendGetRoleInfo=async()=>({role:reads++?after:before});
@@ -131,3 +131,17 @@ test('经验道具耗尽后完整库存省略15001按0处理，整个库存缺�
   assert.equal(logs.some(l=>l.includes('资源或进度无法确认')),missingInventory);
  }
 });
+
+for (const levelId of [6499, undefined, null, "invalid"]) {
+  test(`关卡${levelId}时全部宠物任务不发送操作请求`, async () => {
+    const names = Object.keys(createPetTasks(fixture().deps)).filter(name => name !== "batchClaimGachaRewards");
+    for (const name of names) {
+      const f = fixture();
+      f.deps.tokenStore.sendGetRoleInfo = async () => ({ role: { levelId } });
+      await createPetTasks(f.deps)[name]();
+      assert.deepEqual(f.calls, []);
+      assert.equal(f.released(), 1);
+      assert.equal(f.deps.tokenStatus.value.t, "completed");
+    }
+  });
+}

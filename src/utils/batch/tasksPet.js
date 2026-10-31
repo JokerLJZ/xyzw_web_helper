@@ -42,6 +42,17 @@ export function createPetTasks(deps) {
           currentRunningTokenId.value = id;
           await ensureConnection(id);
           connected = true;
+          const initialRole = claimRewards ? null : (await tokenStore.sendGetRoleInfo(id))?.role;
+          const mainLevel = Number(initialRole?.levelId);
+          if (!claimRewards && (!Number.isFinite(mainLevel) || mainLevel < 6500)) {
+            log(`主线关卡${Number.isFinite(mainLevel) ? mainLevel : "未知"}，未确认达到6500关，跳过${taskLabel}`, "warning");
+            tokenStatus.value[id] = "completed";
+            continue;
+          }
+          if (shouldStop.value) {
+            tokenStatus.value[id] = "stopped";
+            continue;
+          }
           if (management) {
             const options = {
               getRole: async () => (await tokenStore.sendGetRoleInfo(id))?.role,
@@ -99,7 +110,7 @@ export function createPetTasks(deps) {
             tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
             continue;
           }
-          let role = (await tokenStore.sendGetRoleInfo(id))?.role;
+          let role = initialRole;
           const targets = getEquippedPetUpgradeTarget(role);
           if (!targets.length) log("没有可确认的当前佩戴宠物，或槽位/唯一编号不完整，跳过", "warning");
           const target = targets[0];
