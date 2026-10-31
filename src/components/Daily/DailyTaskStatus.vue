@@ -196,15 +196,6 @@
               >黑市按折扣直购</span>
               <n-switch v-model:value="settings.blackMarketDiscountPurchase" />
             </div>
-
-            <div class="switch-row">
-              <span class="switch-label" title="只领取已达标奖励，不激活、不购买、不抽卡">领取藏品奖励</span>
-              <n-switch v-model:value="settings.collectionProgressRewards" />
-            </div>
-            <div class="switch-row">
-              <span class="switch-label" title="只领取已达标奖励，不激活、不购买、不抽卡">领取卡牌图鉴奖励</span>
-              <n-switch v-model:value="settings.cardCollectionRewards" />
-            </div>
             <div class="switch-row">
               <span class="switch-label">周一购买四圣碎片</span>
               <n-switch v-model:value="settings.holyBeastFragmentPurchase" />
@@ -401,8 +392,6 @@ const settings = reactive({
   mondayMailCleanup: false,
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
-  collectionProgressRewards: false,
-  cardCollectionRewards: false,
   holyBeastFragmentPurchase: false,
   whiteJadePurchase: false,
   mondayResourcePurchase: false,
@@ -431,8 +420,6 @@ const defaultDailySettings = {
   mondayMailCleanup: false,
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
-  collectionProgressRewards: false,
-  cardCollectionRewards: false,
   holyBeastFragmentPurchase: false,
   whiteJadePurchase: false,
   mondayResourcePurchase: false,

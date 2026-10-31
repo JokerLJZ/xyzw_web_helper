@@ -40,3 +40,5 @@ export { createConfirmedPetMergeTask } from './confirmedPetMergeTask.js';
 export { createTasksResourcePurchase } from './tasksResourcePurchase.js';
 
 export { createTasksFeudatory } from './tasksFeudatory.js';
+
+export { createTasksCollectionRewards } from './tasksCollectionRewards.js';

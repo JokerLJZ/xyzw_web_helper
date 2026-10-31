@@ -537,6 +537,8 @@
             </n-tab-pane>
             <n-tab-pane name="resource" tab="资源">
               <n-space>
+                <n-button size="small" @click="batchClaimCollectionRewards" :disabled="isRunning || selectedTokens.length === 0" title="领取装扮主题、套装和总积分等级奖励">领取藏品奖励</n-button>
+                <n-button size="small" @click="batchClaimCardCollectionRewards" :disabled="isRunning || selectedTokens.length === 0" title="领取普通及彩色卡牌图鉴奖励">领取卡牌图鉴奖励</n-button>
                 <n-button
                   size="small"
                   @click="openHelperModal('box')"
@@ -1079,14 +1081,6 @@
               />
             </div>
             <div class="switch-row">
-              <span class="switch-label" title="只领取已达标奖励，不激活、不购买、不抽卡">领取藏品奖励</span>
-              <n-switch v-model:value="currentSettings.collectionProgressRewards" />
-            </div>
-            <div class="switch-row">
-              <span class="switch-label" title="只领取已达标奖励，不激活、不购买、不抽卡">领取卡牌图鉴奖励</span>
-              <n-switch v-model:value="currentSettings.cardCollectionRewards" />
-            </div>
-            <div class="switch-row">
               <span class="switch-label">周一购买四圣碎片</span
               ><n-switch v-model:value="currentSettings.holyBeastFragmentPurchase" />
             </div>
@@ -1230,14 +1224,6 @@
               ><n-switch
                 v-model:value="currentTemplate.blackMarketDiscountPurchase"
               />
-            </div>
-            <div class="switch-row">
-              <span class="switch-label" title="只领取已达标奖励，不激活、不购买、不抽卡">领取藏品奖励</span>
-              <n-switch v-model:value="currentTemplate.collectionProgressRewards" />
-            </div>
-            <div class="switch-row">
-              <span class="switch-label" title="只领取已达标奖励，不激活、不购买、不抽卡">领取卡牌图鉴奖励</span>
-              <n-switch v-model:value="currentTemplate.cardCollectionRewards" />
             </div>
             <div class="switch-row">
               <span class="switch-label">周一购买四圣碎片</span
@@ -3882,6 +3868,7 @@ import {
   createTasksItem,
   createTasksRefine,
   createTasksResourcePurchase,
+  createTasksCollectionRewards,
   createConfirmedPearlFishTasks,
   createConfirmedPetMergeTask,
   createTasksDungeon,
@@ -4415,8 +4402,6 @@ const currentSettings = reactive({
   mondayMailCleanup: false,
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
-  collectionProgressRewards: false,
-  cardCollectionRewards: false,
   holyBeastFragmentPurchase: false,
   whiteJadePurchase: false,
   mondayResourcePurchase: false,
@@ -4454,8 +4439,6 @@ const currentTemplate = reactive({
   mondayMailCleanup: false,
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
-  collectionProgressRewards: false,
-  cardCollectionRewards: false,
   holyBeastFragmentPurchase: false,
   whiteJadePurchase: false,
   mondayResourcePurchase: false,
@@ -5071,6 +5054,8 @@ const taskGroupDefinitions = [
     name: "resource",
     label: "资源",
     tasks: [
+      "batchClaimCollectionRewards",
+      "batchClaimCardCollectionRewards",
       "batchOpenBox",
       "batchOpenBoxByPoints",
       "batchClaimBoxPointReward",
@@ -7237,8 +7222,6 @@ const loadSettings = (tokenId) => {
       mondayMailCleanup: false,
       blackMarketPurchase: true,
       blackMarketDiscountPurchase: false,
-      collectionProgressRewards: false,
-      cardCollectionRewards: false,
       holyBeastFragmentPurchase: false,
       whiteJadePurchase: false,
       mondayResourcePurchase: false,
@@ -7296,8 +7279,6 @@ const openTaskTemplateModal = () => {
     mondayMailCleanup: false,
     blackMarketPurchase: true,
     blackMarketDiscountPurchase: false,
-    collectionProgressRewards: false,
-    cardCollectionRewards: false,
     holyBeastFragmentPurchase: false,
     whiteJadePurchase: false,
     mondayResourcePurchase: false,
@@ -7460,8 +7441,6 @@ const resetTemplateForm = () => {
     mondayMailCleanup: false,
     blackMarketPurchase: true,
     blackMarketDiscountPurchase: false,
-    collectionProgressRewards: false,
-    cardCollectionRewards: false,
     holyBeastFragmentPurchase: false,
     whiteJadePurchase: false,
     mondayResourcePurchase: false,
@@ -8227,6 +8206,7 @@ const {
 
 const tasksItem = createTasksItem(createTaskDeps());
 const { batchAltAccountRefine } = createTasksRefine(createTaskDeps());
+const { batchClaimCollectionRewards, batchClaimCardCollectionRewards } = createTasksCollectionRewards(createTaskDeps());
 const { batchBuyRedFragmentsAndPetCookies } = createTasksResourcePurchase(createTaskDeps());
 const { batchBuyRedFeatherWithPearls, batchBuyBaguaWithPearls, batchBuyPearlFish } = createConfirmedPearlFishTasks(createTaskDeps(), {
   isBusy: () => isRunning.value && !scheduledTokenSession.active,
@@ -8408,6 +8388,8 @@ const { batchXuanwuBlessing, batchExchangeXuanwuPetCookies } =
 // 只允许调用明确登记的任务，导入的任务名称不能执行任意代码。
 const getScheduledTaskFunction = (name) => {
   const registry = {
+    batchClaimCollectionRewards,
+    batchClaimCardCollectionRewards,
     startBatch,
     claimHangUpRewards,
     batchAddHangUpTime,

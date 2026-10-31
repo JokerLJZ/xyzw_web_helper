@@ -1,4 +1,3 @@
-import { loadCollectionRewardConfig, runCollectionRewards } from './collectionRewards.js';
 import { cleanupMondayMail } from "./mondayMailCleanup.js";
 import { normalizeDailyRoleSnapshot, chinaDayStart, arenaAvailability, remainingFreeFishing, rewardProgressText, dailyConditionEnabled, classifyDailyStepResult } from "./dailyTaskPolicy.js";
 import { createApexDailySender, runApexDailyTask } from "./apexDailyTask.js";
@@ -936,18 +935,6 @@ export class DailyTaskRunner {
     );
   }
 
-  async claimCollectionProgressRewards(tokenId, cards = false) {
-    const send = (cmd, params) => this.executeGameCommand(tokenId, cmd, params);
-    const config = await loadCollectionRewardConfig(send);
-    const previousRecovery = this.rewardRecoveryActive;
-    this.rewardRecoveryActive = true;
-    try {
-      return await runCollectionRewards({ send, config, cards, log: message => this.log(message, "info") });
-    } finally {
-      this.rewardRecoveryActive = previousRecovery;
-    }
-  }
-
   async claimCollectionFreeRewardIfAvailable(tokenId) {
     const goodsList = await this.executeGameCommand(
       tokenId,
@@ -1397,8 +1384,6 @@ export class DailyTaskRunner {
         mondayMailCleanup: false,
         blackMarketPurchase: true,
         blackMarketDiscountPurchase: false,
-        collectionProgressRewards: false,
-        cardCollectionRewards: false,
         holyBeastFragmentPurchase: false,
         whiteJadePurchase: false,
         mondayResourcePurchase: false,
@@ -1957,12 +1942,6 @@ export class DailyTaskRunner {
       execute: () => this.claimPermanentCardRewardIfAvailable(tokenId),
     });
 
-    if (settings.collectionProgressRewards === true) {
-      taskList.push({ name: "领取藏品奖励", execute: () => this.claimCollectionProgressRewards(tokenId) });
-    }
-    if (settings.cardCollectionRewards === true) {
-      taskList.push({ name: "领取卡牌图鉴奖励", execute: () => this.claimCollectionProgressRewards(tokenId, true) });
-    }
 
     if (settings.holyBeastFragmentPurchase === true) {
       if (isMonday()) {

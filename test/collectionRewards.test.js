@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { collectionRewardActions, cardRewardActions, runCollectionRewards, loadCollectionRewardConfig } from '../src/utils/collectionRewards.js';
-import { DailyTaskRunner } from '../src/utils/dailyTaskRunner.js';
 const config = {
   CollectionStageConf: { 100: { id: 100, stage: 10 }, 200: { id: 200, stage: 20 } },
   CollectionSeriesConf: { 1: { id: 1, stage: [2, 4] } },
@@ -94,21 +93,4 @@ test('配置来自该账号返回版本，失败不缓存', async () => {
   }), config);
   assert.match(url, /data\/current-123\/config.json$/);
   await assert.rejects(loadCollectionRewardConfig(async () => ({})), /版本/);
-});
-test('日常执行器接入并在超时后允许复查，恢复原来的错误处理状态', async () => {
-  const calls = [];
-  const runner = new DailyTaskRunner({ sendMessageWithPromise: async (_id, cmd) => {
-    calls.push(cmd);
-    if (cmd === 'system_getdatabundlever') return { dataBundleVer: 'test' };
-    if (cmd === 'collection_getinfo') return { collection: collection() };
-    throw new Error('请求超时');
-  } });
-  runner.sleep = async () => {};
-  const previous = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, json: async () => config });
-  try {
-    await assert.rejects(runner.claimCollectionProgressRewards('account-a'), /超时/);
-    assert.equal(calls.at(-1), 'collection_getinfo');
-    assert.equal(runner.rewardRecoveryActive, undefined);
-  } finally { globalThis.fetch = previous; }
 });
