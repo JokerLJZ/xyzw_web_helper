@@ -38,3 +38,14 @@ test('接口未确认成功、限流、停止时不重试、不发送下一次�
 test('图鉴激活不修改宠物、物品或发送本体升星命令',async()=>{
  const r=role();const before=structuredClone(r.petData.pets);await activatePetBooks({getRole:async()=>r,send:async(cmd,{petId})=>{assert.ok(['pet_activatebook','pet_claimbookreward'].includes(cmd));const key=cmd==='pet_activatebook'?'books':'bookReward';r.petData[key][petId]=1;return {role:{petData:{[key]:{[petId]:1}}}};}});assert.deepEqual(r.petData.pets,before);
 });
+test('未升级紫宠等级为0或省略等级仍可佩戴，异常等级仍排除', async () => {
+ for (const level of [0, undefined]) {
+  let r = {petData:{pets:{0:{uId:'purple',petId:403,...(level === undefined ? {} : {level})}}}};
+  const result = await equipHighestLevelPet({getRole:async()=>r,send:async(cmd,params)=>{
+   assert.equal(cmd,'pet_load');assert.deepEqual(params,{slotUId:{slot:0,uId:'purple'}});
+   r={petData:{pets:{'-1':r.petData.pets[0]}}};
+  }});
+  assert.equal(result.changed,true);assert.equal(result.target.level,0);
+ }
+ for (const level of [-1, '1', NaN, 1.5]) assert.equal(selectHighestLevelPet({petData:{pets:{0:{uId:'bad',petId:403,level}}}}),null);
+});

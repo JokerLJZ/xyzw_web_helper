@@ -10,8 +10,9 @@ export function selectHighestLevelPet(role) {
   const equipped = equippedId(role);
   return Object.entries(role?.petData?.pets ?? {}).flatMap(([key, pet]) => {
     const slot = Number(key);
-    if (!pet || !PET_EQUIP_CONFIG[pet.petId] || !Number.isInteger(slot) || slot < -1 || typeof pet.uId !== 'string' || !pet.uId || !Number.isSafeInteger(pet.level) || pet.level < 1) return [];
-    return [{ ...pet, slot }];
+    const level = pet?.level ?? 0;
+    if (!pet || !PET_EQUIP_CONFIG[pet.petId] || !Number.isInteger(slot) || slot < -1 || typeof pet.uId !== 'string' || !pet.uId || !Number.isSafeInteger(level) || level < 0) return [];
+    return [{ ...pet, level, slot }];
   }).sort((a, b) =>
     PET_EQUIP_CONFIG[b.petId].color - PET_EQUIP_CONFIG[a.petId].color ||
     attributePriority(b) - attributePriority(a) ||

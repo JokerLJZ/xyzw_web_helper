@@ -77,3 +77,9 @@ PetService.merge({fromSlotUId, toSlotUId, inheritSlot})
 | 白 | 大眼海胆101 | 小幽灵104 | 芽芽蛙102、泡泡蝇103 |
 
 原任务标识 `batchEquipHighestLevelPet` 保留以兼容已有定时任务，界面和日志改为“佩戴优先宠物”；神灯挑战中独立的最高等级宠物判断不变。游戏更新后按 `docs/game接口定位与更新指南.md` 重读 manifest 和 data 版本，核对上述三张配置表并更新预设与测试。
+
+## 2026-10-31 佩戴筛选修复
+
+重新核对本地 index → game-defines → main 的 manifest、CDN及XXTEA规则；POST manifest参数platform=hortor、version=0.36.0-android，当前COMMIT_ID=172f2fc0，game=dff14、launcher=ae5a4、协议=90329、config=58922。下载并隔离解密当前game，PetEquipDialog._onClickUse仍通过petsReverse取槽位，调用PetService.load({slotUId:{slot,uId}})，未设置等级大于0的佩戴条件。沿用已有已核对的pet_load协议，不新增命令。此次未重新分析配置技能表，品质和属性排序保持原规则。
+
+项目原选择器要求level为至少1的整数，导致0级或缺省等级被排除；现在缺省按0参与等级排序，仍排除负值及异常类型。新增0级、缺省等级紫宠从槽位0佩戴并查询装备槽确认的回归，7项宠物管理测试通过。尚未取得用户此次真实角色响应，不能断言其具体等级字段；未连接账号执行佩戴。后续更新仍需按接口定位指南重新取得manifest，并核对PetEquipDialog、协议及配置，避免沿用快照哈希。

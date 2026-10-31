@@ -65,7 +65,7 @@ export function createPetTasks(deps) {
               log(`宠物图鉴任务结束：激活${result.activated}项、领取${result.claimed}项奖励`);
             } else {
               const result = await equipHighestLevelPet(options);
-              log(result.changed ? `已佩戴优先宠物${result.target.uId}（${result.target.level}级）` : result.reason === "equipped" ? "优先宠物已经佩戴，跳过" : "没有可佩戴宠物或任务已停止，跳过", result.changed ? "success" : "info");
+              log(result.changed ? `已佩戴优先宠物${result.target.uId}（${result.target.level}级）` : result.reason === "equipped" ? "优先宠物已经佩戴，跳过" : result.reason === "stopped" ? "任务已停止，跳过佩戴" : "未找到可识别的宠物，请检查宠物列表、编号及等级数据", result.changed ? "success" : "info");
             }
             tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
             continue;
