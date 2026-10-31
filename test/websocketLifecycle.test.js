@@ -134,6 +134,7 @@ test("后端：迟到数字响应不兜底匹配，新连接不受旧连接关�
 test('藏品与卡牌领奖注册命令并匹配客户端声明的共享响应', async () => {
   const mappings = [
     ['collection_getinfo', 'collectioninforesp'],
+    ['collection_activate', 'collectioninforesp'],
     ['collection_claimseries', 'collection_claimresp'],
     ['collection_claimtotal', 'collection_claimresp'],
     ['linkcard_claimpackprocessreward', 'syncrewardresp'],

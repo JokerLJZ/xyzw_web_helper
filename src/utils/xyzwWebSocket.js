@@ -338,6 +338,7 @@ export function registerDefaultCommands(reg) {
 
     // 礼包相关
     .register("discount_claimreward", { discountId: 1 })
+    .register("collection_activate")
     .register("collection_getinfo")
     .register("collection_claimseries")
     .register("collection_claimtotal")
@@ -1305,7 +1306,7 @@ export class XyzwWebSocketClient {
       activity_getresp: "activity_get",
       autumn_useitemresp: "autumn_useitem",
       activity_claimweekactrewardresp: "activity_claimweekactreward",
-      collectioninforesp: "collection_getinfo",
+      collectioninforesp: ["collection_getinfo", "collection_activate"],
       collection_claimresp: ["collection_claimseries", "collection_claimtotal"],
       collection_goodslistresp: "collection_goodslist",
       collection_claimfreerewardresp: "collection_claimfreereward",

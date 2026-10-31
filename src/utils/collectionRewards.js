@@ -17,9 +17,34 @@ export async function loadCollectionRewardConfig(send, fetchConfig = globalThis.
   return config;
 }
 
+// 客户端 advancing = (canActivateNum - activateNum) * activateScore。
+// activateNum 的协议默认值为 0；必须明确返回可激活次数和正积分才发送。
+export function collectionActivationActions(collection) {
+  const actions = [];
+  for (const [field, poolType] of [['heroSeries', 2], ['collectMap', 1], ['themeSeries', 3]]) {
+    for (const [seriesKey, series] of entries(collection?.[field])) {
+      const seriesId = Number(seriesKey);
+      if (!Number.isInteger(seriesId) || seriesId <= 0) continue;
+      for (const [itemKey, item] of entries(series?.collectMap)) {
+        const id = Number(poolType === 3 ? item?.id : itemKey);
+        const activated = item?.activateNum ?? 0;
+        if (!Number.isInteger(id) || id <= 0 ||
+            !Number.isInteger(activated) || activated < 0 ||
+            !Number.isInteger(item?.canActivateNum) || item.canActivateNum <= activated ||
+            !Number.isFinite(item.activateScore) || item.activateScore <= 0) continue;
+        // 主题页的点击激活只处理英雄皮肤；普通装扮按客户端已知类型操作。
+        if (poolType === 3 && item.type !== 1) continue;
+        if (poolType === 1 && (seriesId < 2 || seriesId > 9)) continue;
+        actions.push({ cmd: 'collection_activate', params: { poolType, id, isAll: false, seriesId }, progress: activated });
+      }
+    }
+  }
+  return actions;
+}
+
 export function collectionRewardActions(collection, config) {
   if (!object(collection) || !Number.isFinite(collection.claimScore) || !Number.isFinite(collection.collectionLevel)) throw new Error('藏品状态不完整');
-  const actions = [];
+  const actions = collectionActivationActions(collection);
   for (const [field, table, poolType] of [['themeSeries', 'CollectionSeriesConf', 3], ['suitSeries', 'CollectionHeroSuitsConf', 4]]) {
     if (!object(collection[field])) throw new Error('藏品系列状态不完整');
     for (const [id, state] of entries(collection[field])) {

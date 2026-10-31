@@ -94,3 +94,60 @@ test('配置来自该账号返回版本，失败不缓存', async () => {
   assert.match(url, /data\/current-123\/config.json$/);
   await assert.rejects(loadCollectionRewardConfig(async () => ({})), /版本/);
 });
+
+test('英雄皮肤分、普通装扮分及主题皮肤按各自池和原始ID激活，优先于领奖', () => {
+  const state = collection();
+  state.heroSeries = { 101: { collectMap: { 10103: { canActivateNum: 2, activateNum: 1, activateScore: 5 } } } };
+  state.collectMap = { 2: { collectMap: { 110103: { canActivateNum: 1, activateScore: 10 } } } };
+  state.themeSeries[1].collectMap = { composite: { id: 10103, type: 1, canActivateNum: 1, activateScore: 1 } };
+  const actions = collectionRewardActions(state, config);
+  assert.deepEqual(actions.slice(0, 3), [
+    { cmd: 'collection_activate', params: { poolType: 2, id: 10103, isAll: false, seriesId: 101 }, progress: 1 },
+    { cmd: 'collection_activate', params: { poolType: 1, id: 110103, isAll: false, seriesId: 2 }, progress: 0 },
+    { cmd: 'collection_activate', params: { poolType: 3, id: 10103, isAll: false, seriesId: 1 }, progress: 0 },
+  ]);
+  assert.equal(actions[3].cmd, 'collection_claimseries');
+});
+test('已激活、无可激活次数、零积分及非法计数不领取皮肤分', () => {
+  for (const item of [
+    { activateNum: 1, canActivateNum: 1, activateScore: 5 },
+    { canActivateNum: 0, activateScore: 5 }, { activateScore: 5 },
+    { canActivateNum: 1, activateScore: 0 }, { canActivateNum: 1, activateScore: 5, activateNum: -1 },
+    { canActivateNum: 1.5, activateScore: 5 },
+  ]) {
+    const state = { ...collection(), heroSeries: { 101: { collectMap: { 10103: item } } } };
+    assert.equal(collectionRewardActions(state, config).some(a => a.cmd === 'collection_activate'), false);
+  }
+});
+test('皮肤分激活后刷新进度，继续领取新达标的主题和总积分奖励', async () => {
+  const state = { claimScore: 0, collectionLevel: 0, suitSeries: {}, themeSeries: { 1: { colProcess: 0, claimProcess: 0 } },
+    heroSeries: { 101: { collectMap: { 10103: { canActivateNum: 1, activateScore: 10 } } } } };
+  const commands = [];
+  const result = await runCollectionRewards({ config, send: async (cmd, params) => {
+    commands.push(cmd);
+    if (cmd === 'collection_getinfo') return { collection: structuredClone(state) };
+    if (cmd === 'collection_activate') {
+      assert.equal(params.poolType, 2);
+      state.heroSeries[101].collectMap[10103].activateNum = 1;
+      state.claimScore = 10; state.themeSeries[1].colProcess = 2;
+    } else if (cmd === 'collection_claimseries') state.themeSeries[1].claimProcess = 2;
+    else if (cmd === 'collection_claimtotal') state.collectionLevel = 100;
+    else assert.fail(cmd);
+    return {};
+  } });
+  assert.equal(result.claimed, 3);
+  assert.deepEqual(commands.filter(cmd => cmd !== 'collection_getinfo'), ['collection_activate', 'collection_claimseries', 'collection_claimtotal']);
+});
+test('皮肤激活进度未更新立即停止；超时只复查一次且不重发', async () => {
+  for (const timeout of [false, true]) {
+    let reads = 0, writes = 0;
+    const state = { ...collection(), heroSeries: { 101: { collectMap: { 10103: { canActivateNum: 1, activateScore: 5 } } } } };
+    await assert.rejects(runCollectionRewards({ config, send: async cmd => {
+      if (cmd === 'collection_getinfo') { reads++; return { collection: structuredClone(state) }; }
+      assert.equal(cmd, 'collection_activate'); writes++;
+      if (timeout) throw Error('请求超时');
+      return {};
+    } }), timeout ? /超时/ : /未确认/);
+    assert.equal(reads, 2); assert.equal(writes, 1);
+  }
+});

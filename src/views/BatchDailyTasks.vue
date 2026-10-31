@@ -537,7 +537,7 @@
             </n-tab-pane>
             <n-tab-pane name="resource" tab="资源">
               <n-space>
-                <n-button size="small" @click="batchClaimCollectionRewards" :disabled="isRunning || selectedTokens.length === 0" title="领取装扮主题、套装和总积分等级奖励">领取藏品奖励</n-button>
+                <n-button size="small" @click="batchClaimCollectionRewards" :disabled="isRunning || selectedTokens.length === 0" title="先领取已拥有皮肤和装扮的藏品积分，再领取主题、套装和总积分等级奖励">领取藏品奖励</n-button>
                 <n-button size="small" @click="batchClaimCardCollectionRewards" :disabled="isRunning || selectedTokens.length === 0" title="领取普通及彩色卡牌图鉴奖励">领取卡牌图鉴奖励</n-button>
                 <n-button
                   size="small"
