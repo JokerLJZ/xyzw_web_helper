@@ -1,6 +1,6 @@
 import { runPetMerge } from "../petMerge.js";
 import { getClaimableGachaStages, gachaBody } from "../gachaRewards.js";
-import { activatePetBooks, equipHighestLevelPet } from "../petManagement.js";
+import { activatePetBooks, equipHighestLevelPet, concentratePetExperience } from "../petManagement.js";
 /** 抓包：PetService.useEXPItem，消耗15001；响应pets仅含槽位增量。 */
 export function getPetUpgradeTargets(role) {
   return Object.entries(role?.petData?.pets || {}).flatMap(([key, pet]) => {
@@ -66,6 +66,10 @@ export function createPetTasks(deps) {
             } else {
               const result = await equipHighestLevelPet(options);
               log(result.changed ? `已佩戴优先宠物${result.target.uId}（${result.target.level}级）` : result.reason === "equipped" ? "优先宠物已经佩戴，跳过" : result.reason === "stopped" ? "任务已停止，跳过佩戴" : "未找到可识别的宠物，请检查宠物列表、编号及等级数据", result.changed ? "success" : "info");
+              if (result.target && !shouldStop.value) {
+                const progress = await concentratePetExperience({...options, onResult: ({action,pet,recovered}) => log(action === "reset" ? `宠物${pet.uId}重生，回收脆饼${recovered}` : action === "locked" ? `宠物${pet.uId}已锁定，保留` : `佩戴宠物已升级至${pet.level ?? 0}级`)});
+                log(`脆饼集中升级结束：重生${progress.reset}只、升级${progress.upgrades}次`);
+              }
             }
             tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
             continue;

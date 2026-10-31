@@ -83,3 +83,9 @@ PetService.merge({fromSlotUId, toSlotUId, inheritSlot})
 重新核对本地 index → game-defines → main 的 manifest、CDN及XXTEA规则；POST manifest参数platform=hortor、version=0.36.0-android，当前COMMIT_ID=172f2fc0，game=dff14、launcher=ae5a4、协议=90329、config=58922。下载并隔离解密当前game，PetEquipDialog._onClickUse仍通过petsReverse取槽位，调用PetService.load({slotUId:{slot,uId}})，未设置等级大于0的佩戴条件。沿用已有已核对的pet_load协议，不新增命令。此次未重新分析配置技能表，品质和属性排序保持原规则。
 
 项目原选择器要求level为至少1的整数，导致0级或缺省等级被排除；现在缺省按0参与等级排序，仍排除负值及异常类型。新增0级、缺省等级紫宠从槽位0佩戴并查询装备槽确认的回归，7项宠物管理测试通过。尚未取得用户此次真实角色响应，不能断言其具体等级字段；未连接账号执行佩戴。后续更新仍需按接口定位指南重新取得manifest，并核对PetEquipDialog、协议及配置，避免沿用快照哈希。
+
+## 2026-10-31 佩戴后集中脆饼
+
+沿用本日当前manifest核对（再次请求确认协议90329），分析game=dff14的PetResetDialog → PetModule.sendReset → PetService.reset({slotUId})。协议90329资源包含pet_reset及Pet_ResetResp标识；本次未完整还原混淆注册器，参数以game实际调用为依据。PetResetDialog预览重生等级Lv.0，返还升级资源、部分精炼资源及天赋资源，故重生并非只回收等级。客户端阻止带锁定精炼的重生（quenches[].locked），宠物锁定还涉及密码设置；自动任务保守保留所有锁定宠物。
+
+任务先完成佩戴（已佩戴也继续），逐个查询并重生其他等级>1宠物；每次完整查询确认原唯一编号等级归0、脆饼库存未减少。然后通过PetModule.sendAddExp对应的pet_useexpitem与isOneClick:true持续升级佩戴槽，库存耗尽或状态不变结束。2500/1500毫秒间隔不变，每账号独立查询，停止不继续发送，异常/超时不重发。没有实际账号响应样本；真实返还数量和等级上限以服务器为准，不计算或硬编码可升等级。后续客户端更新需同时检查重生副作用、锁定字段与协议注册。

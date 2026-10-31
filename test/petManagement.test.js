@@ -49,3 +49,21 @@ test('未升级紫宠等级为0或省略等级仍可佩戴，异常等级仍排�
  }
  for (const level of [-1, '1', NaN, 1.5]) assert.equal(selectHighestLevelPet({petData:{pets:{0:{uId:'bad',petId:403,level}}}}),null);
 });
+test('佩戴后回收其他高等级宠物脆饼，再持续升级，保留锁定和1级宠物',async()=>{
+ const {concentratePetExperience}=await import('../src/utils/petManagement.js');
+ let r={petData:{pets:{'-1':{uId:'wear',level:0,exp:0},0:{uId:'reset',level:20},1:{uId:'keep',level:1},2:{uId:'lock',level:20,isLocked:true},3:{uId:'quenchlock',level:30,quenches:{1:{locked:true}}}}},items:{15001:{quantity:0}}};
+ const calls=[];
+ const result=await concentratePetExperience({getRole:async()=>structuredClone(r),send:async(cmd,p)=>{
+  calls.push([cmd,p]);if(cmd==='pet_reset'){r.petData.pets[0].level=0;r.items[15001].quantity=10;}
+  else {r.petData.pets[-1].level+=10;r.items[15001].quantity-=5;}
+ }});
+ assert.deepEqual(result,{reset:1,upgrades:2,stopped:false});assert.deepEqual(calls[0],['pet_reset',{slotUId:{slot:0,uId:'reset'}}]);
+ assert.equal(r.petData.pets[-1].level,20);
+});
+test('回收未确认、库存缺失或停止不会继续消耗',async()=>{
+ const {concentratePetExperience}=await import('../src/utils/petManagement.js');
+ const r={petData:{pets:{'-1':{uId:'wear',level:0},0:{uId:'reset',level:2}}},items:{}};
+ let count=0;await assert.rejects(concentratePetExperience({getRole:async()=>r,send:async()=>{count++;}}),/未确认/);assert.equal(count,1);
+ await concentratePetExperience({getRole:async()=>r,shouldStop:()=>true,send:async()=>assert.fail()});
+ await assert.rejects(concentratePetExperience({getRole:async()=>({...r,items:undefined}),send:async()=>assert.fail()}),/库存/);
+});

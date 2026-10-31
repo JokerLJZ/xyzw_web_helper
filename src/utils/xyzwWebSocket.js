@@ -329,6 +329,7 @@ export function registerDefaultCommands(reg) {
     .register("pet_activatebook")
     .register("pet_claimbookreward")
     .register("pet_load")
+    .register("pet_reset")
 
     // 灯神相关
     .register("hero_calcpowerbyteam")

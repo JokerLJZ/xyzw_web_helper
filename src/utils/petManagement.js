@@ -66,3 +66,53 @@ export async function activatePetBooks({ getRole, send, wait = async()=>{}, shou
   }
   return { activated, claimed };
 }
+
+// 重生还会清除精炼、天赋；锁定宠物保留，写入后仅查询确认，不重发。
+export async function concentratePetExperience({ getRole, send, wait = async()=>{}, shouldStop = ()=>false, onResult = ()=>{} }) {
+  let role = await getRole();
+  const targetId = equippedId(role);
+  if (!targetId) throw new Error('无法确认已佩戴宠物');
+  const inventory = () => {
+    if (!role?.petData?.pets || equippedId(role) !== targetId) throw new Error('宠物列表或佩戴状态发生变化，停止');
+    return Object.entries(role.petData.pets).map(([slot, pet]) => ({...pet, slot:Number(slot)}));
+  };
+  const quantity = () => role?.items ? Number(role.items[15001]?.quantity ?? 0) : NaN;
+  let reset = 0, upgrades = 0;
+  for (const candidate of inventory()) {
+    if (shouldStop()) break;
+    const pet = inventory().find(p=>p.uId === candidate.uId);
+    if (!pet || pet.uId === targetId || !(pet.level > 1)) continue;
+    if (pet.isLocked || Object.values(pet.quenches ?? {}).some(q=>q?.locked)) {
+      onResult({action:'locked', pet});continue;
+    }
+    if (!Number.isInteger(pet.slot) || pet.slot < 0 || typeof pet.uId !== 'string') throw new Error('重生宠物身份不完整');
+    const before = quantity();
+    if (!Number.isFinite(before)) throw new Error('无法确认脆饼库存');
+    await wait(PET_MERGE_OPERATION_DELAY);
+    if (shouldStop()) break;
+    await send('pet_reset',{slotUId:{slot:pet.slot,uId:pet.uId}});
+    await wait(PET_MERGE_QUERY_DELAY);
+    role = await getRole();
+    const after = inventory().find(p=>p.uId === pet.uId);
+    if (!after || (after.level ?? 0) !== 0 || !Number.isFinite(quantity()) || quantity() < before) throw new Error('宠物重生或脆饼回收未确认，停止且不重试');
+    reset++;onResult({action:'reset',pet,recovered:quantity()-before});
+  }
+  while (!shouldStop()) {
+    const pet = inventory().find(p=>p.uId === targetId);
+    const before = quantity();
+    if (!pet || !Number.isFinite(before)) throw new Error('无法确认佩戴宠物或脆饼库存');
+    if (before <= 0) break;
+    await wait(PET_MERGE_OPERATION_DELAY);
+    if (shouldStop()) break;
+    await send('pet_useexpitem',{slotUId:{slot:pet.slot,uId:pet.uId},isOneClick:true});
+    await wait(PET_MERGE_QUERY_DELAY);
+    role = await getRole();
+    const after = inventory().find(p=>p.uId === targetId);
+    const remaining = quantity();
+    if (!after || !Number.isFinite(remaining)) throw new Error('升级后状态无法确认');
+    if (after.level === pet.level && after.exp === pet.exp && remaining === before) break;
+    if (remaining >= before || (after.level ?? 0) < (pet.level ?? 0)) throw new Error('升级进度或消耗异常，停止且不重试');
+    upgrades++;onResult({action:'upgrade',pet:after});
+  }
+  return {reset,upgrades,stopped:shouldStop()};
+}
