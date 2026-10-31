@@ -11,7 +11,7 @@ test('官方配置包含10个阶段，分别要求10至100次，按门槛跳过�
  }
 });
 test('缺少次数或领取状态时不猜测资格',()=>{
- for(const state of [undefined,{}, {stageGachaCnt:50},{stageGachaCnt:-1,claimedStageIdMap:{}},{stageGachaCnt:'50',claimedStageIdMap:{}}])assert.throws(()=>getClaimableGachaStages(state));
+ for(const state of [undefined,{}, {stageGachaCnt:50,claimedStageIdMap:[]},{stageGachaCnt:-1,claimedStageIdMap:{}},{stageGachaCnt:'50',claimedStageIdMap:{}}])assert.throws(()=>getClaimableGachaStages(state));
 });
 test('实际阶段4抓包只有增量领取标记，可正确解析并保留之前状态',()=>{
  const fixture=JSON.parse(fs.readFileSync(new URL('./fixtures/gacha-claim-stage4.json',import.meta.url)));
@@ -35,4 +35,12 @@ test('新增阶段5及以上可领取；手动停止后不领取下一阶段',as
 });
 test('请求失败不重复领取该阶段，未确认成功标记为失败',async()=>{
  const f=deps({roleGacha:{stageGachaCnt:10,claimedStageIdMap:{}}},()=>{throw Error('timeout');});await f.run();assert.equal(f.calls.length,2);assert.equal(f.d.tokenStatus.value.a,'failed');
+});
+
+test('首次领奖没有领取记录时，十次可领第一阶段且无需其他操作', async()=>{
+ assert.deepEqual(getClaimableGachaStages({stageGachaCnt:10}).map(s=>s.id),[1]);
+ const f=deps({roleGacha:{stageGachaCnt:10}},p=>({roleGacha:{claimedStageIdMap:{[p.stageId]:true}}}));
+ await f.run();
+ assert.deepEqual(f.calls,[{cmd:'gacha_getinfo',p:{}},{cmd:'gacha_claimstagereward',p:{stageId:1}}]);
+ assert.equal(f.d.tokenStatus.value.a,'completed');
 });

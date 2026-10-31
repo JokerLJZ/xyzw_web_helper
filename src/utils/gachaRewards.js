@@ -46,8 +46,8 @@ export const gachaBody = result => result?._raw?.body ?? result?.body ?? result;
 
 export function getClaimableGachaStages(state) {
   const count = state?.stageGachaCnt;
-  if (!Number.isSafeInteger(count) || count < 0 || !state?.claimedStageIdMap || typeof state.claimedStageIdMap !== "object") {
+  if (!Number.isSafeInteger(count) || count < 0 || (state?.claimedStageIdMap != null && (typeof state.claimedStageIdMap !== "object" || Array.isArray(state.claimedStageIdMap)))) {
     throw new Error("未获取到完整扭蛋次数和领取状态");
   }
-  return GACHA_REWARD_STAGES.filter(stage => count >= stage.num && !state.claimedStageIdMap[stage.id]);
+  return GACHA_REWARD_STAGES.filter(stage => count >= stage.num && !state.claimedStageIdMap?.[stage.id]);
 }
