@@ -130,3 +130,22 @@ test("后端：迟到数字响应不兜底匹配，新连接不受旧连接关�
   f.client._handleMessage({_raw:{cmd:'role_getroleinforesp',code:0},rawData:{fresh:true}});
   assert.equal((await pending).fresh,true);f.client.disconnect();assert.equal(f.timers.size,0);
 });
+
+test('藏品与卡牌领奖注册命令并匹配客户端声明的共享响应', async () => {
+  const mappings = [
+    ['collection_getinfo', 'collectioninforesp'],
+    ['collection_claimseries', 'collection_claimresp'],
+    ['collection_claimtotal', 'collection_claimresp'],
+    ['linkcard_claimpackprocessreward', 'syncrewardresp'],
+    ['linkcard_claimseriesreward', 'syncrewardresp'],
+  ];
+  for (const [cmd, response] of mappings) {
+    const f = fixture();
+    assert.equal(f.client.registry.commands.has(cmd), true);
+    const pending = f.client.sendWithPromise(cmd, {}, 99);
+    await f.tick(50);
+    f.client._handlePromiseResponse({ cmd: response, code: 0, body: { verified: cmd } });
+    assert.equal((await pending).verified, cmd);
+    f.client.disconnect();
+  }
+});

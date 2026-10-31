@@ -1079,6 +1079,14 @@
               />
             </div>
             <div class="switch-row">
+              <span class="switch-label" title="只领取已达标奖励，不激活、不购买、不抽卡">领取藏品奖励</span>
+              <n-switch v-model:value="currentSettings.collectionProgressRewards" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label" title="只领取已达标奖励，不激活、不购买、不抽卡">领取卡牌图鉴奖励</span>
+              <n-switch v-model:value="currentSettings.cardCollectionRewards" />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">周一购买四圣碎片</span
               ><n-switch v-model:value="currentSettings.holyBeastFragmentPurchase" />
             </div>
@@ -1222,6 +1230,14 @@
               ><n-switch
                 v-model:value="currentTemplate.blackMarketDiscountPurchase"
               />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label" title="只领取已达标奖励，不激活、不购买、不抽卡">领取藏品奖励</span>
+              <n-switch v-model:value="currentTemplate.collectionProgressRewards" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label" title="只领取已达标奖励，不激活、不购买、不抽卡">领取卡牌图鉴奖励</span>
+              <n-switch v-model:value="currentTemplate.cardCollectionRewards" />
             </div>
             <div class="switch-row">
               <span class="switch-label">周一购买四圣碎片</span
@@ -4399,6 +4415,8 @@ const currentSettings = reactive({
   mondayMailCleanup: false,
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
+  collectionProgressRewards: false,
+  cardCollectionRewards: false,
   holyBeastFragmentPurchase: false,
   whiteJadePurchase: false,
   mondayResourcePurchase: false,
@@ -4436,6 +4454,8 @@ const currentTemplate = reactive({
   mondayMailCleanup: false,
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
+  collectionProgressRewards: false,
+  cardCollectionRewards: false,
   holyBeastFragmentPurchase: false,
   whiteJadePurchase: false,
   mondayResourcePurchase: false,
@@ -7217,6 +7237,8 @@ const loadSettings = (tokenId) => {
       mondayMailCleanup: false,
       blackMarketPurchase: true,
       blackMarketDiscountPurchase: false,
+      collectionProgressRewards: false,
+      cardCollectionRewards: false,
       holyBeastFragmentPurchase: false,
       whiteJadePurchase: false,
       mondayResourcePurchase: false,
@@ -7274,6 +7296,8 @@ const openTaskTemplateModal = () => {
     mondayMailCleanup: false,
     blackMarketPurchase: true,
     blackMarketDiscountPurchase: false,
+    collectionProgressRewards: false,
+    cardCollectionRewards: false,
     holyBeastFragmentPurchase: false,
     whiteJadePurchase: false,
     mondayResourcePurchase: false,
@@ -7436,6 +7460,8 @@ const resetTemplateForm = () => {
     mondayMailCleanup: false,
     blackMarketPurchase: true,
     blackMarketDiscountPurchase: false,
+    collectionProgressRewards: false,
+    cardCollectionRewards: false,
     holyBeastFragmentPurchase: false,
     whiteJadePurchase: false,
     mondayResourcePurchase: false,
