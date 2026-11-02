@@ -72,3 +72,11 @@ test('confirmed task assignments override keyword classification', () => {
   assert.equal(groupOf('skinChallenge'), 'weekly');
   assert.equal(groups.find(group => group.name === 'resource').label, '资源管理');
 });
+
+test('pearl purchases belong to growth and standalone combined purchase is removed', () => {
+  const groups = groupTaskCatalog(availableTasks);
+  const growth = groups.find(group => group.name === 'growth').tasks.map(task => task.value);
+  for (const id of ['batchBuyRedFeatherWithPearls', 'batchBuyBaguaWithPearls', 'batchBuyPearlFish']) assert.ok(growth.includes(id));
+  assert.ok(!availableTasks.some(task => task.value === 'batchBuyRedFragmentsAndPetCookies'));
+  assert.equal(availableTasks.find(task => task.value === 'legionStoreBuyWhiteJade').label, '盐锭购买白玉');
+});

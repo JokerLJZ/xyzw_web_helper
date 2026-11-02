@@ -602,7 +602,7 @@
                   @click="legionStoreBuyWhiteJade"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  一键购买白玉
+                  盐锭购买白玉
                 </n-button>
                 <n-button
                   size="small"
@@ -758,7 +758,6 @@
             </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
               <n-space>
-                <n-button size="small" @click="batchBuyRedFragmentsAndPetCookies" :disabled="isRunning || selectedTokens.length === 0" title="不限星期，按余额和剩余限购额度采购珍宝阁万能红碎片及盐晶商店成长脆饼">采购万能红碎片及成长脆饼</n-button>
                 <n-button
                   size="small"
                   @click="batchUpgradeHangUpAndClaimOrderRewards"
@@ -1094,7 +1093,7 @@
               ><n-switch v-model:value="currentSettings.whiteJadePurchase" />
             </div>
             <div class="switch-row">
-              <span class="switch-label" title="仅北京时间周一；按余额和剩余额度采购">周一采购万能红碎片及成长脆饼</span>
+              <span class="switch-label" title="仅北京时间周一；按余额和剩余额度采购">徽记采购万能碎片与盐锭采购成长脆饼</span>
               <n-switch v-model:value="currentSettings.mondayResourcePurchase" />
             </div>
             <div class="switch-row">
@@ -1239,7 +1238,7 @@
               ><n-switch v-model:value="currentTemplate.whiteJadePurchase" />
             </div>
             <div class="switch-row">
-              <span class="switch-label" title="仅北京时间周一；按余额和剩余额度采购">周一采购万能红碎片及成长脆饼</span>
+              <span class="switch-label" title="仅北京时间周一；按余额和剩余额度采购">徽记采购万能碎片与盐锭采购成长脆饼</span>
               <n-switch v-model:value="currentTemplate.mondayResourcePurchase" />
             </div>
             <div class="switch-row">
@@ -3886,7 +3885,6 @@ import {
   createTasksTower,
   createTasksItem,
   createTasksRefine,
-  createTasksResourcePurchase,
   createTasksCollectionRewards,
   createConfirmedPearlFishTasks,
   createConfirmedPetMergeTask,
@@ -8114,7 +8112,6 @@ const {
 const tasksItem = createTasksItem(createTaskDeps());
 const { batchAltAccountRefine } = createTasksRefine(createTaskDeps());
 const { batchClaimCollectionRewards, batchClaimCardCollectionRewards } = createTasksCollectionRewards(createTaskDeps());
-const { batchBuyRedFragmentsAndPetCookies } = createTasksResourcePurchase(createTaskDeps());
 const { batchBuyRedFeatherWithPearls, batchBuyBaguaWithPearls, batchBuyPearlFish } = createConfirmedPearlFishTasks(createTaskDeps(), {
   isBusy: () => isRunning.value && !scheduledTokenSession.active,
   onCancel: () => {
@@ -8342,7 +8339,6 @@ const getScheduledTaskFunction = (name) => {
     batchClaimMailAttachments,
     batchAwakenHeroSkills,
     batchAltAccountRefine,
-    batchBuyRedFragmentsAndPetCookies,
     batchBuyRedFeatherWithPearls,
     batchBuyBaguaWithPearls,
     batchBuyPearlFish,

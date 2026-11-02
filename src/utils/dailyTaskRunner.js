@@ -1975,7 +1975,7 @@ export class DailyTaskRunner {
 
     if (settings.mondayResourcePurchase === true) {
       if (isChinaMonday()) {
-        taskList.push({ name: "周一采购万能红碎片及成长脆饼", execute: () => this.runMondayResourcePurchase(tokenId) });
+        taskList.push({ name: "徽记采购万能碎片与盐锭采购成长脆饼", execute: () => this.runMondayResourcePurchase(tokenId) });
       } else {
         this.logDetail("万能红碎片及成长脆饼采购跳过：仅北京时间周一执行", "info");
       }

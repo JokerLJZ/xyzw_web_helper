@@ -206,7 +206,7 @@
               <n-switch v-model:value="settings.whiteJadePurchase" />
             </div>
             <div class="switch-row">
-              <span class="switch-label" title="仅北京时间周一；按余额和剩余限购额度兑换万能红碎片及成长脆饼">周一采购万能红碎片及成长脆饼</span>
+              <span class="switch-label" title="仅北京时间周一；按余额和剩余限购额度兑换万能红碎片及成长脆饼">徽记采购万能碎片与盐锭采购成长脆饼</span>
               <n-switch v-model:value="settings.mondayResourcePurchase" />
             </div>
             <div class="switch-row">

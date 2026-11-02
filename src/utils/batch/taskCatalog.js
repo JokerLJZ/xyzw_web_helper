@@ -15,6 +15,9 @@ export const TASK_GROUPS = [
 const TASK_GROUP_OVERRIDES = {
   batchCheckSaltMasters: 'growth',
   batchJoinLegion: 'growth',
+  batchBuyRedFeatherWithPearls: 'growth',
+  batchBuyBaguaWithPearls: 'growth',
+  batchBuyPearlFish: 'growth',
   skinChallenge: 'weekly',
 };
 export function groupTaskCatalog(tasks, query = '') {
