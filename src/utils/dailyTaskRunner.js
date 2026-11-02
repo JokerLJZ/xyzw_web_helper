@@ -455,6 +455,8 @@ export class DailyTaskRunner {
           if (code === 400010) reason = "购买所需盐锭不足";
           if (code === 2300370) reason = "本周商品购买数量已达上限";
         }
+        if (cmd === "collection_goodslist" && code === 200160)
+          reason = "珍宝阁模块未开启（200160）";
         if (cmd === "store_purchase" && code === 200020)
           reason = "黑市采购返回200020，按设置正常跳过";
         if (cmd === "store_purchase" && code === 1300050)
@@ -942,6 +944,7 @@ export class DailyTaskRunner {
       {},
       "检查珍宝阁免费礼包状态",
     );
+    if (goodsList?.status === "skipped") return goodsList;
     const claimState = getCollectionFreeRewardClaimState(goodsList);
 
     if (claimState === "claimed") {

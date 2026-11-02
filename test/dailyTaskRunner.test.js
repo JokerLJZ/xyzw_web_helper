@@ -1272,3 +1272,37 @@ test('断线中断与用户主动停止保留不同原因', () => {
   runner.callbacks = { shouldStop: () => true };
   assert.throws(() => runner.throwIfInterrupted('account-a'), error => error.interrupted === true && error.connectionLost === false);
 });
+
+test("珍宝阁首次状态查询未开启正常跳过且不发送领奖", async () => {
+  for (const error of [new Error("服务器错误: 200160 - 模块未开启"), Object.assign(new Error("模块未开启"), { code: 200160 })]) {
+    const f = fixture();
+    const send = f.store.sendMessageWithPromise;
+    f.store.sendMessageWithPromise = async (...args) => {
+      if (args[1] === "collection_goodslist") throw error;
+      return send(...args);
+    };
+    const result = await f.runner().run("account-a", {}, settings);
+    assert.equal(result.planFailed, 0);
+    assert.equal(result.planIncomplete, 0);
+    assert.equal(result.incomplete, 0);
+    assert.equal(f.calls.some(c => c.cmd === "collection_claimfreereward"), false);
+  }
+});
+
+test("珍宝阁其他查询错误、停止及领奖阶段未开启仍抛出", async () => {
+  for (const [cmd, error] of [
+    ["collection_goodslist", new Error("服务器错误: 200020 - 未知错误")],
+    ["collection_goodslist", new Error("请求超时")],
+    ["collection_goodslist", Object.assign(new Error("停止"), { code: 200160, interrupted: true })],
+    ["collection_claimfreereward", new Error("服务器错误: 200160 - 模块未开启")],
+  ]) {
+    const f = fixture();
+    f.store.sendMessageWithPromise = async (id, command) => {
+      f.calls.push({ cmd: command });
+      if (command === cmd) throw error;
+      return { freeRewardTime: 0 };
+    };
+    await assert.rejects(f.runner().claimCollectionFreeRewardIfAvailable("account-a"), e => e === error);
+    if (cmd === "collection_goodslist") assert.equal(f.calls.some(c => c.cmd === "collection_claimfreereward"), false);
+  }
+});
