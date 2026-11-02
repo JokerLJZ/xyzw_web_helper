@@ -27,3 +27,8 @@ export function getBatchRetryTokenIds(tokenIds, statuses, stopped = false) {
   const failed = tokenIds.filter(id => statuses[id] === "failed");
   return failed.length > 0 && failed.length * 10 <= tokenIds.length * 3 ? failed : [];
 }
+
+/** User cancellation is a stopped run; a lost connection remains a failure. */
+export function getTaskErrorStatus(error, stopped = false) {
+  return (error?.interrupted || stopped) && !error?.connectionLost ? "stopped" : "failed";
+}

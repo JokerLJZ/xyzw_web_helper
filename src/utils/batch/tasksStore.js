@@ -1,3 +1,4 @@
+import { getTaskErrorStatus } from '../scheduledTaskResult.js';
 import { runCheerShopPurchase } from '../cheerShop.js';
 import { syncBlackMarketPurchaseConfig } from "./blackMarketConfig.js";
 /**
@@ -66,8 +67,8 @@ export function createTasksStore(deps) {
           });
           tokenStatus.value[id] = shouldStop.value ? 'stopped' : 'completed';
         } catch (error) {
-          tokenStatus.value[id] = 'failed';
-          log(`助威商店采购停止：${error.message}`, 'error');
+          tokenStatus.value[id] = getTaskErrorStatus(error, shouldStop.value);
+          log(`助威商店采购${tokenStatus.value[id] === 'stopped' ? '已停止' : '停止'}：${error.message}`, tokenStatus.value[id] === 'stopped' ? 'info' : 'error');
         } finally {
           if (connected) {
             try { tokenStore.closeWebSocketConnection(id); }

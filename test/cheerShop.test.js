@@ -9,7 +9,7 @@ function account({ balance = 100, bought = {}, timeout = false, confirm = true }
     calls.push({ cmd, params });
     if (cmd === 'legion_storegoodslist') return { buyGoods: { ...bought } };
     if (cmd === 'role_getroleinfo') return { role: { items: { 2101: { quantity: balance } } } };
-    if (confirm) { bought[params.id] = (bought[params.id] || 0) + params.num; balance -= params.num * 20; }
+    if (confirm) { bought[params.id] = (bought[params.id] || 0) + 1; balance -= 20; }
     if (timeout) throw new Error('timeout');
     // Reward responses may omit role/items. Confirmation must use a fresh query.
     return { reward: [] };
@@ -20,7 +20,7 @@ const writes = a => a.calls.filter(c => c.cmd === 'legion_storebuygoods');
 test('uses current account stock, configured cumulative target and official wire fields', async () => {
   const a = account({ balance: 60, bought: { 10: 2 } });
   await runCheerShopPurchase({ send: a.send, purchases: { 10: 6 } });
-  assert.deepEqual(writes(a), [{ cmd: 'legion_storebuygoods', params: { id: 10, num: 3 } }]);
+  assert.deepEqual(writes(a), Array.from({ length: 3 }, () => ({ cmd: 'legion_storebuygoods', params: { id: 10, num: 0 } })));
 });
 test('repeated run skips already reached target; accounts have independent balances', async () => {
   const a = account({ balance: 100 });
@@ -79,4 +79,17 @@ test('pearl purchases belong to growth and standalone combined purchase is remov
   for (const id of ['batchBuyRedFeatherWithPearls', 'batchBuyBaguaWithPearls', 'batchBuyPearlFish']) assert.ok(growth.includes(id));
   assert.ok(!availableTasks.some(task => task.value === 'batchBuyRedFragmentsAndPetCookies'));
   assert.equal(availableTasks.find(task => task.value === 'legionStoreBuyWhiteJade').label, '盐锭购买白玉');
+});
+
+test('server rejection identifies the product and never falls back to bulk quantity', async () => {
+  const a = account({ confirm: false });
+  const send = async (cmd, params) => {
+    if (cmd === 'legion_storebuygoods') {
+      await a.send(cmd, params);
+      throw new Error('服务器错误: 200020');
+    }
+    return a.send(cmd, params);
+  };
+  await assert.rejects(runCheerShopPurchase({ send, purchases: { 10: 5, 11: 1 } }), /进阶石.*商品 10.*200020.*已购 0→0/);
+  assert.deepEqual(writes(a), [{ cmd: 'legion_storebuygoods', params: { id: 10, num: 0 } }]);
 });

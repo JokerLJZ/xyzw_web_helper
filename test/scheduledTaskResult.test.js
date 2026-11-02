@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { summarizeScheduledAccount } from "../src/utils/scheduledTaskResult.js";
+import { getTaskErrorStatus, summarizeScheduledAccount } from "../src/utils/scheduledTaskResult.js";
 import { formatScheduledTaskNotification } from "../src/utils/wxpusher.js";
 
 test("账号日常未领奖后即使后续任务成功，推送仍为待继续", () => {
@@ -24,4 +24,11 @@ test("账号正常完成和全部跳过分别保留结果", () => {
   assert.equal(summarizeScheduledAccount(["completed", "completed"]), "completed");
   assert.equal(summarizeScheduledAccount(["skipped", "completed"]), "completed");
   assert.equal(summarizeScheduledAccount(["skipped", "skipped"]), "skipped");
+});
+
+test("连接等待期间主动停止归为停止，断线及普通错误保留失败", () => {
+  assert.equal(getTaskErrorStatus({ interrupted: true }), "stopped");
+  assert.equal(getTaskErrorStatus(new Error("取消等待连接"), true), "stopped");
+  assert.equal(getTaskErrorStatus({ interrupted: true, connectionLost: true }, true), "failed");
+  assert.equal(getTaskErrorStatus(new Error("服务器错误200020")), "failed");
 });

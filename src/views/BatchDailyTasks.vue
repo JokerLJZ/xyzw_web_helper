@@ -3830,7 +3830,7 @@ import {
 } from "vue";
 import { useTokenStore, gameTokens, tokenGroups } from "@/stores/tokenStore";
 import { $emit } from "@/stores/events/index.ts";
-import { getBatchRetryTokenIds, getDailyRunStatus, normalizeTaskResultStatus, summarizeScheduledAccount } from "@/utils/scheduledTaskResult.js";
+import { getTaskErrorStatus, getBatchRetryTokenIds, getDailyRunStatus, normalizeTaskResultStatus, summarizeScheduledAccount } from "@/utils/scheduledTaskResult.js";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import {
   buildSnapshotWithIndexedDB,
@@ -6562,12 +6562,12 @@ const executeScheduledTask = async (task) => {
             }
           } catch (error) {
             accountReasons.push(...(error.dailyReasons || [`${taskLabel(taskName)}：${error.message}`]));
-            accountTaskStatuses.push(error.interrupted && !error.connectionLost ? "stopped" : "failed");
-            tokenStatus.value[tokenId] = error.interrupted && !error.connectionLost ? "stopped" : "failed";
+            accountTaskStatuses.push(getTaskErrorStatus(error, shouldStop.value));
+            tokenStatus.value[tokenId] = getTaskErrorStatus(error, shouldStop.value);
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 任务 ${taskLabel(taskName)} 失败: ${error.message}`,
-              type: "error",
+              message: `${tokenName} 任务 ${taskLabel(taskName)}${tokenStatus.value[tokenId] === "stopped" ? "已停止" : "失败"}: ${error.message}`,
+              type: tokenStatus.value[tokenId] === "stopped" ? "info" : "error",
             });
           }
         }
@@ -6583,11 +6583,11 @@ const executeScheduledTask = async (task) => {
         });
       } catch (error) {
         (tokenTaskReasons.value[tokenId] ||= []).push(`账号连接或执行异常：${error.message}`);
-        tokenStatus.value[tokenId] = "failed";
+        tokenStatus.value[tokenId] = getTaskErrorStatus(error, shouldStop.value);
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 账号任务执行失败: ${error.message}`,
-          type: "error",
+          message: `${tokenName} 账号任务${tokenStatus.value[tokenId] === "stopped" ? "已停止" : "执行失败"}: ${error.message}`,
+          type: tokenStatus.value[tokenId] === "stopped" ? "info" : "error",
         });
       } finally {
         endScheduledTokenSession(tokenId, tokenName);

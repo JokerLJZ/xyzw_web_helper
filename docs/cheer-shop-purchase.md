@@ -20,7 +20,7 @@
 
 - `StoreLegionDataAdapter.bindItem` 读取 `LegionStoreConf` 商品、`buyGoods[id]` 已购数量及 `UIHelper.isPaymentEnough(coin,price,itemID)`，购买按钮经确认对话框调用 `LegionModule.sendStoreBuyGoods(id)`。
 - `LegionModule.sendStoreGoodsList` 调用 `LegionService.storeGoodsList({})`；返回后清空并重建 `buyGoods`，该字段为完整已购额度表。
-- `LegionModule.sendStoreBuyGoods(id,num=0)` 调用 `LegionService.storeBuyGoods({id,num})`，成功后展示 `reward` 并替换 `buyGoods`。单份 UI 使用默认 num=0；本项目已有采购任务使用正整数 num 明确份数，本次同样使用正整数。
+- `LegionModule.sendStoreBuyGoods(id,num=0)` 调用 `LegionService.storeBuyGoods({id,num})`，成功后展示 `reward` 并替换 `buyGoods`。助威商店单份 UI 使用默认 num=0。本次错误反馈后已修正原实现：助威商店只能按已观察到的官方单份调用逐次发送 `{id,num:0}`；不能把其他商店的正整数数量调用推广到这里。
 - 当前 TEST_REMOTE_MODULE 中注册 `_gs("Legion",{...,storeBuyGoods:tV,storeGoodsList:nV,...})`。注册器以 `(service+"_"+method).toLowerCase()` 生成发送命令，因此实际为 `legion_storegoodslist`、`legion_storebuygoods`。已隔离字符串表及轮转解码核对 `_gs`、`toLowerCase`、`Legion_StoreBuyGoodsResp`、`buyGoods`，没有执行整个协议包。
 - 客户端声明 `Legion_StoreGoodsListResp.buyGoods`、`Legion_StoreBuyGoodsResp.buyGoods`。购买响应的角色字段可能为增量，因此库存始终重新查询 `role_getroleinfo`，不把增量缺失当作清零。
 
@@ -50,3 +50,13 @@
 验证结果：采购和洗练入口相关15项测试通过；全量919项中918项通过，宠物合成测试在未修改HEAD快照同样失败。生产构建通过，仍有既有worker.js缺失及大包提示。未进行浏览器人工交互或真实账号采购验证。
 
 2026-11-02 用户确认调整：查询咸主、加入俱乐部明确归入养成与阵容；换皮闯关明确归入周常与限时活动；资源分类名称改为“资源管理”。明确归属优先于关键词匹配。列表新增分类数量筛选、网格任务项和多选高亮，跨分类/搜索保留选择。相关16项测试及生产构建通过，未进行浏览器人工交互验证。
+
+## 2026-11-02：200020反馈后的参数纠正
+
+重新请求当前manifest并下载业务/协议，版本仍为game dff14、launcher ae5a4、TEST_REMOTE_MODULE 90329、codeVersion 2.52.1、dataBundleVer cbb769dfb4、COMMIT_ID 172f2fc0。
+
+进一步核对 `LegionShopDialog._refreshItem`：当 `o.storeID !== SALT_CRYSTAL_STORE_ID` 时，普通确认对话框成功后调用 `_module.sendStoreBuyGoods(o.id)`；只有盐晶商店调用 `_showSaltCrystalBuyDialog`，数量回调才调用 `sendStoreBuyGoods(t.id,e)`。类内 `SALT_CRYSTAL_STORE_ID=4`，助威商品配置的storeID=2。因此助威应使用 `sendStoreBuyGoods` 的默认num=0表示单份。
+
+原实现把盐晶等其他商品的批量num推广到助威商店，是缺乏当前UI调用依据的推断，现已纠正。累计目标仍有效，但每次只发送 `{id,num:0}`，刷新额度，确认已购数量增加1，再查询库存继续下一份。失败日志记录商品名称、id、已购前后额度、单价及请求前库存；200020仍只认定通用错误，不能据此证明余额不足或服务器禁止的具体条件。未使用真实账号复现或执行线上购买，修正效果仍需实际运行确认。
+
+同时修正组合任务连接等待阶段：用户主动停止标记为stopped并记录“已停止”，真实断线和普通错误仍为failed。
