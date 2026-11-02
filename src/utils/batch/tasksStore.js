@@ -1,3 +1,4 @@
+import { runCheerShopPurchase } from '../cheerShop.js';
 import { syncBlackMarketPurchaseConfig } from "./blackMarketConfig.js";
 /**
  * 商店类任务
@@ -34,6 +35,52 @@ export function createTasksStore(deps) {
     currentRunningTokenId,
     delayConfig,
   } = deps;
+
+  const batchCheerShopPurchase = async () => {
+    const ids = [...selectedTokens.value];
+    if (!ids.length) return;
+    const purchases = { ...batchSettings.cheerShopPurchases };
+    if (!Object.values(purchases).some(value => Number(value) > 0)) {
+      message.warning('请先配置助威商店采购数量');
+      return;
+    }
+    isRunning.value = true;
+    shouldStop.value = false;
+    ids.forEach(id => { tokenStatus.value[id] = "waiting"; });
+    try {
+      for (const id of ids) {
+        if (shouldStop.value) break;
+        let connected = false;
+        const name = tokens.value.find(t => t.id === id)?.name || id;
+        const log = (text, type = 'info') => addLog({ time: new Date().toLocaleTimeString(), message: `${name} ${text}`, type });
+        try {
+          tokenStatus.value[id] = 'running';
+          currentRunningTokenId.value = id;
+          await ensureConnection(id);
+          connected = true;
+          await runCheerShopPurchase({
+            purchases, shouldStop: () => shouldStop.value,
+            send: (cmd, params) => tokenStore.sendMessageWithPromise(id, cmd, params, 15000),
+            wait: ms => new Promise(resolve => setTimeout(resolve, Math.max(ms, Number(delayConfig?.command) || 0))),
+            log,
+          });
+          tokenStatus.value[id] = shouldStop.value ? 'stopped' : 'completed';
+        } catch (error) {
+          tokenStatus.value[id] = 'failed';
+          log(`助威商店采购停止：${error.message}`, 'error');
+        } finally {
+          if (connected) {
+            try { tokenStore.closeWebSocketConnection(id); }
+            finally { releaseConnectionSlot(); }
+          }
+        }
+      }
+    } finally {
+      ids.forEach(id => { if (tokenStatus.value[id] === "waiting") tokenStatus.value[id] = "stopped"; });
+      currentRunningTokenId.value = null;
+      isRunning.value = false;
+    }
+  };
 
   /** 使用批量设置中的俱乐部号，为所选账号申请加入俱乐部。 */
   const batchJoinLegion = async () => {
@@ -675,6 +722,7 @@ export function createTasksStore(deps) {
   };
 
   return {
+    batchCheerShopPurchase,
     batchJoinLegion,
     store_syncpurchaseconfig,
     legion_storebuygoods,

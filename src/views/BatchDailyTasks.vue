@@ -331,6 +331,8 @@
 
         <!-- Batch Functions -->
         <n-card title="批量功能列表" style="margin-top: 16px">
+          <BatchTaskCatalog :tasks="availableTasks" :disabled="isRunning" :can-run="selectedTokens.length > 0" @run="runCatalogTasks" @settings="showBatchSettingsModal = true" />
+          <n-collapse style="margin-top: 16px"><n-collapse-item title="专项操作与配置（商品选择、助威、查询等）" name="special">
           <n-tabs type="line" animated>
             <n-tab-pane name="daily" tab="日常">
               <n-space>
@@ -644,6 +646,8 @@
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="monthly" tab="月度">
+              <n-button size="small" :disabled="isRunning" @click="showCheerShopModal = true">配置助威商店采购</n-button>
+              <n-button size="small" :disabled="isRunning || !selectedTokens.length" @click="batchCheerShopPurchase">助威商店采购</n-button>
               <n-space>
                 <n-button
                   size="small"
@@ -931,6 +935,7 @@
               </n-space>
             </n-tab-pane>
           </n-tabs>
+          </n-collapse-item></n-collapse>
         </n-card>
       </div>
 
@@ -2628,7 +2633,8 @@
       title="全局任务设置"
       style="width: 90%; max-width: 820px"
     >
-      <div class="settings-content">
+      <n-button :disabled="isRunning" @click="showCheerShopModal = true">配置月度助威商店采购</n-button>
+        <div class="settings-content">
         <n-grid :cols="2" :x-gap="24">
           <!-- 左列：批量操作设置 -->
           <n-grid-item>
@@ -3407,6 +3413,16 @@
       </div>
     </n-modal>
 
+    <n-modal v-model:show="showCheerShopModal" preset="card" title="助威商店采购清单" style="width: 620px; max-width: 95%">
+      <p>使用助威币；数量为本期累计采购目标，已购买部分会扣除，0 表示不购买。按下列顺序采购，余额不足时购买可负担数量。商店按游戏周期重置。</p>
+      <n-space vertical>
+        <div v-for="good in CHEER_SHOP_GOODS" :key="good.id" style="display: flex; justify-content: space-between; gap: 12px">
+          <span>{{ good.name }}（{{ good.price }} 助威币 / 份）</span>
+          <n-input-number v-model:value="batchSettings.cheerShopPurchases[good.id]" :min="0" :max="good.limit" :precision="0" :disabled="isRunning" style="width: 130px" />
+        </div>
+        <n-button type="primary" :disabled="isRunning" @click="saveBatchSettings(); showCheerShopModal = false">保存采购清单</n-button>
+      </n-space>
+    </n-modal>
     <n-modal v-model:show="showGoldenCheerModal" preset="card" title="黄金天宫助威" style="width: 600px; max-width: 90%">
       <p>每个选中账号本期助威一次；已助威账号自动跳过。请先刷新本期俱乐部列表。</p>
       <n-space vertical>
@@ -3799,6 +3815,9 @@ import WeeklyRewardSettings from "@/components/Common/WeeklyRewardSettings.vue";
 import { normalizeWeeklyRewardChoice } from "@/utils/weeklyReward.js";
 import JianghuBlackMarketSettings from "@/components/Common/JianghuBlackMarketSettings.vue";
 import { DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES, normalizeJianghuBlackMarketPurchases } from "@/utils/jianghuBlackMarketWeekly.js";
+import BatchTaskCatalog from '@/components/Common/BatchTaskCatalog.vue';
+import { groupTaskCatalog } from '@/utils/batch/taskCatalog.js';
+import { CHEER_SHOP_GOODS } from '@/utils/cheerShop.js';
 // Import required dependencies
 import {
   ref,
@@ -4742,6 +4761,7 @@ const loadBatchSettings = () => {
       Object.assign(batchSettings, parsed);
       batchSettings.saltBattle = { ...DEFAULT_SALT_BATTLE_SETTINGS, ...(parsed.saltBattle || {}) };
     }
+    batchSettings.cheerShopPurchases = { ...(batchSettings.cheerShopPurchases || {}) };
     batchSettings.weirdTowerClimbCount = normalizeWeirdTowerClimbCount(batchSettings.weirdTowerClimbCount);
     batchSettings.blackMarketPurchaseList = normalizeBlackMarketPurchaseList(batchSettings.blackMarketPurchaseList);
     const normalizedBlackMarket = normalizeBlackMarketSettings(batchSettings);
@@ -4811,6 +4831,7 @@ const openBatchSettings = () => {
 
 // Load settings on component mount
 loadBatchSettings();
+batchSettings.cheerShopPurchases ||= {};
 
 // ======================
 // Legacy Gift Feature
@@ -5006,143 +5027,28 @@ watch(
   { deep: true },
 );
 
-// 任务分组定义
-const taskGroupDefinitions = [
-  {
-    name: "daily",
-    label: "日常",
-    tasks: [
-      "startBatch",
-      "claimHangUpRewards",
-      "batchAddHangUpTime",
-      "resetBottles",
-      "batchlingguanzi",
-      "batchclubsign",
-      "batchSaltSignup",
-      "batchSaltBattle",
-      "batchCampSignup",
-      "batchPeachSignup",
-      "batchGoldenCheer",
-      "batchCampChallenge",
-      "batcharenafight",
-      "store_syncpurchaseconfig",
-      "store_purchase",
-      "collection_claimfreereward",
-      "batchGenieSweep",
-    ],
-  },
-  {
-    name: "dungeon",
-    label: "副本",
-    tasks: [
-      "climbTower",
-      "batchmengjing",
-      "skinChallenge",
-      "batchClaimPeachTasks",
-      "batchXuanwuBlessing",
-      "batchClaimConsumptionRewards",
-      "batchRechargeStandard",
-      "batchPhotoStandard",
-    ],
-  },
-  {
-    name: "weirdTower",
-    label: "怪异塔",
-    tasks: ["batchWeirdTower"],
-  },
-  {
-    name: "resource",
-    label: "资源",
-    tasks: [
-      "batchClaimCollectionRewards",
-      "batchClaimCardCollectionRewards",
-      "batchOpenBox",
-      "batchOpenBoxByPoints",
-      "batchClaimBoxPointReward",
-      "batchClaimWeeklyActivityBenefit",
-      "batchFish",
-      "batchRecruit",
-      "legion_storebuygoods",
-      "legionStoreBuyWhiteJade",
-    ],
-  },
-  {
-    name: "legacy",
-    label: "功法",
-    tasks: [
-      "batchLegacyClaim",
-      "batchLegacyBeginHangUp",
-      "batchLegacyClaimChargeReward",
-      "batchLegacyGiftSendEnhanced",
-    ],
-  },
-  {
-    name: "monthly",
-    label: "月度",
-    tasks: ["batchTopUpFish", "batchTopUpArena"],
-  },
-  {
-    name: "formation",
-    label: "阵容管理",
-    tasks: [
-      "batchAdjustEarlyMainLevelFormation",
-      "batchAdjustMainLevelFormation",
-    ],
-  },
-  { name: "pet", label: "宠物", tasks: ["batchUpgradeAllPets", "batchMergePets", "batchClaimGachaRewards", "batchActivatePetBooks", "batchEquipHighestLevelPet"] },
-  {
-    name: "small-account",
-    label: "小号任务",
-    tasks: [
-      "batchUpgradeHangUpAndClaimOrderRewards",
-      "batchJoinLegion",
-      "batchUpgradeCrystal",
-      "batchReplaceBestFishArtifact",
-      "batchMaxWarriorLegionTech",
-      "batchClaimAchievementRewards",
-      "batchClaimMailAttachments",
-      "batchAwakenHeroSkills",
-      "batchAltAccountRefine",
-      "batchBuyRedFragmentsAndPetCookies",
-      "batchBuyRedFeatherWithPearls",
-      "batchBuyBaguaWithPearls",
-      "batchBuyPearlFish",
-      "batchChallengeGroupGenie",
-      "batchChallengeThreeKingdomsGenie",
-      "batchTopUpGoldFish",
-      "batchPushMainLevelInfo",
-      "batchCheckSaltMasters",
-      "batchSmartBoxWeekly",
-      "batchSmartRecruitWeekly",
-      "batchSmartBlackMarketWeekly",
-      "batchUseWarehouseItems",
-      "batchExchangeXuanwuPetCookies",
-      "batchRedeemCodes",
-      "store_discount_purchase",
-    ],
-  },
-];
-
-// 计算属性，根据 taskGroupDefinitions 将 availableTasks 分组
-const groupedAvailableTasks = computed(() => {
-  const groups = {};
-  taskGroupDefinitions.forEach((group) => {
-    groups[group.name] = availableTasks.filter((task) =>
-      group.tasks.includes(task.value),
-    );
-  });
-
-  // 处理未分组的任务
-  const groupedTaskValues = taskGroupDefinitions.flatMap((g) => g.tasks);
-  const otherTasks = availableTasks.filter(
-    (task) => !groupedTaskValues.includes(task.value),
-  );
-  if (otherTasks.length > 0) {
-    groups["other"] = otherTasks;
+// Immediate and scheduled lists share the same groups.
+const taskGroupDefinitions = computed(() => groupTaskCatalog(availableTasks).map(group => ({ ...group, tasks: group.tasks.map(task => task.value) })));
+const groupedAvailableTasks = computed(() => Object.fromEntries(groupTaskCatalog(availableTasks).map(group => [group.name, group.tasks])));
+const showCheerShopModal = ref(false);
+const runCatalogTasks = async (taskNames) => {
+  if (isRunning.value || scheduledTaskExecutionActive || !selectedTokens.value.length) return;
+  if (taskNames.includes('batchCheerShopPurchase') && !Object.values(batchSettings.cheerShopPurchases || {}).some(v => Number(v) > 0)) {
+    showCheerShopModal.value = true;
+    message.info('请先设置助威商店采购目标，再执行任务');
+    return;
   }
-
-  return groups;
-});
+  if (taskNames.includes('batchGoldenCheer') && (!batchSettings.goldenCheerLegionId || !batchSettings.goldenCheerPhase)) {
+    showGoldenCheerModal.value = true;
+    return;
+  }
+  shouldStop.value = false;
+  const orderedTasks = groupTaskCatalog(availableTasks).flatMap(group => group.tasks).filter(task => taskNames.includes(task.value)).map(task => task.value);
+  await executeScheduledTask({ id: '__manual_batch__', name: '列表所选任务', manual: true,
+    selectedTokens: [...selectedTokens.value], selectedTasks: orderedTasks,
+    taskConfig: createScheduledTaskConfig(), legacyExcludedTokens: [],
+  });
+};
 
 const legacyExcludableTokens = computed(() => {
   const selectedTokenIds = new Set(taskForm.selectedTokens);
@@ -6357,7 +6263,7 @@ const executeScheduledTask = async (task) => {
   if (scheduledTaskExecutionActive || isRunning.value) {
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `=== 跳过定时任务 ${task.name}：已有任务正在执行 ===`,
+      message: `=== 跳过${task.manual ? "手动组合任务" : "定时任务"} ${task.name}：已有任务正在执行 ===`,
       type: "warning",
     });
     return;
@@ -6366,11 +6272,12 @@ const executeScheduledTask = async (task) => {
   scheduledTaskExecutionActive = true;
   isRunning.value = true;
   const scheduledTaskStartTime = new Date();
+  const executionKind = task.manual ? "手动组合任务" : "定时任务";
   let previousSelectedTokens = null;
 
   // 立即写入 lastStartedAt，让 checkMissedExecutions 知道本周期已开始执行
   // 这样长任务（>15min 容忍窗口）不会被误判为漏执行而重复触发
-  taskExecutionHistory.value[task.id] = {
+  if (!task.manual) taskExecutionHistory.value[task.id] = {
     ...taskExecutionHistory.value[task.id],
     lastStartedAt: scheduledTaskStartTime.toISOString(),
   };
@@ -6378,7 +6285,7 @@ const executeScheduledTask = async (task) => {
 
   addLog({
     time: new Date().toLocaleTimeString(),
-    message: `=== 开始执行定时任务: ${task.name} ===`,
+    message: `=== 开始执行${executionKind}: ${task.name} ===`,
     type: "info",
   });
 
@@ -6692,7 +6599,7 @@ const executeScheduledTask = async (task) => {
       if (shouldStop.value) break;
       await runScheduledAccount(tokenId);
     }
-    for (let retryRound = 1; retryRound <= 2 && !shouldStop.value; retryRound++) {
+    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.includes("batchCheerShopPurchase") ? 0 : 2) && !shouldStop.value; retryRound++) {
     const retryIds = getBatchRetryTokenIds(availableTokens, tokenStatus.value, shouldStop.value);
     for (const tokenId of retryIds) {
       if (shouldStop.value) break;
@@ -6748,7 +6655,7 @@ const executeScheduledTask = async (task) => {
     }
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `=== 定时任务执行结束: ${task.name} ===`,
+      message: `=== ${executionKind}执行结束: ${task.name} ===`,
       type: availableTokens.every(id => tokenStatus.value[id] === "completed") ? "success" : "warning",
     });
 
@@ -6765,16 +6672,16 @@ const executeScheduledTask = async (task) => {
       scheduledTaskStartTime,
       upcomingScheduledTasks,
     );
-    await sendNotifications(title, content, {
+    if (!task.manual) await sendNotifications(title, content, {
       skipWxPusher: !selectedTaskNames.includes("startBatch") && selectedTaskNames.some(name => ["batchPushMainLevelInfo", "batchCheckSaltMasters"].includes(name)),
     });
 
     // 记录执行成功，用于漏执行检测
-    recordTaskExecution(task.id);
+    if (!task.manual) recordTaskExecution(task.id);
   } catch (error) {
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `=== 定时任务执行失败: ${error.message} ===`,
+      message: `=== ${executionKind}执行失败: ${error.message} ===`,
       type: "error",
     });
     console.error(
@@ -6785,7 +6692,7 @@ const executeScheduledTask = async (task) => {
     // 发送定时任务失败推送通知
     const failedTitle = `❌ 定时任务失败: ${task.name}`;
     const failedContent = `## ❌ 定时任务执行失败\n\n**任务名称**: ${task.name}\n\n**失败原因**: ${error.message}\n\n**时间**: ${new Date().toLocaleTimeString()}`;
-    await sendNotifications(failedTitle, failedContent);
+    if (!task.manual) await sendNotifications(failedTitle, failedContent);
   } finally {
     if (scheduledTokenSession.active) {
       const tokenId = scheduledTokenSession.tokenId;
@@ -8315,6 +8222,7 @@ const { batcharenafight, batchTopUpFish, batchTopUpGoldFish, batchTopUpArena } =
 const tasksStore = createTasksStore(createTaskDeps());
 const {
   batchJoinLegion,
+  batchCheerShopPurchase,
   legion_storebuygoods,
   legionStoreBuyWhiteJade,
   legionStoreBuySkinCoins,
@@ -8388,6 +8296,7 @@ const { batchXuanwuBlessing, batchExchangeXuanwuPetCookies } =
 // 只允许调用明确登记的任务，导入的任务名称不能执行任意代码。
 const getScheduledTaskFunction = (name) => {
   const registry = {
+    batchCheerShopPurchase,
     batchClaimCollectionRewards,
     batchClaimCardCollectionRewards,
     startBatch,
