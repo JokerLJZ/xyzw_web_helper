@@ -441,6 +441,7 @@
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryRechargeExchangeItems">充值活动兑换物品</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoStandard">闲来入镜任务</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryPhotoExchangeItems">闲来入镜商店兑换</n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoWhiteJade" title="先将勿忘我换为满天星，再按实时库存及剩余限购兑换白玉">闲来入镜兑换白玉</n-button>
               </n-space>
               <n-space>
                 <n-button
@@ -758,6 +759,8 @@
             </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
               <n-space>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoWhiteJade" title="先将勿忘我换为满天星，再按实时库存及剩余限购兑换白玉">闲来入镜兑换白玉</n-button>
+
                 <n-button
                   size="small"
                   @click="batchUpgradeHangUpAndClaimOrderRewards"
@@ -3804,7 +3807,7 @@ import { DEFAULT_SALT_BATTLE_SETTINGS } from "@/utils/saltWarRunner.js";
 import { connectWithTokenRefresh } from "@/utils/batch/connectWithTokenRefresh.js";
 import RechargeExchangeDialog from "@/components/RechargeExchangeDialog.vue";
 import { createTasksRecharge } from "@/utils/batch/tasksRecharge.js";
-import { loadPhotoExchangeCatalog, exchangePhotoItems, runPhotoStandard } from "@/utils/photoActivity.js";
+import { loadPhotoExchangeCatalog, exchangePhotoItems, runPhotoStandard, runPhotoWhiteJade } from "@/utils/photoActivity.js";
 import { DEFAULT_WEIRD_TOWER_CLIMB_COUNT, normalizeWeirdTowerClimbCount } from "@/utils/evoTowerRewards.js";
 import {
   blackMarketItemCatalog, createBlackMarketPurchaseEntry,
@@ -8203,6 +8206,7 @@ const confirmUpgradeLordTo6000 = () => {
 };
 
 const { batchRechargeStandard, queryRechargeExchangeItems, batchRechargeExchange, rechargeExchangeOpen, rechargeExchangePreviews } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession });
+const { batchRechargeStandard: batchPhotoWhiteJade } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession }, { label: "闲来入镜兑换白玉", runStandard: runPhotoWhiteJade });
 const { batchRechargeStandard: batchPhotoStandard, queryRechargeExchangeItems: queryPhotoExchangeItems, batchRechargeExchange: batchPhotoExchange, rechargeExchangeOpen: photoExchangeOpen, rechargeExchangePreviews: photoExchangePreviews } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession }, { label: "闲来入镜", loadCatalog: loadPhotoExchangeCatalog, exchangeItems: exchangePhotoItems, runStandard: runPhotoStandard });
 const tasksDungeon = createTasksDungeon(createTaskDeps());
 const {
@@ -8366,6 +8370,7 @@ const getScheduledTaskFunction = (name) => {
     batchClaimConsumptionRewards,
     batchRechargeStandard,
     batchPhotoStandard,
+    batchPhotoWhiteJade,
     batchUseConsumptionActivityItems,
     batchExchangeXuanwuPetCookies,
     climbWeirdTower,

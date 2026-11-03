@@ -46,6 +46,49 @@ export async function exchangePhotoItems(context) {
   return exchangeRechargeItems({ ...context, expectedActivityId: activityId, query: (send, config, now) => queryPhotoExchange(send, config, now, activityId) });
 }
 
+/** 勿忘我先换满天星，再按实时库存与剩余限购兑换白玉。 */
+export async function runPhotoWhiteJade({ send, config, now = Date.now, log = () => {} }) {
+  const event = findPhotoActivity(config, now());
+  if (!event) return { status: "skipped", reason: "当前没有开放的闲来入镜活动" };
+  const steps = [[5291, 5293], [5293, 1022]].map(([itemId, rewardId]) => {
+    const shops = event.shops.filter(shop => Number(shop.itemId) === itemId);
+    const goods = mapEntries(config.ExchangeActConf).map(([, row]) => row).filter(row =>
+      shops.some(shop => shop.id === row.actId) && Number(row.resourceType) === 3 && Number(row.rewardId) === rewardId);
+    if (goods.length !== 1) throw new Error("白玉兑换配置缺失或不唯一，停止兑换");
+    const row = goods[0], shop = shops.find(shop => shop.id === row.actId);
+    if (![row.consumeNum, row.rewardNum].every(value => Number.isSafeInteger(value) && value > 0) ||
+      ![row.limitNum, row.unlockNeed].every(value => Number.isSafeInteger(value) && value >= 0)) throw new Error("白玉兑换数量配置异常");
+    return { shop, goodsId: row.id };
+  });
+  let exchanged = 0;
+  for (const { shop, goodsId } of steps) {
+    const query = async (transport, currentConfig, time) => {
+      const current = findPhotoActivity(currentConfig, time);
+      if (current?.code !== event.code || !current.shops.some(row => row.id === shop.id)) throw new Error("闲来入镜活动已切期");
+      const snapshot = await queryPhotoExchange(async (cmd, params) => {
+        const response = await transport(cmd, params);
+        if (cmd === "role_getroleinfo") {
+          const items = object(extractRolePatch(response)?.items, "兑换库存");
+          const item = mapGet(items, shop.itemId);
+          if (item !== undefined) number(object(item, "兑换道具").quantity, "兑换库存");
+        }
+        return response;
+      }, currentConfig, time, shop.id);
+      const row = snapshot.rows.find(row => row.id === goodsId);
+      if (!Number.isSafeInteger(snapshot.stock) || !row || !Number.isSafeInteger(row.used) || !Number.isSafeInteger(row.max)) throw new Error("白玉兑换库存或记录格式异常");
+      return snapshot;
+    };
+    const snapshot = await query(send, config, now());
+    const row = snapshot.rows.find(row => row.id === goodsId);
+    log(`${snapshot.itemName}现存${snapshot.stock}个，${row.name}可兑换${row.max}份`);
+    if (row.max <= 0) continue;
+    await exchangeRechargeItems({ send, config, now, log, query, expectedActivityId: shop.id,
+      selection: [{ goodsId, quantity: row.max }] });
+    exchanged++;
+  }
+  return { status: exchanged ? "completed" : "skipped", ...(exchanged ? {} : { reason: "库存不足、未解锁或已达兑换限购" }) };
+}
+
 const DAY = 86400000;
 const dayStart = time => Math.floor((time + 8 * 3600000) / DAY) * DAY - 8 * 3600000;
 const number = (value, name) => {
