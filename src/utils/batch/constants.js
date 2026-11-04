@@ -79,6 +79,7 @@ export const availableTasks = [
   { label: "升级当前佩戴宠物", value: "batchUpgradeAllPets" },
   { label: "宠物图鉴一键激活领奖", value: "batchActivatePetBooks" },
   { label: "佩戴优先宠物", value: "batchEquipHighestLevelPet" },
+  { label: "自动合成并佩戴宠物(小号专用)", value: "batchAltMergeAndEquipPets" },
   { label: "自动合成宠物", value: "batchMergePets" },
   { label: "战士科技依次升满", value: "batchMaxWarriorLegionTech" },
   { label: "领取成就奖励", value: "batchClaimAchievementRewards" },

@@ -759,6 +759,7 @@
             </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
               <n-space>
+                <n-button size="small" @click="batchAltMergeAndEquipPets" :disabled="isRunning || selectedTokens.length === 0" title="按合成最高品质设置开蛋合成，可配对的未锁定佩戴宠物会卸下参与；随后图鉴激活领奖并佩戴优先宠物">自动合成并佩戴宠物(小号专用)</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoWhiteJade" title="先将勿忘我换为满天星，再按实时库存及剩余限购兑换白玉">闲来入镜兑换白玉</n-button>
 
                 <n-button
@@ -8179,6 +8180,7 @@ const {
   batchReplaceBestFishArtifact,
   batchUpgradeAllPets,
   batchActivatePetBooks,
+  batchAltMergeAndEquipPets,
   batchEquipHighestLevelPet,
   batchClaimGachaRewards,
   batchUpgradeShoeToy,
@@ -8336,6 +8338,7 @@ const getScheduledTaskFunction = (name) => {
     batchClaimGachaRewards,
     batchUpgradeAllPets,
     batchActivatePetBooks,
+    batchAltMergeAndEquipPets,
     batchEquipHighestLevelPet,
     batchMergePets,
     batchMaxWarriorLegionTech,

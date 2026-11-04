@@ -116,7 +116,7 @@ export const PET_MERGE_CONFIG = {
 
 export function selectPetMergePair(role, maxColor = 4) {
   if (!Number.isInteger(maxColor) || maxColor < 1 || maxColor > 6) throw new Error("宠物合成品质范围无效");
-  const equipped = role?.pet?.petUId ?? role?.pet?.uId;
+  const equipped = role?.petData?.pets?.[-1]?.uId ?? role?.pet?.petUId ?? role?.pet?.uId;
   const pets = Object.entries(role?.petData?.pets ?? {}).flatMap(([key, pet]) => {
     const slot = Number(pet?.slot ?? key);
     const color = PET_MERGE_CONFIG[pet?.petId]?.color;
@@ -138,13 +138,36 @@ export const PET_EGG_ITEMS = [37011, 37012, 37013];
 export const PET_MERGE_QUERY_DELAY = 1500;
 export const PET_MERGE_OPERATION_DELAY = 2500;
 const boardPets = role => Object.entries(role?.petData?.pets ?? {}).filter(([slot, pet]) => Number(slot) > 0 && pet?.uId);
-export async function runPetMerge({ getRole, send, openEgg, maxColor = 4, shouldStop = () => false, wait = async () => {}, onResult = () => {} }) {
+export async function runPetMerge({ getRole, send, openEgg, maxColor = 4, shouldStop = () => false, wait = async () => {}, onResult = () => {}, includeEquipped = false, load }) {
   if (!Number.isInteger(maxColor) || maxColor < 1 || maxColor > 6) throw new Error("宠物合成品质范围无效");
-  let count = 0, eggsOpened = 0, role = await getRole();
+  let count = 0, eggsOpened = 0, blockedEquipped = false, role = await getRole();
   if (!role?.petData?.pets) throw new Error("未获取到完整宠物列表");
   while (!shouldStop()) {
     const capacity = Number(role.petData.unlockedSlot ?? 8);
     if (!Number.isInteger(capacity) || capacity < 8 || capacity > 16) throw new Error("无法确认宠物槽位数量，停止任务");
+    // 官方拖拽装备槽到空棋盘槽：pet_load 的 slotUId 指向空槽，uId 使用协议默认空字符串。
+    if (includeEquipped) {
+      const equipped = role.petData.pets[-1];
+      const color = PET_MERGE_CONFIG[equipped?.petId]?.color;
+      const partner = Object.entries(role.petData.pets).some(([slot, pet]) =>
+        Number(slot) > 0 && pet?.uId && pet.uId !== equipped?.uId && pet.isLocked === false && PET_MERGE_CONFIG[pet.petId]?.color === color);
+      blockedEquipped = Boolean(equipped?.uId && equipped.isLocked === false && color && color <= maxColor && partner);
+      const emptySlot = Array.from({ length: capacity }, (_, i) => i + 1).find(slot => !role.petData.pets[slot]?.uId);
+      if (equipped?.uId && equipped.isLocked === false && color && color <= maxColor && partner && emptySlot) {
+        if (!load) throw new Error("未提供宠物卸下操作");
+        await wait(PET_MERGE_OPERATION_DELAY);
+        if (shouldStop()) break;
+        await load({ slotUId: { slot: emptySlot, uId: "" } });
+        await wait(PET_MERGE_QUERY_DELAY);
+        const after = await getRole();
+        if (!after?.petData?.pets || after.petData.pets[-1]?.uId ||
+            after.petData.pets[emptySlot]?.uId !== equipped.uId ||
+            (after.pet?.petUId ?? after.pet?.uId)) throw new Error("卸下宠物未确认，停止且不重试");
+        role = after;
+        onResult({ unloaded: true, pet: equipped });
+        continue;
+      }
+    }
     const egg = PET_EGG_ITEMS.find(id => Number(role?.items?.[id]?.quantity) > 0);
     const empty = Array.from({ length: capacity }, (_, i) => i + 1).some(slot => !role.petData.pets[slot]?.uId);
     if (egg && empty && openEgg) {
@@ -186,5 +209,5 @@ export async function runPetMerge({ getRole, send, openEgg, maxColor = 4, should
     onResult({ count, isSuccess: result.isSuccess === true, params });
     role = after;
   }
-  return { count, eggsOpened, blockedByCapacity: PET_EGG_ITEMS.some(id => Number(role?.items?.[id]?.quantity) > 0), stopped: shouldStop() };
+  return { count, eggsOpened, blockedEquipped, blockedByCapacity: PET_EGG_ITEMS.some(id => Number(role?.items?.[id]?.quantity) > 0), stopped: shouldStop() };
 }

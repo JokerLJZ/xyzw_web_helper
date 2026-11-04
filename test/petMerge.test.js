@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { selectPetMergePair, runPetMerge } from '../src/utils/petMerge.js';
 import { createConfirmedPetMergeTask } from '../src/utils/batch/confirmedPetMergeTask.js';
 const pet = (uId,petId=101,level=1) => ({uId,petId,level,isLocked:false});
-const role = () => ({pet:{petUId:'equipped'},petData:{pets:{1:pet('a'),2:pet('b',102)}}});
+const role = () => ({levelId:6500,pet:{petUId:'equipped'},petData:{pets:{1:pet('a'),2:pet('b',102)}}});
 test('同品质不同种宠物可合成，低品质inheritSlot为0',()=>{
  assert.deepEqual(selectPetMergePair(role()),{fromSlotUId:{slot:2,uId:'b'},toSlotUId:{slot:1,uId:'a'},inheritSlot:0});
 });

@@ -25,7 +25,7 @@ export function createPetTasks(deps) {
     currentRunningTokenId, ensureConnection, releaseConnectionSlot,
     tokenStore, addLog, message, delayConfig } = deps;
   const runPetTask = async (claimRewards = false, mergePets = false, management = "") => {
-    const taskLabel = management === "book" ? "宠物图鉴激活领奖" : management === "equip" ? "佩戴优先宠物" : mergePets ? "宠物合成" : claimRewards ? "扭蛋领奖" : "宠物升级";
+    const taskLabel = management === "alt" ? "自动合成并佩戴宠物(小号专用)" : management === "book" ? "宠物图鉴激活领奖" : management === "equip" ? "佩戴优先宠物" : mergePets ? "宠物合成" : claimRewards ? "扭蛋领奖" : "宠物升级";
     if (!selectedTokens.value.length) return;
     isRunning.value = true;
     shouldStop.value = false;
@@ -53,7 +53,7 @@ export function createPetTasks(deps) {
             tokenStatus.value[id] = "stopped";
             continue;
           }
-          if (management) {
+          if (management && management !== "alt") {
             const options = {
               getRole: async () => (await tokenStore.sendGetRoleInfo(id))?.role,
               send: (cmd, params) => tokenStore.sendMessageWithPromise(id, cmd, params, 15000),
@@ -97,19 +97,37 @@ export function createPetTasks(deps) {
             tokenStatus.value[id] = shouldStop.value ? "stopped" : failures ? "failed" : "completed";
             continue;
           }
-          if (mergePets) {
+          if (mergePets || management === "alt") {
             const result = await runPetMerge({
               maxColor: deps.batchSettings?.petMergeMaxColor ?? 4,
+              includeEquipped: management === "alt",
+              load: params => tokenStore.sendMessageWithPromise(id, "pet_load", params, 15000),
               shouldStop: () => shouldStop.value,
               getRole: async () => (await tokenStore.sendGetRoleInfo(id))?.role,
               send: params => tokenStore.sendMessageWithPromise(id, "pet_merge", params, 15000),
               openEgg: params => tokenStore.sendMessageWithPromise(id, "pet_openegg", params, 15000),
               wait: ms => new Promise(resolve => setTimeout(resolve, Math.max(ms, Number(delayConfig?.command) || 0))),
-              onResult: ({ count, isSuccess, openedEgg, eggsOpened }) => openedEgg
+              onResult: ({ count, isSuccess, openedEgg, eggsOpened, unloaded }) => unloaded
+                ? log("已卸下可配对的佩戴宠物，参与合成") : openedEgg
                 ? log(`已使用${eggsOpened}个白、绿、蓝宠物蛋，已刷新宠物列表`)
                 : log(`第${count}次宠物合成${isSuccess ? "成功" : "失败"}，已刷新宠物列表`, isSuccess ? "success" : "warning"),
             });
-            log(`宠物合成结束，本次开蛋${result.eggsOpened}个、合成${result.count}次；跳过佩戴、锁定和范围外宠物`);
+            log(`宠物合成结束，本次开蛋${result.eggsOpened}个、合成${result.count}次；${management === "alt" ? "保留锁定和范围外宠物" : "跳过佩戴、锁定和范围外宠物"}`);
+            if (result.blockedEquipped && !result.stopped) log("佩戴宠物有同色配对，但棋盘已满且无法合成腾位，保留佩戴宠物；不会购买槽位", "warning");
+            if (management === "alt" && !shouldStop.value) {
+              const options = {
+                getRole: async () => (await tokenStore.sendGetRoleInfo(id))?.role,
+                send: (cmd, params) => tokenStore.sendMessageWithPromise(id, cmd, params, 15000),
+                shouldStop: () => shouldStop.value,
+                wait: ms => new Promise(resolve => setTimeout(resolve, Math.max(ms, Number(delayConfig?.command) || 0))),
+              };
+              const books = await activatePetBooks(options);
+              log(`宠物图鉴：激活${books.activated}项、领奖${books.claimed}项`);
+              if (!shouldStop.value) {
+                const equipped = await equipHighestLevelPet(options);
+                log(equipped.target ? `优先宠物${equipped.target.uId}：${equipped.changed ? "已佩戴" : "已在佩戴"}` : "没有可佩戴的宠物");
+              }
+            }
             if (result.blockedByCapacity && !result.stopped) log("仍有宠物蛋，但无可继续合成的宠物或空槽，已停止；不会购买槽位", "warning");
             tokenStatus.value[id] = shouldStop.value ? "stopped" : "completed";
             continue;
@@ -166,5 +184,5 @@ export function createPetTasks(deps) {
     }
     message.info(`${taskLabel}任务结束，请查看各账号日志`);
   };
-  return { batchUpgradeAllPets: () => runPetTask(false), batchClaimGachaRewards: () => runPetTask(true), batchMergePets: () => runPetTask(false, true), batchActivatePetBooks: () => runPetTask(false, false, "book"), batchEquipHighestLevelPet: () => runPetTask(false, false, "equip") };
+  return { batchAltMergeAndEquipPets: () => runPetTask(false, false, "alt"), batchUpgradeAllPets: () => runPetTask(false), batchClaimGachaRewards: () => runPetTask(true), batchMergePets: () => runPetTask(false, true), batchActivatePetBooks: () => runPetTask(false, false, "book"), batchEquipHighestLevelPet: () => runPetTask(false, false, "equip") };
 }

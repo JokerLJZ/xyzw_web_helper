@@ -89,3 +89,27 @@ PetService.merge({fromSlotUId, toSlotUId, inheritSlot})
 沿用本日当前manifest核对（再次请求确认协议90329），分析game=dff14的PetResetDialog → PetModule.sendReset → PetService.reset({slotUId})。协议90329资源包含pet_reset及Pet_ResetResp标识；本次未完整还原混淆注册器，参数以game实际调用为依据。PetResetDialog预览重生等级Lv.0，返还升级资源、部分精炼资源及天赋资源，故重生并非只回收等级。客户端阻止带锁定精炼的重生（quenches[].locked），宠物锁定还涉及密码设置；自动任务保守保留所有锁定宠物。
 
 任务先完成佩戴（已佩戴也继续），逐个查询并重生其他等级>1宠物；每次完整查询确认原唯一编号等级归0、脆饼库存未减少。然后通过PetModule.sendAddExp对应的pet_useexpitem与isOneClick:true持续升级佩戴槽，库存耗尽或状态不变结束。2500/1500毫秒间隔不变，每账号独立查询，停止不继续发送，异常/超时不重发。没有实际账号响应样本；真实返还数量和等级上限以服务器为准，不计算或硬编码可升等级。后续客户端更新需同时检查重生副作用、锁定字段与协议注册。
+
+## 2026-11-04：小号自动合成、图鉴与佩戴组合任务
+
+本次重新读取 `public/game/index.html` → `game-defines.a175e.js` → `main.2a00e.js`。按本地 POST manifest（platform=hortor、version=0.36.0-android）、CDN 转换和 XXTEA 解密规则取得当前公开资源，独立分析目录 `/tmp/xyzw-pet-analysis`；不执行完整业务脚本。
+
+| 证据 | 当前结果 |
+| --- | --- |
+| manifest | COMMIT_ID=172f2fc0、codeVersion=2.52.1 |
+| 业务 / 启动 / 协议 | game=dff14、launcher=ae5a4、TEST_REMOTE_MODULE=90329 |
+| 配置版本 | config bundle=58922、dataVers=cbb769dfb4；下载当前 data/cbb769dfb4/config.json，28只宠物品质及mergeConfirmColor=4与项目一致；技能选择沿用已核对规则 |
+| UI → Module | 宠物棋盘拖拽入口进入 `PetModule.sendDragDropPet(m,p)`；从装备槽 -1 拖至空槽时新建 `PetSlotUId`，只赋目标 `slot`，转 `_sendLoad` |
+| Service → 注册 | `_sendLoad` → `PetService.load({slotUId})`；协议注册 `_gs("Pet",{load:_ae,merge:vae,...})`，命令表 `Pet_Load="pet_load"`，`Pet_Merge="pet_merge"`；`PetSlotUId` 默认 `uId=""` |
+| 合成 | `sendDragDropPet` 只有非装备棋盘槽、同品质、双方未锁定且非金色才进入 `_sendMerge`；参数仍为 `fromSlotUId/toSlotUId/inheritSlot` |
+| 图鉴 / 佩戴 | 当前 `sendActiveBook`、`sendClaimBookReward` 分别使用 `activateBook({petId})`、`claimBookReward({petId})`；`PetEquipDialog._onClickUse` 调用 `load({slotUId:{slot,uId}})` |
+
+新增任务 `batchAltMergeAndEquipPets`，入口位于小号任务，并注册到批量/定时任务列表。顺序为：沿用库存白绿蓝开蛋及合成循环 → 图鉴激活领奖 → 按现有品质、破甲/格挡、等级优先规则佩戴。不附带重生、升级、精炼操作。
+
+合成最高品质仍由原有设置控制（默认紫色及以下）。仅该新任务允许装备槽中未锁定、品质在范围内且有未锁定同色配对的宠物卸下；卸下使用 `pet_load({slotUId:{slot:空槽,uId:""}})`，等待后查询完整角色，确认装备槽清空且目标槽唯一编号相符，再进入合成循环。满槽先合成腾位，不能腾位时记录原因并保留佩戴宠物，不购买槽位。普通合成仍排除当前佩戴宠物。
+
+每次写请求仍采用2500毫秒操作等待、1500毫秒查询等待；结果不确定或超时停止本账号且不重发，后续账号继续。停止时不再启动下一阶段。角色查询用于确认完整快照，不将服务端增量当完整列表。新卸下流程未使用真实账号在线验证；客户端协议可确认调用方式，实际返回体及效果仍待线上运行确认。
+
+测试位置：`test/altPetMerge.test.js` 覆盖卸下与合成顺序、普通任务保护、锁定/未知锁定/范围外/无配对保护、满槽、超时及停止、组合阶段顺序和连接释放。`test/petMerge.test.js` 的批量测试补齐6500关前置条件，避免测试在入口被跳过。
+
+后续游戏更新应重新请求 manifest，按本地转换与解密规则分析匹配资源，核对拖拽装备槽分支、PetSlotUId默认值、协议注册和角色装备槽更新；不能仅替换本次哈希或根据Service方法名推定命令。
