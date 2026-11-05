@@ -92,7 +92,8 @@ export class SaltWarSession {
     if (body.battleList) mergeSaltPatch(this.battles, body.battleList);
     if (body.battleInfo?.id !== undefined) this.battles[body.battleInfo.id] = clone(body.battleInfo);
     if (String(cmd).toLowerCase() === "war_endattackbuildingnotify") {
-      this.ends.set(String(body.battleId), clone(body));
+      // War_EndAttackBuildingNotify defaults omitted hP to 0 (wall destroyed).
+      this.ends.set(String(body.battleId), { hP: 0, ...clone(body) });
       delete this.battles[body.battleId];
     }
     if (String(cmd).toLowerCase() === "war_endmarchnotify" && this.battlefield?.marches) delete this.battlefield.marches[body.marchId];

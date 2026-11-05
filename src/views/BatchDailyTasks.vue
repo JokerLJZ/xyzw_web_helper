@@ -441,7 +441,7 @@
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryRechargeExchangeItems">充值活动兑换物品</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoStandard">闲来入镜任务</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryPhotoExchangeItems">闲来入镜商店兑换</n-button>
-                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoWhiteJade" title="先将勿忘我换为满天星，再按实时库存及剩余限购兑换白玉">闲来入镜兑换白玉</n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoWhiteJade" title="先将勿忘我换为满天星，优先兑换白玉，剩余满天星再尽量兑换灵贝">闲来入镜兑换白玉</n-button>
               </n-space>
               <n-space>
                 <n-button
@@ -760,7 +760,7 @@
             <n-tab-pane name="small-account" tab="小号任务">
               <n-space>
                 <n-button size="small" @click="batchAltMergeAndEquipPets" :disabled="isRunning || selectedTokens.length === 0" title="按合成最高品质设置开蛋合成，可配对的未锁定佩戴宠物会卸下参与；随后图鉴激活领奖并佩戴优先宠物">自动合成并佩戴宠物(小号专用)</n-button>
-                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoWhiteJade" title="先将勿忘我换为满天星，再按实时库存及剩余限购兑换白玉">闲来入镜兑换白玉</n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoWhiteJade" title="先将勿忘我换为满天星，优先兑换白玉，剩余满天星再尽量兑换灵贝">闲来入镜兑换白玉</n-button>
 
                 <n-button
                   size="small"
@@ -3795,7 +3795,7 @@
       <n-text depth="3">执行时逐账号重新核对资格和最近地块，实际目标可能变化。预览未布阵、加速或攻击。</n-text>
       <n-space justify="end">
         <n-button @click="saltBattlePreviewOpen = false">关闭</n-button>
-        <n-button type="primary" :disabled="isRunning || !saltBattlePreviews.some(row => !row.reason)" @click="saltBattlePreviewOpen = false; batchSaltBattle()">按预算出战并攻击一次</n-button>
+        <n-button type="primary" :disabled="isRunning || !saltBattlePreviews.some(row => !row.reason)" @click="saltBattlePreviewOpen = false; batchSaltBattle()">全程加速、攻击一次并回营</n-button>
       </n-space>
     </n-space>
   </n-modal>

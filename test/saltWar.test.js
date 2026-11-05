@@ -55,8 +55,8 @@ function scenario(options = {}) {
   const advance = async ms => {
     time += ms; ticks++;
     if (field.state === 'ready') field.state = 'started';
-    if (field.roles[11].state === 'march' && ticks >= 1) {
-      field.roles[11].state = 'idle'; field.roles[11].position = { x: 3, y: 2 }; delete field.marches[5]; target.memberV2[11] = true;
+    if (field.roles[11].state === 'march' && ticks >= 1 && (!options.slowMarch || time >= field.marches[5].endTime * 1000)) {
+      field.roles[11].state = 'idle'; field.roles[11].position = { ...field.marches[5].to }; delete field.marches[5]; target.memberV2[11] = true;
       if (options.targetChanges) target.belongsLegionId = 1;
       listener?.({ cmd: 'war_endmarchnotify', rawData: { battlefieldId: info.battlefieldId, marchId: 5, battlefield: { roles: structuredClone(field.roles), marches: { 5: null }, buildingData: { '3_2': structuredClone(target) } } } });
     }
@@ -65,7 +65,7 @@ function scenario(options = {}) {
       listener?.({ cmd: 'war_endattackbuildingnotify', rawData: { battlefieldId: info.battlefieldId, roleCodeId: 11, buildingId: target.id, battleId: 70, hP: options.canceled ? -1 : 29, battlefield: { roles: structuredClone(field.roles) } } });
     }
   };
-  const context = { accountId: 'account1', session, info, role, config, journal, now: () => time, sleep: advance, shouldStop: () => !!options.stop, send: async () => ({ role: structuredClone(role) }), loadMap: async () => map, log: text => logs.push(text), settings: { maxDiamondCost: 20, maxSpeedUps: 1, waitTimeoutSeconds: 10 } };
+  const context = { accountId: 'account1', session, info, role, config, journal, now: () => time, sleep: advance, shouldStop: () => !!options.stop, send: async () => ({ role: structuredClone(role) }), loadMap: async () => map, log: text => logs.push(text), settings: { accelerateAll: false, maxDiamondCost: 20, maxSpeedUps: 1, waitTimeoutSeconds: 10 } };
   return { ...context, field, map, target, commands, records, logs, options, context, advance, async run() { await session.enter(role.roleId); try { return await runSaltBattle(context); } finally { session.close(); } } };
 }
 const count = (s, cmd) => s.commands.filter(([c]) => c === cmd).length;
@@ -466,4 +466,144 @@ test('战场请求与业务错误后的查询都至少间隔500毫秒', async ()
   await session.refresh();
   assert.deepEqual(times, [10000, 10500, 11000]);
   session.close();
+});
+
+
+test('攻击结算后自然返回本军团大本营，确认到达后才完成', async () => {
+  const s = scenario();
+  assert.equal((await s.run()).status, 'completed');
+  const marches = s.commands.filter(([cmd]) => cmd === 'war_startmarch');
+  assert.deepEqual(marches.map(([, p]) => p.target), [{ x: 3, y: 2 }, { x: 1, y: 2 }]);
+  assert.deepEqual(s.field.roles[11].position, s.field.legions[1].position);
+  assert.equal(count(s, 'war_startattackbuilding'), 1);
+  assert.equal(count(s, 'war_speedup'), 1);
+  assert.equal(s.records['p1:bf1'].returnedHome, true);
+});
+
+test('回营请求超时保留攻击完成标记，重跑不追加攻击或回营请求', async () => {
+  const s = scenario();
+  const original = s.session.client.sendWithPromise.bind(s.session.client);
+  s.session.client.sendWithPromise = async (cmd, p) => {
+    if (cmd === 'war_startmarch' && p.target.x === 1) { s.commands.push([cmd, p]); throw new Error('请求超时'); }
+    return original(cmd, p);
+  };
+  await assert.rejects(s.run(), /不自动重发/);
+  assert.equal(s.records['p1:bf1'].attackCompleted, true);
+  assert.equal(s.records['p1:bf1'].status, 'pending');
+  s.session.closed = false;
+  try { assert.equal((await runSaltBattle(s.context)).status, 'pending'); } finally { s.session.close(); }
+  assert.equal(count(s, 'war_startattackbuilding'), 1);
+  assert.equal(count(s, 'war_startmarch'), 2);
+});
+
+test('回营响应丢失但实际已到家，重跑通过位置确认完成', async () => {
+  const s = scenario();
+  s.records['p1:bf1'] = { attackCompleted: true, stage: 'returnMarch', status: 'pending' };
+  s.field.roles[11].state = 'idle';
+  s.field.roles[11].position = { x: -1, y: -1 };
+  assert.equal((await s.run()).status, 'completed');
+  assert.equal(count(s, 'war_startattackbuilding'), 0);
+  assert.equal(count(s, 'war_startmarch'), 0);
+});
+
+test('攻击已完成但死亡或大本营不可达，保留待回营且不自动复活', async () => {
+  for (const dead of [true, false]) {
+    const s = scenario({ state: dead ? 'die' : 'idle' });
+    s.records['p1:bf1'] = { attackCompleted: true, stage: 'attackSettled', status: 'pending' };
+    s.field.roles[11].position = { x: 3, y: 2 };
+    if (!dead) s.map.layers.data.fill(0);
+    assert.equal((await s.run()).status, 'pending');
+    assert.equal(count(s, 'war_startattackbuilding'), 0);
+    assert.equal(count(s, 'war_startmarch'), 0);
+  }
+});
+
+test('行军响应丢失但已抵达记录目标时不永久卡在待核实', async () => {
+  const s = scenario({ state: 'idle' });
+  s.records['p1:bf1'] = { stage: 'march', targetId: '3_2' };
+  s.field.roles[11].position = { x: 3, y: 2 }; s.target.memberV2[11] = true;
+  assert.equal((await s.run()).status, 'completed');
+  assert.equal(count(s, 'war_startattackbuilding'), 1);
+  assert.equal(count(s, 'war_startmarch'), 1); // Only the return leg.
+});
+
+
+test('开始后被编入多人队伍，攻击前和回营前均停止写入', async () => {
+  const s = scenario();
+  const original = s.session.client.sendWithPromise.bind(s.session.client);
+  s.session.client.sendWithPromise = async (cmd, p) => {
+    const result = await original(cmd, p);
+    if (cmd === 'war_startmarch') {
+      s.field.teamMap[1] = { mCodeIds: [11, 12] };
+      result.battlefield.teamMap = structuredClone(s.field.teamMap);
+    }
+    return result;
+  };
+  await assert.rejects(s.run(), /多人队伍/);
+  assert.equal(count(s, 'war_speedup'), 0);
+  assert.equal(count(s, 'war_startattackbuilding'), 0);
+});
+
+test('回营未到达不能标记完成，重跑继续等待原行军而不重发', async () => {
+  const s = scenario({ state: 'march' });
+  s.records['p1:bf1'] = { attackCompleted: true, stage: 'returnMoving', status: 'pending' };
+  s.field.roles[11].position = { x: 3, y: 2 };
+  s.field.marches[5] = { id: 5, codeId: 11, to: { x: 1, y: 2 }, endTime: s.now() / 1000 + 40 };
+  assert.equal((await s.run()).status, 'completed');
+  assert.equal(count(s, 'war_startmarch'), 0);
+  assert.equal(count(s, 'war_startattackbuilding'), 0);
+});
+
+
+test('攻城结束通知省略默认hP=0时仍可确认结算并回营', async () => {
+  const s = scenario();
+  const absorb = s.session.absorb.bind(s.session);
+  s.session.absorb = (raw, cmd) => {
+    if (cmd === 'war_endattackbuildingnotify') { raw = { ...raw }; delete raw.hP; }
+    return absorb(raw, cmd);
+  };
+  assert.equal((await s.run()).status, 'completed');
+  assert.equal(s.records['p1:bf1'].returnedHome, true);
+  assert.equal(count(s, 'war_startattackbuilding'), 1);
+});
+
+
+test('默认最快模式忽略旧的一次20金砖限制，去程回程连续加速且间隔至少2秒', async () => {
+  const s = scenario({ slowMarch: true });
+  s.context.settings = { maxDiamondCost: 20, maxSpeedUps: 1, waitTimeoutSeconds: 30 };
+  const times = [], legs = [];
+  const original = s.session.client.sendWithPromise.bind(s.session.client);
+  s.session.client.sendWithPromise = async (cmd, p) => {
+    if (cmd === 'war_speedup') { times.push(s.now()); legs.push({ ...s.field.marches[5].to }); }
+    return original(cmd, p);
+  };
+  assert.equal((await s.run()).status, 'completed');
+  assert.equal(count(s, 'war_speedup'), 4);
+  assert.deepEqual(legs, [{ x: 3, y: 2 }, { x: 3, y: 2 }, { x: 1, y: 2 }, { x: 1, y: 2 }]);
+  assert.ok(times.slice(1).every((time, i) => time - times[i] >= 2000));
+  assert.equal(s.records['p1:bf1'].spent, 80);
+  assert.equal(s.role.diamond, 20);
+  assert.equal(s.records['p1:bf1'].returnedHome, true);
+});
+
+test('最快模式余额耗尽后停止付费加速，仍自然完成回营', async () => {
+  const s = scenario({ slowMarch: true, diamond: 20 });
+  s.context.settings = { waitTimeoutSeconds: 60 };
+  assert.equal((await s.run()).status, 'completed');
+  assert.equal(count(s, 'war_speedup'), 1);
+  assert.equal(s.role.diamond, 0);
+  assert.equal(s.records['p1:bf1'].returnedHome, true);
+});
+
+test('最快模式加速效果未确认则停止，再次运行不追加该次付费', async () => {
+  const s = scenario({ slowMarch: true });
+  s.context.settings = { waitTimeoutSeconds: 60 };
+  const original = s.session.client.sendWithPromise.bind(s.session.client);
+  s.session.client.sendWithPromise = async (cmd, p) => {
+    if (cmd === 'war_speedup') { s.commands.push([cmd, p]); return {}; }
+    return original(cmd, p);
+  };
+  await assert.rejects(s.run(), /加速效果待核实/);
+  assert.equal(count(s, 'war_speedup'), 1);
+  assert.ok(s.records['p1:bf1'].speedPending);
 });

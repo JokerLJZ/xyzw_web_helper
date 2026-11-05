@@ -1,9 +1,9 @@
 import { entries, get, loadSaltMap, saltMapSpec, saltRoute } from "./saltWarMap.js";
 import { saltBody } from "./saltWarSession.js";
-export const DEFAULT_SALT_BATTLE_SETTINGS = Object.freeze({ maxDiamondCost: 20, maxSpeedUps: 1, waitTimeoutSeconds: 180 });
+export const DEFAULT_SALT_BATTLE_SETTINGS = Object.freeze({ accelerateAll: true, maxDiamondCost: 20, maxSpeedUps: 1, waitTimeoutSeconds: 180 });
 export function saltSettings(value = {}) {
   const integer = (key, max) => { const n = Number(value[key] ?? DEFAULT_SALT_BATTLE_SETTINGS[key]); if (!Number.isSafeInteger(n) || n < 0 || n > max) throw new Error("盐场预算、次数或等待时间无效"); return n; };
-  const result = { maxDiamondCost: integer("maxDiamondCost", 10000), maxSpeedUps: integer("maxSpeedUps", 1), waitTimeoutSeconds: integer("waitTimeoutSeconds", 900) };
+  const result = { accelerateAll: value.accelerateAll !== false, maxDiamondCost: integer("maxDiamondCost", 10000), maxSpeedUps: integer("maxSpeedUps", 1), waitTimeoutSeconds: integer("waitTimeoutSeconds", 900) };
   if (result.waitTimeoutSeconds < 10) throw new Error("盐场最长等待至少10秒");
   return result;
 }
@@ -99,19 +99,21 @@ export async function runSaltBattle({ accountId, session, info, config, role, se
   let record = journal.read(accountId, key);
   const save = patch => { record = { ...record, ...patch, updatedAt: now() }; journal.write(accountId, key, record); };
   if (record.status === "completed") return { status: "completed", reason: "本场盐场已完成一次攻击，跳过重复执行" };
-  const deadline = now() + options.waitTimeoutSeconds * 1000;
+  let deadline = now() + options.waitTimeoutSeconds * 1000;
   const check = () => {
     session.check();
+    assertSaltSolo(session, now());
     if (shouldStop()) throw new Error("盐场任务已停止");
     if (now() >= deadline) throw new Error("盐场等待超时，执行记录已保留，不自动重发动作");
     if (now() >= Number(info.endTime) * 1000 || session.battlefield.state === "ended") throw new Error("本场盐场已结束");
   };
   const refresh = async () => { check(); await session.refresh(); assertSaltSolo(session, now()); check(); };
-  const waitFor = async (predicate, { poll = true } = {}) => {
+  const waitFor = async (predicate, { poll = true, onTick } = {}) => {
     let lastQueryAt = now();
     while (true) {
       check(); await session.pending;
       const value = predicate(); if (value) return value;
+      if (onTick) { await onTick(); await session.pending; const updated = predicate(); if (updated) return updated; }
       await sleep(1000);
       check(); await session.pending;
       const pushed = predicate(); if (pushed) return pushed;
@@ -129,13 +131,75 @@ export async function runSaltBattle({ accountId, session, info, config, role, se
       throw new Error(`盐场${stage === "saveFormation" ? "保存布阵" : stage === "deploy" ? "提交出战" : stage}失败 [${command}]：${error.message}；${code ? "服务器明确拒绝，下次执行将先核对状态" : "结果待核实，已停止且不自动重发"}`);
     }
   };
+  const accelerateMarch = async (stage, fastest = options.accelerateAll) => {
+    check(); await session.pending;
+    const march = ownMarch(session);
+    if (!march || session.self()?.state !== "march") return;
+    // A lost response must not spend again, even after reopening the task.
+    if (record.speedPending) return;
+    const cost = saltConstant(session, config, "legionWarSpeedCost");
+    const minRemaining = saltConstant(session, config, "legionWarMoveTimeLowerLimit") * 1000;
+    const remaining = Number(march.endTime) * 1000 - now();
+    if (!Number.isFinite(remaining)) throw new Error("行军结束时间缺失");
+    if (remaining < minRemaining || (record.lastSpeedAt != null && now() - record.lastSpeedAt < 2000)) return;
+    if (!fastest && ((record.speedUps || 0) >= options.maxSpeedUps || (record.spent || 0) + cost > options.maxDiamondCost)) return;
+    const latest = saltBody(await send("role_getroleinfo", {}))?.role;
+    if (!latest || !Number.isFinite(Number(latest.diamond))) throw new Error("未取得金砖库存，不执行加速");
+    if (Number(latest.diamond) < cost) return;
+    await session.pending; check();
+    const current = ownMarch(session);
+    if (!current || String(current.id) !== String(march.id) || session.self()?.state !== "march" || Number(current.endTime) * 1000 - now() < minRemaining) return;
+    const previousEnd = Number(current.endTime);
+    save({ speedUps: (record.speedUps || 0) + 1, spent: (record.spent || 0) + cost, lastSpeedAt: now(), speedPending: { marchId: current.id } });
+    await write("war_speedup", { marchId: current.id }, stage);
+    let updated = ownMarch(session);
+    if (updated && String(updated.id) === String(current.id) && !(Number(updated.endTime) < previousEnd)) {
+      await refresh(); updated = ownMarch(session);
+      if (updated && String(updated.id) === String(current.id) && !(Number(updated.endTime) < previousEnd)) throw new Error("盐场加速效果待核实，停止且不重复消耗金砖");
+    }
+    save({ speedPending: null, stage, lastSpeedAt: now() });
+    log(`已加速${record.speedUps}次，本场累计预留支出${record.spent}金砖`);
+  };
+  const returnHome = async () => {
+    // Give the return leg its own bounded wait.
+    deadline = now() + options.waitTimeoutSeconds * 1000;
+    await refresh();
+    const home = get(session.battlefield.legions, session.self().legionID)?.position;
+    if (!home || !Number.isInteger(home.x) || !Number.isInteger(home.y) || home.x < 0 || home.y < 0) throw new Error("盐场大本营坐标缺失，攻击已完成，停止回营");
+    const atHome = () => {
+      const self = session.self(), pos = saltPosition(session.battlefield, self);
+      return self.state === "idle" && pos?.x === home.x && pos?.y === home.y && !ownMarch(session);
+    };
+    if (!atHome()) {
+      const march = ownMarch(session);
+      if (march) {
+        if (!["returnMarch", "returnMoving"].includes(record.stage) || march.to?.x !== home.x || march.to?.y !== home.y) return { status: "pending", reason: "攻击已完成，当前存在其他行军，未改动目标" };
+      } else {
+        if (["returnMarch", "returnMoving"].includes(record.stage)) return { status: "pending", reason: "攻击已完成，回营结果待核实，不重复发送行军" };
+        if (session.self().state !== "idle") return { status: "pending", reason: "攻击已完成，当前状态不能回营，不自动复活" };
+        const map = await loadMap(info, config);
+        const position = saltPosition(session.battlefield, session.self());
+        if (!position || !saltRoute(map, session.battlefield.buildingData, session.self().legionID, position, home).length) return { status: "pending", reason: "攻击已完成，暂无返回大本营的合法路线" };
+        await write("war_startmarch", { target: home }, "returnMarch");
+        save({ stage: "returnMoving" });
+        log("本次攻击已结算，正在返回大本营");
+      }
+      await waitFor(() => {
+        if (["die", "resurrect", "over", "combat"].includes(session.self()?.state)) throw new Error("攻击已完成，回营途中状态变化，停止后续操作");
+        return atHome();
+      }, { onTick: options.accelerateAll ? () => accelerateMarch("returnMoving") : undefined });
+    }
+    save({ status: "completed", stage: "returnedHome", returnedHome: true });
+    return { status: "completed", reason: `一次攻击已结算并返回大本营，本场累计预留加速支出${record.spent || 0}金砖` };
+  };
   // enter() has just supplied the initial snapshot. Do not fetch it again
   // before any action; notifications and write responses keep it current.
   check(); await session.pending;
   const self = assertSaltSolo(session, now());
+  if (record.attackCompleted) return returnHome();
   if (record.stage === "attack" || record.battleId) {
     const ended = session.ends.get(String(record.battleId));
-    if (ended && String(ended.roleCodeId) === String(session.selfCodeId) && ended.buildingId === record.targetId && Number(ended.hP) >= 0) { save({ status: "completed" }); return { status: "completed", reason: "本场攻击结算已确认" }; }
+    if (ended && String(ended.roleCodeId) === String(session.selfCodeId) && ended.buildingId === record.targetId && Number(ended.hP) >= 0) { save({ status: "pending", attackCompleted: true, stage: "attackSettled" }); return returnHome(); }
     return { status: "pending", reason: "本场已有一次攻击请求，结果待核实，不追加攻击" };
   }
   if (["die", "resurrect", "over", "teaming", "observing"].includes(self.state)) return { status: "skipped", reason: "盐场角色当前不能参战，不自动复活或修改队伍" };
@@ -208,7 +272,11 @@ export async function runSaltBattle({ accountId, session, info, config, role, se
   }
   let target;
   let march = ownMarch(session);
-  if (record.stage === "march" && !march) return { status: "pending", reason: "上次行军结果待核实，不重复发起" };
+  if (record.stage === "march" && !march) {
+    const pos = saltPosition(session.battlefield, session.self());
+    if (session.self().state !== "idle" || !pos || `${pos.x}_${pos.y}` !== record.targetId) return { status: "pending", reason: "上次行军结果待核实，不重复发起" };
+    save({ stage: "arrived", speedPending: null });
+  }
   if (march) {
     const targetId = `${march.to.x}_${march.to.y}`;
     if (record.targetId !== targetId) return { status: "skipped", reason: "当前已有其他行军，保持原操作" };
@@ -225,36 +293,18 @@ export async function runSaltBattle({ accountId, session, info, config, role, se
         const active = ownMarch(session), p = saltPosition(session.battlefield, session.self());
         return active || (session.self().state === "idle" && p && `${p.x}_${p.y}` === target.id ? { arrived: true } : null);
       });
-      if (march.arrived) { march = null; save({ stage: "arrived" }); }
+      if (march.arrived) { march = null; save({ stage: "arrived", speedPending: null }); }
       else save({ stage: "moving", marchId: march.id });
       log(`向最近合法地块 ${target.id} 行军，路径${target.route.length - 1}格`);
     }
   }
   if (march) {
-    const id = march.id;
-    const cost = saltConstant(session, config, "legionWarSpeedCost");
-    const minRemaining = saltConstant(session, config, "legionWarMoveTimeLowerLimit") * 1000;
-    const remaining = Number(march.endTime) * 1000 - now();
-    if (!Number.isFinite(remaining)) throw new Error("行军结束时间缺失");
-    if ((record.speedUps || 0) < options.maxSpeedUps && remaining >= minRemaining && (record.spent || 0) + cost <= options.maxDiamondCost) {
-      const latest = saltBody(await send("role_getroleinfo", {}))?.role;
-      if (!latest || !Number.isFinite(Number(latest.diamond))) throw new Error("未取得金砖库存，不执行加速");
-      if (Number(latest.diamond) >= cost) {
-        // Reserve budget even if the request times out; never spend it twice.
-        save({ speedUps: (record.speedUps || 0) + 1, spent: (record.spent || 0) + cost });
-        await write("war_speedup", { marchId: id }, "speed");
-        // The response and arrival notifications update marches; only the
-        // bounded fallback poll queries again when notifications do not arrive.
-        save({ stage: "moving" });
-        log(`已执行一次行军加速，预留本场金砖支出${record.spent}/${options.maxDiamondCost}`);
-      } else log("金砖不足，等待自然到达");
-    } else log("加速次数、预算或剩余时间不满足，等待自然到达");
     await waitFor(() => {
       const self = session.self(), pos = saltPosition(session.battlefield, self);
       if (!ownMarch(session) && ["die", "over", "combat"].includes(self.state)) throw new Error("行军后角色状态变化，停止追加操作");
       return self.state === "idle" && pos && `${pos.x}_${pos.y}` === target.id && !ownMarch(session);
-    });
-    save({ stage: "arrived" });
+    }, { onTick: () => accelerateMarch("moving") });
+    save({ stage: "arrived", speedPending: null });
   }
   await refresh();
   const currentTarget = get(session.battlefield.buildingData, target.id);
@@ -272,6 +322,6 @@ export async function runSaltBattle({ accountId, session, info, config, role, se
     if (!(Number(ended.hP) >= 0)) throw new Error("本次地块攻击被取消，不追加攻击");
     return ended;
   }, { poll: false });
-  save({ status: "completed" });
-  return { status: "completed", reason: `地块 ${target.id} 一次攻击已结算，本场累计预留加速支出${record.spent || 0}金砖` };
+  save({ status: "pending", attackCompleted: true, stage: "attackSettled" });
+  return returnHome();
 }

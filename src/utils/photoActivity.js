@@ -46,18 +46,18 @@ export async function exchangePhotoItems(context) {
   return exchangeRechargeItems({ ...context, expectedActivityId: activityId, query: (send, config, now) => queryPhotoExchange(send, config, now, activityId) });
 }
 
-/** 勿忘我先换满天星，再按实时库存与剩余限购兑换白玉。 */
+/** 勿忘我先换满天星，优先白玉，再将余量按实时库存与限购兑换灵贝。 */
 export async function runPhotoWhiteJade({ send, config, now = Date.now, log = () => {} }) {
   const event = findPhotoActivity(config, now());
   if (!event) return { status: "skipped", reason: "当前没有开放的闲来入镜活动" };
-  const steps = [[5291, 5293], [5293, 1022]].map(([itemId, rewardId]) => {
+  const steps = [[5291, 5293], [5293, 1022], [5293, 1033]].map(([itemId, rewardId]) => {
     const shops = event.shops.filter(shop => Number(shop.itemId) === itemId);
     const goods = mapEntries(config.ExchangeActConf).map(([, row]) => row).filter(row =>
       shops.some(shop => shop.id === row.actId) && Number(row.resourceType) === 3 && Number(row.rewardId) === rewardId);
-    if (goods.length !== 1) throw new Error("白玉兑换配置缺失或不唯一，停止兑换");
+    if (goods.length !== 1) throw new Error("白玉/灵贝兑换配置缺失或不唯一，停止兑换");
     const row = goods[0], shop = shops.find(shop => shop.id === row.actId);
     if (![row.consumeNum, row.rewardNum].every(value => Number.isSafeInteger(value) && value > 0) ||
-      ![row.limitNum, row.unlockNeed].every(value => Number.isSafeInteger(value) && value >= 0)) throw new Error("白玉兑换数量配置异常");
+      ![row.limitNum, row.unlockNeed].every(value => Number.isSafeInteger(value) && value >= 0)) throw new Error("白玉/灵贝兑换数量配置异常");
     return { shop, goodsId: row.id };
   });
   let exchanged = 0;
@@ -75,7 +75,7 @@ export async function runPhotoWhiteJade({ send, config, now = Date.now, log = ()
         return response;
       }, currentConfig, time, shop.id);
       const row = snapshot.rows.find(row => row.id === goodsId);
-      if (!Number.isSafeInteger(snapshot.stock) || !row || !Number.isSafeInteger(row.used) || !Number.isSafeInteger(row.max)) throw new Error("白玉兑换库存或记录格式异常");
+      if (!Number.isSafeInteger(snapshot.stock) || !row || !Number.isSafeInteger(row.used) || !Number.isSafeInteger(row.max)) throw new Error("白玉/灵贝兑换库存或记录格式异常");
       return snapshot;
     };
     const snapshot = await query(send, config, now());
