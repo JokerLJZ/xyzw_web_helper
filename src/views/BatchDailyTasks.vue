@@ -332,7 +332,7 @@
         <!-- Batch Functions -->
         <n-card title="批量功能列表" style="margin-top: 16px">
           <n-tabs type="line" animated>
-            <n-tab-pane name="daily" tab="日常">
+            <n-tab-pane name="daily" tab="日常与领取">
               <n-space>
                 <n-button
                   size="small"
@@ -364,84 +364,14 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="batchclubsign"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键俱乐部签到
-                </n-button>
-                <n-button size="small" @click="previewSaltBattle()" :disabled="isRunning || selectedTokens.length === 0">自动盐场（一次攻击）</n-button>
-                <n-button
-                  size="small"
-                  @click="batchSaltSignup"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键盐场报名（周六）
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchCampSignup"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  自动营地报名（周日）
-                </n-button>
-                <n-button size="small" @click="batchPeachSignup()" :disabled="isRunning || selectedTokens.length === 0">自动蟠桃报名（周日）</n-button>
-                <n-tooltip>
-                  <template #trigger>
-                    <n-button
-                      size="small"
-                      @click="batchCampChallenge"
-                      :disabled="isRunning || selectedTokens.length === 0"
-                    >
-                      自动营地挑战
-                    </n-button>
-                  </template>
-                  周二至周四：低战力优先，当日累计3胜即停；普通据点连续3次未获胜后，改为挑战一次宠物。使用当前阵容，不使用挑战道具。
-                </n-tooltip>
-                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchCampfireLottery" title="按现有种火石逐次抽奖至不足一次，不购买道具、不替换奖池">篝火奇遇全量抽奖</n-button>
-                <n-button
-                  size="small"
-                  @click="batcharenafight"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isarenaActivityOpen
-                  "
-                >
-                  一键竞技场战斗3次
-                </n-button>
-                <n-button size="small" @click="openBlackMarketPurchaseModal" :disabled="isRunning">配置黑市采购清单</n-button>
-                <n-button size="small" @click="store_syncpurchaseconfig" :disabled="isRunning || selectedTokens.length === 0">同步黑市采购清单</n-button>
-                <n-button
-                  size="small"
-                  @click="store_purchase"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键黑市采购
-                </n-button>
-                <n-button
-                  size="small"
                   @click="collection_claimfreereward"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键领取珍宝阁
                 </n-button>
-                <n-button
-                  size="small"
-                  @click="batchGenieSweep"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键灯神扫荡
-                </n-button>
               </n-space>
             </n-tab-pane>
-            <n-tab-pane name="dungeon" tab="副本">
-              <n-space style="margin-bottom: 12px">
-                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchRechargeStandard">充值活动标准任务</n-button>
-                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryRechargeExchangeItems">充值活动兑换物品</n-button>
-                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoStandard">闲来入镜任务</n-button>
-                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryPhotoExchangeItems">闲来入镜商店兑换</n-button>
-                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoWhiteJade" title="先将勿忘我换为满天星，优先兑换白玉，剩余满天星再尽量兑换灵贝">闲来入镜兑换白玉</n-button>
-              </n-space>
+            <n-tab-pane name="dungeon" tab="副本与挑战">
               <n-space>
                 <n-button
                   size="small"
@@ -449,6 +379,17 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键爬塔
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchWeirdTower"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !isWeirdTowerActivityOpen
+                  "
+                >
+                  一键怪异塔
                 </n-button>
                 <n-button
                   size="small"
@@ -463,11 +404,62 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="skinChallenge"
+                  @click="batcharenafight"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !isarenaActivityOpen
+                  "
+                >
+                  一键竞技场战斗3次
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchGenieSweep"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  一键换皮闯关
+                  一键灯神扫荡
                 </n-button>
+              </n-space>
+            </n-tab-pane>
+            <n-tab-pane name="club" tab="俱乐部与赛事">
+              <n-space>
+                <n-button
+                  size="small"
+                  @click="batchclubsign"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键俱乐部签到
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchSaltSignup"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键盐场报名（周六）
+                </n-button>
+                <n-button size="small" @click="previewSaltBattle()" :disabled="isRunning || selectedTokens.length === 0">自动盐场（一次攻击）</n-button>
+                <n-button
+                  size="small"
+                  @click="batchCampSignup"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  自动营地报名（周日）
+                </n-button>
+                <n-tooltip>
+                  <template #trigger>
+                    <n-button
+                      size="small"
+                      @click="batchCampChallenge"
+                      :disabled="isRunning || selectedTokens.length === 0"
+                    >
+                      自动营地挑战
+                    </n-button>
+                  </template>
+                  周二至周四：低战力优先，当日累计3胜即停；普通据点连续3次未获胜后，改为挑战一次宠物。使用当前阵容，不使用挑战道具。
+                </n-tooltip>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchCampfireLottery" title="按现有种火石逐次抽奖至不足一次，不购买道具、不替换奖池">篝火奇遇全量抽奖</n-button>
+                <n-button size="small" @click="batchPeachSignup()" :disabled="isRunning || selectedTokens.length === 0">自动蟠桃报名（周日）</n-button>
                 <n-button
                   size="small"
                   @click="batchClaimPeachTasks"
@@ -475,6 +467,134 @@
                 >
                   一键领取蟠桃园任务
                 </n-button>
+                <n-button size="small" @click="showGoldenCheerModal = true" :disabled="isRunning || selectedTokens.length === 0">批量黄金天宫助威</n-button>
+                <n-button
+                  size="small"
+                  @click="openWarGuessModal"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !isWarGuessActivityOpen
+                  "
+                  :title="isWarGuessActivityOpen ? '' : warGuessActivityTip"
+                >
+                  月赛助威
+                </n-button>
+                <n-popselect
+                  :value="footballPick"
+                  :options="footballPickOptions"
+                  trigger="click"
+                  @update:value="onFootballPickChange"
+                >
+                  <n-button
+                    size="small"
+                    :disabled="isRunning || selectedTokens.length === 0"
+                  >
+                    一键竞猜({{ footballPickLabel }})
+                  </n-button>
+                </n-popselect>
+                <n-button
+                  size="small"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  @click="batchApexGuess()"
+                >
+                  逐鹿盐山竞猜
+                </n-button>
+              </n-space>
+            </n-tab-pane>
+            <n-tab-pane name="shop" tab="商店与采购">
+              <n-space>
+                <n-button size="small" @click="openBlackMarketPurchaseModal" :disabled="isRunning">配置黑市采购清单</n-button>
+                <n-button size="small" :disabled="isRunning" @click="showCheerShopModal = true">配置助威商店采购</n-button>
+                <n-button size="small" @click="store_syncpurchaseconfig" :disabled="isRunning || selectedTokens.length === 0">同步黑市采购清单</n-button>
+                <n-button
+                  size="small"
+                  @click="store_purchase"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键黑市采购
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="legion_storebuygoods"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键购买四圣碎片
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="legionStoreBuyWhiteJade"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  盐锭购买白玉
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="legionStoreBuySkinCoins"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键购买俱乐部5皮肤币
+                </n-button>
+                <n-button size="small" :disabled="isRunning || !selectedTokens.length" @click="batchCheerShopPurchase">助威商店采购</n-button>
+              </n-space>
+            </n-tab-pane>
+            <n-tab-pane name="monthly" tab="月度补齐">
+              <n-space>
+                <n-button
+                  size="small"
+                  @click="batchTopUpFish"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键钓鱼补齐
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchTopUpArena"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !isarenaActivityOpen
+                  "
+                >
+                  一键竞技场补齐
+                </n-button>
+              </n-space>
+            </n-tab-pane>
+            <n-tab-pane name="weekly" tab="周常与限时活动">
+              <n-space>
+                <n-button
+                  size="small"
+                  @click="batchClaimWeeklyActivityBenefit"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="查询当前周活动后，领取对应活动商店第0项免费福利；已领取时自动跳过"
+                >
+                  领取周活动福利
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="openSmartBoxWeeklyModal"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  智能宝箱周任务
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="openWeeklyTaskModal('recruit')"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  智能招募周任务
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="openWeeklyTaskModal('blackMarket')"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  智能黑市周任务
+                </n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchRechargeStandard">充值活动标准任务</n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryRechargeExchangeItems">充值活动兑换物品</n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoStandard">闲来入镜任务</n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryPhotoExchangeItems">闲来入镜商店兑换</n-button>
                 <n-button
                   size="small"
                   @click="batchXuanwuBlessing"
@@ -498,49 +618,17 @@
                 >
                   使用消耗活动普通道具
                 </n-button>
-              </n-space>
-              <n-space>
-                <n-popselect
-                  :value="footballPick"
-                  :options="footballPickOptions"
-                  trigger="click"
-                  @update:value="onFootballPickChange"
-                >
-                  <n-button
-                    size="small"
-                    :disabled="isRunning || selectedTokens.length === 0"
-                  >
-                    一键竞猜({{ footballPickLabel }})
-                  </n-button>
-                </n-popselect>
                 <n-button
                   size="small"
+                  @click="skinChallenge"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  @click="batchApexGuess()"
                 >
-                  逐鹿盐山竞猜
+                  一键换皮闯关
                 </n-button>
               </n-space>
             </n-tab-pane>
-            <n-tab-pane name="weirdTower" tab="怪异塔">
+            <n-tab-pane name="resource" tab="资源管理">
               <n-space>
-                <n-button
-                  size="small"
-                  @click="batchWeirdTower"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键怪异塔
-                </n-button>
-              </n-space>
-            </n-tab-pane>
-            <n-tab-pane name="resource" tab="资源">
-              <n-space>
-                <n-button size="small" @click="batchClaimCollectionRewards" :disabled="isRunning || selectedTokens.length === 0" title="先领取已拥有皮肤和装扮的藏品积分，再领取主题、套装和总积分等级奖励">领取藏品奖励</n-button>
-                <n-button size="small" @click="batchClaimCardCollectionRewards" :disabled="isRunning || selectedTokens.length === 0" title="领取普通及彩色卡牌图鉴奖励">领取卡牌图鉴奖励</n-button>
                 <n-button
                   size="small"
                   @click="openHelperModal('box')"
@@ -576,13 +664,10 @@
                 >
                   批量招募
                 </n-button>
-                <n-button
-                  size="small"
-                  @click="batchAutoStarBook"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  自动升星图鉴
-                </n-button>
+              </n-space>
+            </n-tab-pane>
+            <n-tab-pane name="growth" tab="武将与图鉴">
+              <n-space>
                 <n-button
                   size="small"
                   @click="openHeroLevelUpgradeModal"
@@ -592,24 +677,53 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="legion_storebuygoods"
+                  @click="batchAutoStarBook"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  一键购买四圣碎片
+                  自动升星图鉴
+                </n-button>
+                <n-button size="small" @click="batchClaimCollectionRewards" :disabled="isRunning || selectedTokens.length === 0" title="先领取已拥有皮肤和装扮的藏品积分，再领取主题、套装和总积分等级奖励">领取藏品奖励</n-button>
+                <n-button size="small" @click="batchClaimCardCollectionRewards" :disabled="isRunning || selectedTokens.length === 0" title="领取普通及彩色卡牌图鉴奖励">领取卡牌图鉴奖励</n-button>
+              </n-space>
+            </n-tab-pane>
+            <n-tab-pane name="formation" tab="阵容管理">
+              <n-space>
+                <n-button
+                  size="small"
+                  @click="batchAdjustEarlyMainLevelFormation"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  前期推图阵容
                 </n-button>
                 <n-button
                   size="small"
-                  @click="legionStoreBuyWhiteJade"
+                  @click="batchAdjustMainLevelFormation"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  盐锭购买白玉
+                  推图默认阵容调整
                 </n-button>
+              </n-space>
+            </n-tab-pane>
+            <n-tab-pane name="pet" tab="宠物">
+              <n-space>
                 <n-button
                   size="small"
-                  @click="legionStoreBuySkinCoins"
+                  @click="batchClaimGachaRewards"
                   :disabled="isRunning || selectedTokens.length === 0"
+                  title="按本轮扭蛋次数领取10至100次已达标且未领取的累计奖励"
                 >
-                  一键购买俱乐部5皮肤币
+                  领取扭蛋奖励
+                </n-button>
+                <n-button size="small" @click="batchActivatePetBooks" :disabled="isRunning || selectedTokens.length === 0" title="激活已解锁但未激活的宠物图鉴，并领取未领图鉴奖励">宠物图鉴一键激活领奖</n-button>
+                <n-button size="small" @click="batchMergePets" :disabled="isRunning || selectedTokens.length === 0" title="循环使用白绿蓝宠物蛋并合成腾位，跳过当前佩戴及锁定宠物；紫色及以上继承较高等级宠物">自动合成宠物</n-button>
+                <n-button size="small" @click="batchEquipHighestLevelPet" :disabled="isRunning || selectedTokens.length === 0" title="优先最高品质，同品质破甲优先、其次格挡，再比较等级">佩戴优先宠物</n-button>
+                <n-button
+                  size="small"
+                  @click="batchUpgradeAllPets"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="对当前佩戴宠物持续一键升级，直到道具不足或无法继续升级"
+                >
+                  升级当前佩戴宠物
                 </n-button>
               </n-space>
             </n-tab-pane>
@@ -643,117 +757,6 @@
                 >
                   批量功法残卷赠送
                 </n-button>
-              </n-space>
-            </n-tab-pane>
-            <n-tab-pane name="monthly" tab="月度">
-              <n-button size="small" :disabled="isRunning" @click="showCheerShopModal = true">配置助威商店采购</n-button>
-              <n-button size="small" :disabled="isRunning || !selectedTokens.length" @click="batchCheerShopPurchase">助威商店采购</n-button>
-              <n-space>
-                <n-button
-                  size="small"
-                  @click="batchTopUpFish"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键钓鱼补齐
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchTopUpArena"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isarenaActivityOpen
-                  "
-                >
-                  一键竞技场补齐
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="openWarGuessModal"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWarGuessActivityOpen
-                  "
-                  :title="isWarGuessActivityOpen ? '' : warGuessActivityTip"
-                >
-                  月赛助威
-                </n-button>
-                <n-button size="small" @click="showGoldenCheerModal = true" :disabled="isRunning || selectedTokens.length === 0">批量黄金天宫助威</n-button>
-              </n-space>
-            </n-tab-pane>
-            <n-tab-pane name="formation" tab="阵容管理">
-              <n-space>
-                <n-button
-                  size="small"
-                  @click="batchAdjustMainLevelFormation"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  推图默认阵容调整
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchAdjustEarlyMainLevelFormation"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  前期推图阵容
-                </n-button>
-              </n-space>
-            </n-tab-pane>
-            <n-tab-pane name="weekly" tab="周常">
-              <n-space>
-                <n-button
-                  size="small"
-                  @click="batchClaimWeeklyActivityBenefit"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                  title="查询当前周活动后，领取对应活动商店第0项免费福利；已领取时自动跳过"
-                >
-                  领取周活动福利
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="openSmartBoxWeeklyModal"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  智能宝箱周任务
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="openWeeklyTaskModal('recruit')"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  智能招募周任务
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="openWeeklyTaskModal('blackMarket')"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  智能黑市周任务
-                </n-button>
-              </n-space>
-            </n-tab-pane>
-            <n-tab-pane name="pet" tab="宠物">
-              <n-space>
-                <n-button size="small" @click="batchActivatePetBooks" :disabled="isRunning || selectedTokens.length === 0" title="激活已解锁但未激活的宠物图鉴，并领取未领图鉴奖励">宠物图鉴一键激活领奖</n-button>
-                <n-button size="small" @click="batchEquipHighestLevelPet" :disabled="isRunning || selectedTokens.length === 0" title="优先最高品质，同品质破甲优先、其次格挡，再比较等级">佩戴优先宠物</n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimGachaRewards"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                  title="按本轮扭蛋次数领取10至100次已达标且未领取的累计奖励"
-                >
-                  领取扭蛋奖励
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchUpgradeAllPets"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                  title="对当前佩戴宠物持续一键升级，直到道具不足或无法继续升级"
-                >
-                  升级当前佩戴宠物
-                </n-button>
-                <n-button size="small" @click="batchMergePets" :disabled="isRunning || selectedTokens.length === 0" title="循环使用白绿蓝宠物蛋并合成腾位，跳过当前佩戴及锁定宠物；紫色及以上继承较高等级宠物">自动合成宠物</n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
@@ -5028,7 +5031,7 @@ watch(
 );
 
 // 定时任务沿用现有分组；即时操作恢复经典标签页。
-const taskGroupDefinitions = computed(() => groupTaskCatalog(availableTasks).map(group => ({ ...group, tasks: group.tasks.map(task => task.value) })));
+const taskGroupDefinitions = computed(() => groupTaskCatalog(availableTasks).filter(group => group.name !== 'other').map(group => ({ ...group, tasks: group.tasks.map(task => task.value) })));
 const groupedAvailableTasks = computed(() => Object.fromEntries(groupTaskCatalog(availableTasks).map(group => [group.name, group.tasks])));
 const showCheerShopModal = ref(false);
 

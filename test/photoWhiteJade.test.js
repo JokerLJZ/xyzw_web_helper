@@ -74,12 +74,12 @@ test('配置异常、库存异常、跨期与停止均不继续写入', async ()
   const d = account();
   await assert.rejects(runPhotoWhiteJade({ ...d, send: async () => { const error = new Error('任务已停止'); error.stopped = true; throw error; } }), /停止/);
 });
-test('副本和小号任务共用已注册的白玉兑换入口', () => {
+test('白玉兑换只保留小号入口，定时任务同步归小号组', () => {
   const view = readFileSync(new URL('../src/views/BatchDailyTasks.vue', import.meta.url), 'utf8');
   assert.match(view.slice(view.indexOf('tab="小号任务"')), /@click="batchPhotoWhiteJade"/);
-  assert.equal((view.match(/@click="batchPhotoWhiteJade"/g) || []).length, 2);
+  assert.equal((view.match(/@click="batchPhotoWhiteJade"/g) || []).length, 1);
   assert.match(view, /batchPhotoWhiteJade,/);
-  assert.equal(groupTaskCatalog([{ value: 'batchPhotoWhiteJade', label: '闲来入镜兑换白玉' }])[0].name, 'weekly');
+  assert.equal(groupTaskCatalog([{ value: 'batchPhotoWhiteJade', label: '闲来入镜兑换白玉' }])[0].name, 'small-account');
 });
 
 

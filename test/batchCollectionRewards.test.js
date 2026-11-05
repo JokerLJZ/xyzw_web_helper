@@ -68,9 +68,9 @@ test('停止后不发领奖请求，剩余账号标记停止并释放已连接�
   assert.equal(f.released.length, 1);
   assert.equal(f.calls.some(([cmd]) => cmd.startsWith('collection_')), false);
 }));
-test('只有资源面板和批量任务注册提供入口，旧日常设置不再触发', async () => {
+test('只有武将与图鉴面板和批量任务注册提供入口，旧日常设置不再触发', async () => {
   const view = await readFile(new URL('../src/views/BatchDailyTasks.vue', import.meta.url), 'utf8');
-  const resource = view.slice(view.indexOf('<n-tab-pane name="resource"'), view.indexOf('</n-tab-pane>', view.indexOf('<n-tab-pane name="resource"')));
+  const resource = view.slice(view.indexOf('<n-tab-pane name="growth"'), view.indexOf('</n-tab-pane>', view.indexOf('<n-tab-pane name="growth"')));
   for (const name of ['batchClaimCollectionRewards', 'batchClaimCardCollectionRewards']) {
     assert.ok(resource.includes(`@click="${name}"`));
     assert.ok(view.includes(`"${name}"`));

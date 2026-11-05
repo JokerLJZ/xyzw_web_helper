@@ -59,7 +59,7 @@ test('catalog puts every task in one group and searches labels and groups', () =
   const ids = groups.flatMap(g => g.tasks.map(t => t.value));
   assert.equal(ids.length, availableTasks.length);
   assert.equal(new Set(ids).size, availableTasks.length);
-  assert.ok(groups.find(g => g.name === 'monthly').tasks.some(t => t.value === 'batchCheerShopPurchase'));
+  assert.ok(groups.find(g => g.name === 'shop').tasks.some(t => t.value === 'batchCheerShopPurchase'));
   assert.ok(groupTaskCatalog(availableTasks, '月度').every(g => g.name === 'monthly'));
   assert.ok(groupTaskCatalog(availableTasks, '白玉').flatMap(g => g.tasks).some(t => t.value === 'legionStoreBuyWhiteJade'));
 });
@@ -67,15 +67,15 @@ test('catalog puts every task in one group and searches labels and groups', () =
 test('confirmed task assignments override keyword classification', () => {
   const groups = groupTaskCatalog(availableTasks);
   const groupOf = id => groups.find(group => group.tasks.some(task => task.value === id))?.name;
-  assert.equal(groupOf('batchCheckSaltMasters'), 'growth');
-  assert.equal(groupOf('batchJoinLegion'), 'growth');
+  assert.equal(groupOf('batchCheckSaltMasters'), 'small-account');
+  assert.equal(groupOf('batchJoinLegion'), 'small-account');
   assert.equal(groupOf('skinChallenge'), 'weekly');
   assert.equal(groups.find(group => group.name === 'resource').label, '资源管理');
 });
 
-test('pearl purchases belong to growth and standalone combined purchase is removed', () => {
+test('pearl purchases belong only to small accounts and standalone combined purchase is removed', () => {
   const groups = groupTaskCatalog(availableTasks);
-  const growth = groups.find(group => group.name === 'growth').tasks.map(task => task.value);
+  const growth = groups.find(group => group.name === 'small-account').tasks.map(task => task.value);
   for (const id of ['batchBuyRedFeatherWithPearls', 'batchBuyBaguaWithPearls', 'batchBuyPearlFish']) assert.ok(growth.includes(id));
   assert.ok(!availableTasks.some(task => task.value === 'batchBuyRedFragmentsAndPetCookies'));
   assert.equal(availableTasks.find(task => task.value === 'legionStoreBuyWhiteJade').label, '盐锭购买白玉');

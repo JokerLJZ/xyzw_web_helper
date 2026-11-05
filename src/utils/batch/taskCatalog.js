@@ -1,29 +1,182 @@
-// Classify the scheduled task picker; immediate operations use classic tabs.
+// Explicit approved groups shared by the classic page and scheduled task picker.
 export const TASK_GROUPS = [
-  { name: 'daily', label: '日常与领取', match: /日常|挂机|加钟|罐子|签到|珍宝阁|成就|邮件|兑换码|藏品奖励|卡牌图鉴/ },
-  { name: 'monthly', label: '月度任务', match: /补齐|助威商店/ },
-  { name: 'weekly', label: '周常与限时活动', match: /周任务|周活动|充值活动|闲来入镜|玄武|消耗活动/ },
-  { name: 'club', label: '俱乐部与赛事', match: /报名|盐场|营地|篝火|蟠桃|天宫|俱乐部|咸主/ },
-  { name: 'shop', label: '商店采购', match: /购买|采购|黑市|珍珠买/ },
-  { name: 'dungeon', label: '副本与挑战', match: /爬塔|怪异塔|梦境|闯关|竞技场|灯神/ },
-  { name: 'resource', label: '资源管理', match: /开箱|宝箱积分|钓鱼|招募|仓库/ },
-  { name: 'pet', label: '宠物养成', match: /宠物|扭蛋/ },
-  { name: 'legacy', label: '功法', match: /功法/ },
-  { name: 'growth', label: '养成与阵容', match: /.*/ },
+  {
+    "name": "daily",
+    "label": "日常与领取",
+    "tasks": [
+      "startBatch",
+      "claimHangUpRewards",
+      "batchAddHangUpTime",
+      "resetBottles",
+      "batchlingguanzi",
+      "collection_claimfreereward",
+      "batchStudy"
+    ]
+  },
+  {
+    "name": "dungeon",
+    "label": "副本与挑战",
+    "tasks": [
+      "climbTower",
+      "batchWeirdTower",
+      "batchmengjing",
+      "batcharenafight",
+      "batchGenieSweep",
+      "climbWeirdTower",
+      "batchUseItems",
+      "batchMergeItems",
+      "batchClaimFreeEnergy"
+    ]
+  },
+  {
+    "name": "club",
+    "label": "俱乐部与赛事",
+    "tasks": [
+      "batchclubsign",
+      "batchSaltSignup",
+      "batchSaltBattle",
+      "batchCampSignup",
+      "batchCampChallenge",
+      "batchCampfireLottery",
+      "batchPeachSignup",
+      "batchClaimPeachTasks",
+      "batchGoldenCheer",
+      "batchWarGuessCheer",
+      "batchFootballBet",
+      "batchApexGuess"
+    ]
+  },
+  {
+    "name": "shop",
+    "label": "商店与采购",
+    "tasks": [
+      "store_syncpurchaseconfig",
+      "store_purchase",
+      "legion_storebuygoods",
+      "legionStoreBuyWhiteJade",
+      "legionStoreBuySkinCoins",
+      "batchCheerShopPurchase",
+      "batchBuyDreamItems"
+    ]
+  },
+  {
+    "name": "monthly",
+    "label": "月度补齐",
+    "tasks": [
+      "batchTopUpFish",
+      "batchTopUpArena"
+    ]
+  },
+  {
+    "name": "weekly",
+    "label": "周常与限时活动",
+    "tasks": [
+      "batchClaimWeeklyActivityBenefit",
+      "batchSmartBoxWeekly",
+      "batchSmartRecruitWeekly",
+      "batchSmartBlackMarketWeekly",
+      "batchRechargeStandard",
+      "batchRechargeExchange",
+      "batchPhotoStandard",
+      "batchPhotoExchange",
+      "batchXuanwuBlessing",
+      "batchClaimConsumptionRewards",
+      "batchUseConsumptionActivityItems",
+      "skinChallenge"
+    ]
+  },
+  {
+    "name": "resource",
+    "label": "资源管理",
+    "tasks": [
+      "batchOpenBox",
+      "batchOpenBoxByPoints",
+      "batchClaimBoxPointReward",
+      "batchFish",
+      "batchRecruit"
+    ]
+  },
+  {
+    "name": "growth",
+    "label": "武将与图鉴",
+    "tasks": [
+      "batchHeroLevelUpgrade",
+      "batchAutoStarBook",
+      "batchClaimCollectionRewards",
+      "batchClaimCardCollectionRewards"
+    ]
+  },
+  {
+    "name": "formation",
+    "label": "阵容管理",
+    "tasks": [
+      "batchAdjustEarlyMainLevelFormation",
+      "batchAdjustMainLevelFormation"
+    ]
+  },
+  {
+    "name": "pet",
+    "label": "宠物",
+    "tasks": [
+      "batchClaimGachaRewards",
+      "batchActivatePetBooks",
+      "batchMergePets",
+      "batchEquipHighestLevelPet",
+      "batchUpgradeAllPets"
+    ]
+  },
+  {
+    "name": "legacy",
+    "label": "功法",
+    "tasks": [
+      "batchLegacyClaim",
+      "batchLegacyBeginHangUp",
+      "batchLegacyClaimChargeReward",
+      "batchLegacyGiftSendEnhanced"
+    ]
+  },
+  {
+    "name": "small-account",
+    "label": "小号任务",
+    "tasks": [
+      "batchAltMergeAndEquipPets",
+      "batchPhotoWhiteJade",
+      "batchUpgradeHangUpAndClaimOrderRewards",
+      "batchJoinLegion",
+      "batchUpgradeCrystal",
+      "batchUpgradeEquipment",
+      "batchAltAccountRefine",
+      "batchBuyRedFeatherWithPearls",
+      "batchBuyBaguaWithPearls",
+      "batchBuyPearlFish",
+      "batchReplaceBestFishArtifact",
+      "batchUpgradeShoeToy",
+      "batchChallengeGroupGenie",
+      "batchChallengeThreeKingdomsGenie",
+      "batchMaxWarriorLegionTech",
+      "batchClaimAchievementRewards",
+      "batchClaimMailAttachments",
+      "batchAwakenHeroSkills",
+      "batchTopUpGoldFish",
+      "batchCheckSaltMasters",
+      "batchPushMainLevelInfo",
+      "batchUpgradeLordTo6000",
+      "batchUseWarehouseItems",
+      "batchExchangeXuanwuPetCookies",
+      "batchRedeemCodes",
+      "store_discount_purchase"
+    ]
+  }
 ];
-// Explicit assignments take priority over name-based classification.
-const TASK_GROUP_OVERRIDES = {
-  batchCheckSaltMasters: 'growth',
-  batchJoinLegion: 'growth',
-  batchBuyRedFeatherWithPearls: 'growth',
-  batchBuyBaguaWithPearls: 'growth',
-  batchBuyPearlFish: 'growth',
-  skinChallenge: 'weekly',
-};
+
 export function groupTaskCatalog(tasks, query = '') {
   const keyword = query.trim().toLowerCase();
-  return TASK_GROUPS.map(group => ({ ...group, tasks: tasks.filter(task =>
-    (TASK_GROUP_OVERRIDES[task.value] || TASK_GROUPS.find(g => g.match.test(task.label)).name) === group.name &&
-    (!keyword || `${task.label} ${group.label}`.toLowerCase().includes(keyword)),
+  const byId = new Map(tasks.map(task => [task.value, task]));
+  const assigned = new Set(TASK_GROUPS.flatMap(group => group.tasks));
+  const groups = TASK_GROUPS.map(group => ({ ...group, tasks: group.tasks.map(id => byId.get(id)).filter(Boolean) }));
+  const other = tasks.filter(task => !assigned.has(task.value));
+  if (other.length) groups.push({ name: 'other', label: '其他', tasks: other });
+  return groups.map(group => ({ ...group, tasks: group.tasks.filter(task =>
+    !keyword || `${task.label} ${group.label}`.toLowerCase().includes(keyword),
   ) })).filter(group => group.tasks.length);
 }

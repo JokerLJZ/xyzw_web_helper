@@ -86,12 +86,12 @@ test("非法上限不建立连接，不发送任何游戏请求",async()=>{
   assert.ok(f.logs[0].message.includes("正整数"));
 });
 
-test("注册到批量入口、养成分组和定时任务，默认每账号1000次、吕布",()=>{
+test("注册到批量入口、小号分组和定时任务，默认每账号1000次、吕布",()=>{
   assert.ok(availableTasks.some(x=>x.value === "batchAltAccountRefine"));
   assert.equal(defaultBatchSettings.altRefineLimit,1000); assert.equal(defaultBatchSettings.altRefineHeroId,107);
   const source=fs.readFileSync(new URL("../src/views/BatchDailyTasks.vue",import.meta.url),"utf8");
   assert.ok(source.includes('@click="batchAltAccountRefine"'));
-  assert.ok(groupTaskCatalog(availableTasks).find(group => group.name === "growth").tasks.some(task => task.value === "batchAltAccountRefine"));
+  assert.ok(groupTaskCatalog(availableTasks).find(group => group.name === "small-account").tasks.some(task => task.value === "batchAltAccountRefine"));
   assert.ok(source.includes('v-model:value="batchSettings.altRefineLimit"'));
   assert.ok(source.includes('v-model:value="batchSettings.altRefineHeroId"'));
   assert.ok(source.slice(source.indexOf("const getScheduledTaskFunction")).includes("    batchAltAccountRefine,"));
