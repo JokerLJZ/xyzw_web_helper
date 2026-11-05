@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { readFile } from "node:fs/promises";
 import ts from "typescript";
-import { getBatchRetryTokenIds, normalizeTaskResultStatus, summarizeScheduledAccount } from "../src/utils/scheduledTaskResult.js";
+import { getTaskErrorStatus, getBatchRetryTokenIds, normalizeTaskResultStatus, summarizeScheduledAccount } from "../src/utils/scheduledTaskResult.js";
 import { formatScheduledTaskNotification } from "../src/utils/wxpusher.js";
 const component = await readFile(new URL("../src/views/BatchDailyTasks.vue", import.meta.url), "utf8");
 const source = ts.createSourceFile("batch.js", component.match(/<script setup[^>]*>([\s\S]*?)<\/script>/)[1], ts.ScriptTarget.Latest, true);
@@ -20,7 +20,7 @@ function fixture({ beforeFailure = false, dailyFailure = true, connectionFailure
     isLegacyTaskName: () => false, availableTasks: [], shouldStop: ref(false), currentRunningTokenId: ref(null),
     beginScheduledTokenSession() {}, endScheduledTokenSession() {}, scheduledTokenSession: { active: false },
     ensureConnection: async () => { if (connectionFailure) throw new Error("连接超时"); },
-    getBatchRetryTokenIds, normalizeTaskResultStatus, summarizeScheduledAccount, formatScheduledTaskNotification,
+    getTaskErrorStatus, getBatchRetryTokenIds, normalizeTaskResultStatus, summarizeScheduledAccount, formatScheduledTaskNotification,
     getUpcomingScheduledTaskRuns: () => [], recordTaskExecution() {},
     sendNotifications: async (title, content, options) => reports.push({ title, content, options }),
     getScheduledTaskFunction: name => async () => {

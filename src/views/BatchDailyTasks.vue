@@ -331,7 +331,7 @@
 
         <!-- Batch Functions -->
         <n-card title="批量功能列表" style="margin-top: 16px">
-          <n-tabs type="line" animated>
+          <n-tabs class="batch-task-tabs" type="line" animated>
             <n-tab-pane name="daily" tab="日常与领取">
               <n-space>
                 <n-button
@@ -2459,6 +2459,7 @@
 
             <n-checkbox-group v-model:value="taskForm.selectedTasks">
               <n-tabs
+                class="batch-task-tabs"
                 type="line"
                 animated
                 size="small"
@@ -8539,6 +8540,47 @@ const stopBatch = () => {
 </script>
 
 <style scoped>
+
+/* Task categories wrap into rows instead of using Naive UI's horizontal scroller. */
+.batch-task-tabs :deep(.n-tabs-nav-scroll-content) {
+  width: 100%;
+}
+
+.batch-task-tabs :deep(.n-tabs-wrapper) {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  column-gap: 24px;
+}
+
+.batch-task-tabs :deep(.v-x-scroll) {
+  overflow: visible;
+}
+
+.batch-task-tabs :deep(.n-tabs-tab-pad),
+.batch-task-tabs :deep(.n-tabs-scroll-padding),
+.batch-task-tabs :deep(.n-tabs-bar),
+.batch-task-tabs :deep(.n-tabs-nav-scroll-wrapper::before),
+.batch-task-tabs :deep(.n-tabs-nav-scroll-wrapper::after) {
+  display: none;
+}
+
+/* The built-in sliding bar only tracks one row; underline each active tab locally. */
+.batch-task-tabs :deep(.n-tabs-tab) {
+  position: relative;
+}
+
+.batch-task-tabs :deep(.n-tabs-tab--active::after) {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 1px;
+  background-color: var(--n-bar-color);
+}
+
 .batch-daily-tasks {
   padding: 20px;
   height: calc(100vh - 64px);
