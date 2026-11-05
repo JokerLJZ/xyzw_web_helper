@@ -253,6 +253,7 @@ export function registerDefaultCommands(reg) {
     .register("club_attack", { useItem: false })
     .register("club_attackmonster", { useItem: false })
     .register("club_taskclaim")
+    .register("club_draw")
     .register("club_gettargetteam", { targetId: 0 })
     .register("club_getattackrecord")
     .register("club_getdefenserecord", { targetId: 0, targetIsMirror: false })
@@ -1409,6 +1410,7 @@ export class XyzwWebSocketClient {
       club_attackresp: "club_attack",
       club_attackmonsterresp: "club_attackmonster",
       club_taskclaimresp: "club_taskclaim",
+      club_drawresp: "club_draw",
       club_gettargetteamresp: "club_gettargetteam",
       club_getattackrecordresp: "club_getattackrecord",
       club_getdefenserecordresp: "club_getdefenserecord",

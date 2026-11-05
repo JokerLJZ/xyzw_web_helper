@@ -24,7 +24,6 @@ declare module 'vue' {
     ATag: typeof import('@arco-design/web-vue')['Tag']
     AUpload: typeof import('@arco-design/web-vue')['Upload']
     BackupSettingsPanel: typeof import('./src/components/Backup/BackupSettingsPanel.vue')['default']
-    BatchTaskCatalog: typeof import('./src/components/Common/BatchTaskCatalog.vue')['default']
     BottleHelperCard: typeof import('./src/components/cards/BottleHelperCard.vue')['default']
     BoxHelperCard: typeof import('./src/components/cards/BoxHelperCard.vue')['default']
     CampChallenge: typeof import('./src/components/Club/CampChallenge.vue')['default']

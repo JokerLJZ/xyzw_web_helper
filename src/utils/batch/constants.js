@@ -70,6 +70,7 @@ export const availableTasks = [
   { label: "自动蟠桃报名（周日）", value: "batchPeachSignup" },
   { label: "批量黄金天宫助威", value: "batchGoldenCheer" },
   { label: "自动营地挑战（周二至周四）", value: "batchCampChallenge" },
+  { label: "篝火奇遇全量抽奖", value: "batchCampfireLottery" },
   { label: "一键竞技场战斗3次", value: "batcharenafight" },
   { label: "一键钓鱼补齐", value: "batchTopUpFish" },
   { label: "一键金鱼杆补齐", value: "batchTopUpGoldFish" },

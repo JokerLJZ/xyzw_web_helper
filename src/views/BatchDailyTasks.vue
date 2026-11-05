@@ -331,8 +331,6 @@
 
         <!-- Batch Functions -->
         <n-card title="批量功能列表" style="margin-top: 16px">
-          <BatchTaskCatalog :tasks="availableTasks" :disabled="isRunning" :can-run="selectedTokens.length > 0" @run="runCatalogTasks" @settings="showBatchSettingsModal = true" />
-          <n-collapse style="margin-top: 16px"><n-collapse-item title="专项操作与配置（商品选择、助威、查询等）" name="special">
           <n-tabs type="line" animated>
             <n-tab-pane name="daily" tab="日常">
               <n-space>
@@ -399,6 +397,7 @@
                   </template>
                   周二至周四：低战力优先，当日累计3胜即停；普通据点连续3次未获胜后，改为挑战一次宠物。使用当前阵容，不使用挑战道具。
                 </n-tooltip>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchCampfireLottery" title="按现有种火石逐次抽奖至不足一次，不购买道具、不替换奖池">篝火奇遇全量抽奖</n-button>
                 <n-button
                   size="small"
                   @click="batcharenafight"
@@ -938,7 +937,6 @@
               </n-space>
             </n-tab-pane>
           </n-tabs>
-          </n-collapse-item></n-collapse>
         </n-card>
       </div>
 
@@ -3818,7 +3816,7 @@ import WeeklyRewardSettings from "@/components/Common/WeeklyRewardSettings.vue";
 import { normalizeWeeklyRewardChoice } from "@/utils/weeklyReward.js";
 import JianghuBlackMarketSettings from "@/components/Common/JianghuBlackMarketSettings.vue";
 import { DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES, normalizeJianghuBlackMarketPurchases } from "@/utils/jianghuBlackMarketWeekly.js";
-import BatchTaskCatalog from '@/components/Common/BatchTaskCatalog.vue';
+import { runCampfireLottery } from '@/utils/campfireLottery.js';
 import { groupTaskCatalog } from '@/utils/batch/taskCatalog.js';
 import { CHEER_SHOP_GOODS } from '@/utils/cheerShop.js';
 // Import required dependencies
@@ -5029,28 +5027,10 @@ watch(
   { deep: true },
 );
 
-// Immediate and scheduled lists share the same groups.
+// 定时任务沿用现有分组；即时操作恢复经典标签页。
 const taskGroupDefinitions = computed(() => groupTaskCatalog(availableTasks).map(group => ({ ...group, tasks: group.tasks.map(task => task.value) })));
 const groupedAvailableTasks = computed(() => Object.fromEntries(groupTaskCatalog(availableTasks).map(group => [group.name, group.tasks])));
 const showCheerShopModal = ref(false);
-const runCatalogTasks = async (taskNames) => {
-  if (isRunning.value || scheduledTaskExecutionActive || !selectedTokens.value.length) return;
-  if (taskNames.includes('batchCheerShopPurchase') && !Object.values(batchSettings.cheerShopPurchases || {}).some(v => Number(v) > 0)) {
-    showCheerShopModal.value = true;
-    message.info('请先设置助威商店采购目标，再执行任务');
-    return;
-  }
-  if (taskNames.includes('batchGoldenCheer') && (!batchSettings.goldenCheerLegionId || !batchSettings.goldenCheerPhase)) {
-    showGoldenCheerModal.value = true;
-    return;
-  }
-  shouldStop.value = false;
-  const orderedTasks = groupTaskCatalog(availableTasks).flatMap(group => group.tasks).filter(task => taskNames.includes(task.value)).map(task => task.value);
-  await executeScheduledTask({ id: '__manual_batch__', name: '列表所选任务', manual: true,
-    selectedTokens: [...selectedTokens.value], selectedTasks: orderedTasks,
-    taskConfig: createScheduledTaskConfig(), legacyExcludedTokens: [],
-  });
-};
 
 const legacyExcludableTokens = computed(() => {
   const selectedTokenIds = new Set(taskForm.selectedTokens);
@@ -6601,7 +6581,7 @@ const executeScheduledTask = async (task) => {
       if (shouldStop.value) break;
       await runScheduledAccount(tokenId);
     }
-    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.includes("batchCheerShopPurchase") ? 0 : 2) && !shouldStop.value; retryRound++) {
+    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.some(name => ["batchCheerShopPurchase", "batchCampfireLottery"].includes(name)) ? 0 : 2) && !shouldStop.value; retryRound++) {
     const retryIds = getBatchRetryTokenIds(availableTokens, tokenStatus.value, shouldStop.value);
     for (const tokenId of retryIds) {
       if (shouldStop.value) break;
@@ -8208,6 +8188,7 @@ const confirmUpgradeLordTo6000 = () => {
 };
 
 const { batchRechargeStandard, queryRechargeExchangeItems, batchRechargeExchange, rechargeExchangeOpen, rechargeExchangePreviews } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession });
+const { batchRechargeStandard: batchCampfireLottery } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession }, { label: "篝火奇遇全量抽奖", runStandard: runCampfireLottery });
 const { batchRechargeStandard: batchPhotoWhiteJade } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession }, { label: "闲来入镜兑换白玉", runStandard: runPhotoWhiteJade });
 const { batchRechargeStandard: batchPhotoStandard, queryRechargeExchangeItems: queryPhotoExchangeItems, batchRechargeExchange: batchPhotoExchange, rechargeExchangeOpen: photoExchangeOpen, rechargeExchangePreviews: photoExchangePreviews } = createTasksRecharge({ ...createTaskDeps(), isScheduled: () => scheduledTaskExecutionActive, isScheduledSession: isScheduledTokenSession }, { label: "闲来入镜", loadCatalog: loadPhotoExchangeCatalog, exchangeItems: exchangePhotoItems, runStandard: runPhotoStandard });
 const tasksDungeon = createTasksDungeon(createTaskDeps());
@@ -8330,6 +8311,7 @@ const getScheduledTaskFunction = (name) => {
     batchPeachSignup,
     batchGoldenCheer,
     batchCampChallenge,
+    batchCampfireLottery,
     batcharenafight,
     batchTopUpFish,
     batchTopUpGoldFish,

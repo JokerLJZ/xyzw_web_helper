@@ -24,3 +24,13 @@ test("营地领奖注册发送并按专用响应匹配，服务器时间按连�
   b._handlePromiseResponse({ _raw: { time: 1791960001000 } });
   assert.ok(b.getServerTime() >= 1791960001000);
 });
+
+test("篝火抽奖注册空参数发送，匹配Club_DrawResp而不串入其他营地响应", async () => {
+  const a = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+  a.connected = true; a.socket = { readyState: 1, close() {} };
+  const pending = a.sendWithPromise("club_draw", {}, 1000);
+  assert.equal(a.sendQueue[0].cmd, "club_draw");
+  assert.deepEqual(a.sendQueue[0].params, {});
+  a._handlePromiseResponse({ cmd: "club_drawresp", code: 0, body: { siege: { boxId: 2 }, reward: [] } });
+  assert.deepEqual((await pending).siege, { boxId: 2 });
+});
