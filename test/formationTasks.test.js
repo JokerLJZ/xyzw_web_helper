@@ -98,3 +98,35 @@ for (const early of [true, false]) {
     assert.ok(f.logs.some(log => log.message.includes("状态查询失败")));
   }));
 }
+
+test("皮鞋任务换高星阵容后停止仍恢复默认站位，且不触发武将培养", async () => immediateTimers(async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { bon } = await import("../src/utils/bonProtocol.js");
+  const config = JSON.parse(await readFile(new URL("./fixtures/shoeToyConfig.json", import.meta.url), "utf8"));
+  const f = fixture(false);
+  f.role.statistics = { "lord:weapon:claim:open:reward": 1 };
+  f.role.lordWeaponId = 2;
+  f.role.lordWeapon = { 2: { level: 150, passiveSkill: {} } };
+  Object.values(f.role.heroes).forEach(hero => { hero.star = [107, 110].includes(hero.heroId) ? 10 : 30; });
+  const originalQuery = f.deps.tokenStore.sendGetRoleInfo;
+  const syncTeam = () => {
+    f.role.battleTeam = Object.fromEntries(Object.values(f.role.heroes).filter(hero => hero.battleTeamSlot >= 0).map(hero => [hero.battleTeamSlot, { heroId: hero.heroId }]));
+  };
+  f.deps.tokenStore.sendGetRoleInfo = async (...args) => { syncTeam(); return originalQuery(...args); };
+  const originalSend = f.deps.tokenStore.sendMessageWithPromise;
+  f.deps.tokenStore.sendMessageWithPromise = async (id, cmd, params) => {
+    if (cmd === "system_getdatabundlever") return { dataBundleVer: "shoe-batch-test" };
+    if (cmd === "lordweapon_get") return { role: {} };
+    const response = await originalSend(id, cmd, params);
+    if (cmd === "hero_exchange") f.deps.shouldStop.value = true;
+    return response;
+  };
+  const fetcher = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => bon.encode(config).buffer });
+  try { await createTasksItem(f.deps).batchUpgradeShoeToy(); }
+  finally { globalThis.fetch = fetcher; }
+  assert.equal(f.deps.tokenStatus.value.a, "stopped");
+  for (const [slot, id] of [107, 110, 104, 106, 223].entries()) assert.equal(f.role.heroes[id].battleTeamSlot, slot);
+  assert.ok(f.logs.some(log => log.message.includes("推图默认阵容已恢复并校验")));
+  assert.ok(f.commands.every(row => ["hero_exchange", "hero_gointobattle", "hero_gobackbattle"].includes(row.cmd)));
+}));

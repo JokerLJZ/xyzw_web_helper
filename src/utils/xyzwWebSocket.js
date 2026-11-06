@@ -366,6 +366,7 @@ export function registerDefaultCommands(reg) {
     .register("artifact_unload")
     .register("lordweapon_changedefaultweapon")
     .register("lordweapon_get")
+    .register("lordweapon_claimopenreward")
     .register("lordweapon_unlock", { weaponId: 2 })
     .register("lordweapon_upgradeactiveskilllevel", { weaponId: 2 })
     .register("lordweapon_upgradepassiveskilllevel", {
@@ -1504,6 +1505,7 @@ export class XyzwWebSocketClient {
         "lordweapon_upgradepassiveskilllevel",
       ],
       syncrewardresp: [
+        "lordweapon_claimopenreward",
         "linkcard_claimpackprocessreward",
         "linkcard_claimseriesreward",
         "activity_buygoods",

@@ -139,6 +139,10 @@ test('藏品与卡牌领奖注册命令并匹配客户端声明的共享响应',
     ['collection_claimtotal', 'collection_claimresp'],
     ['linkcard_claimpackprocessreward', 'syncrewardresp'],
     ['linkcard_claimseriesreward', 'syncrewardresp'],
+    ['lordweapon_claimopenreward', 'syncrewardresp'],
+    ['lordweapon_get', 'syncresp'],
+    ['lordweapon_changedefaultweapon', 'syncresp'],
+    ['lordweapon_upgradepassiveskilllevel', 'syncresp'],
   ];
   for (const [cmd, response] of mappings) {
     const f = fixture();

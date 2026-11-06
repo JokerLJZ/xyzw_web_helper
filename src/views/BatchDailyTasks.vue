@@ -827,7 +827,7 @@
                   size="small"
                   @click="batchUpgradeShoeToy"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="主公达到4001级后，领取免费扳手并升级皮鞋玩具和已开放被动技能"
+                  title="主公达到4001级后领取玩具礼包，临时上阵高星武将开放皮鞋被动并升级，结束后切回推图默认阵容"
                 >
                   自动升级皮鞋玩具
                 </n-button>

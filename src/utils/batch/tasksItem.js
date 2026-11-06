@@ -43,14 +43,7 @@ import {
   isHeroAwakeSlot,
   planHeroAwakenings,
 } from "@/utils/heroAwakeningPlanner";
-import {
-  IRON_ITEM_ID,
-  SHOE_TOY_ID,
-  SHOE_TOY_UNLOCK_COST,
-  TOY_WRENCH_ITEM_ID,
-  planToyActiveUpgrades,
-  planToyPassiveUpgrades,
-} from "@/utils/toyUpgradePlanner";
+import { loadShoeToyConfig, runShoeToyUpgrade } from "../shoeToyRunner.js";
 import {
   GENIE_FACTION_GROUP,
   GENIE_FACTION_LINEUPS,
@@ -507,174 +500,54 @@ export function createTasksItem(deps) {
     message.success("领取周活动福利任务结束");
   };
 
-  /** 达到4001级后，自动领取免费扳手并升级皮鞋玩具及已开放被动技能。 */
+  /** 领取玩具界面礼包，按上阵星级开放被动，升级后恢复推图默认阵容。 */
   const batchUpgradeShoeToy = async () => {
     if (selectedTokens.value.length === 0) return;
-
-    const getRole = (result) =>
-      result?.role ||
-      result?.data?.role ||
-      result?.body?.role ||
-      result?.data?.body?.role ||
-      {};
-    const getShoeToy = (role) =>
-      role?.lordWeapon?.[SHOE_TOY_ID] ??
-      role?.lordWeapon?.[String(SHOE_TOY_ID)] ??
-      null;
-    const operationDelay = Math.max(800, Number(delayConfig.command) || 0);
-    const waitForNextOperation = () =>
-      new Promise((resolve) => setTimeout(resolve, operationDelay));
-
     isRunning.value = true;
     shouldStop.value = false;
-    selectedTokens.value.forEach((id) => {
-      tokenStatus.value[id] = "waiting";
-    });
-
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
-      if (shouldStop.value) return;
-      const token = tokens.value.find((item) => item.id === tokenId);
-      const tokenName = token?.name || tokenId;
-      let activeUpgraded = 0;
-      let passiveUpgraded = 0;
-
+    selectedTokens.value.forEach((id) => { tokenStatus.value[id] = "waiting"; });
+    await Promise.all(selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) { tokenStatus.value[tokenId] = "stopped"; return; }
+      const tokenName = tokens.value.find((item) => item.id === tokenId)?.name || tokenId;
+      const log = (text, type = "info") => addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} ${text}`, type });
       try {
         tokenStatus.value[tokenId] = "running";
         await ensureConnection(tokenId);
-
-        let roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        let role = getRole(roleInfo);
-        const lordLevel = Number(role?.lord?.level) || 0;
-        if (lordLevel < 4001) {
-          tokenStatus.value[tokenId] = "completed";
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 当前主公${lordLevel}级，未达到皮鞋玩具开放所需的4001级，跳过`,
-            type: "warning",
-          });
-          return;
-        }
-
-        // 首次进入玩具模块会发放500扳手；随后统一查询最新库存和玩具状态。
-        await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "lordweapon_get",
-          {},
-          HELPER_COMMAND_TIMEOUT_MS,
-        );
-        await waitForNextOperation();
-        roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        role = getRole(roleInfo);
-        let shoeToy = getShoeToy(role);
-        let wrenchQuantity = getItemQuantity(roleInfo, TOY_WRENCH_ITEM_ID);
-
-        if (!shoeToy) {
-          if (wrenchQuantity < SHOE_TOY_UNLOCK_COST) {
-            tokenStatus.value[tokenId] = "completed";
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 尚未激活皮鞋玩具，当前扳手${wrenchQuantity}/${SHOE_TOY_UNLOCK_COST}，跳过升级`,
-              type: "warning",
-            });
-            return;
-          }
-          await waitForNextOperation();
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "lordweapon_unlock",
-            { weaponId: SHOE_TOY_ID },
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 已使用${SHOE_TOY_UNLOCK_COST}个扳手激活皮鞋玩具`,
-            type: "success",
-          });
-          await waitForNextOperation();
-          roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-          role = getRole(roleInfo);
-          shoeToy = getShoeToy(role);
-          wrenchQuantity = getItemQuantity(roleInfo, TOY_WRENCH_ITEM_ID);
-          if (!shoeToy) throw new Error("激活后未查询到皮鞋玩具信息");
-        }
-
-        const activePlan = planToyActiveUpgrades(
-          shoeToy.level,
-          wrenchQuantity,
-        );
-        if (activePlan.upgradeCount > 0) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${tokenName} 皮鞋玩具${shoeToy.level || 1}级，当前扳手${wrenchQuantity}个，计划升级${activePlan.upgradeCount}次至${activePlan.finalLevel}级`,
-            type: "info",
-          });
-        }
-        for (let index = 0; index < activePlan.upgradeCount; index += 1) {
-          if (shouldStop.value) break;
-          await waitForNextOperation();
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "lordweapon_upgradeactiveskilllevel",
-            { weaponId: SHOE_TOY_ID },
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
-          activeUpgraded += 1;
-        }
-
-        const passivePlan = planToyPassiveUpgrades(
-          shoeToy.passiveSkill,
-          getItemQuantity(roleInfo, IRON_ITEM_ID),
-        );
-        for (const plan of passivePlan.plans) {
-          if (plan.upgradeCount > 0) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${tokenName} 皮鞋被动技能${plan.skillId}计划升级${plan.upgradeCount}次至${plan.finalLevel}级，预计消耗精铁${plan.spent}个`,
-              type: "info",
-            });
-          }
-          for (let index = 0; index < plan.upgradeCount; index += 1) {
-            if (shouldStop.value) break;
-            await waitForNextOperation();
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "lordweapon_upgradepassiveskilllevel",
-              { weaponId: SHOE_TOY_ID, skillId: plan.skillId },
-              HELPER_COMMAND_TIMEOUT_MS,
-            );
-            passiveUpgraded += 1;
-          }
-          if (shouldStop.value) break;
-        }
-
-        await waitForNextOperation();
-        const finalRoleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        const finalToy = getShoeToy(getRole(finalRoleInfo));
-        const openedPassiveCount = Object.keys(finalToy?.passiveSkill || {}).length;
+        if (shouldStop.value) { tokenStatus.value[tokenId] = "stopped"; return; }
+        const send = (command, params) => gateFormationRequest(tokenId, () => {
+          if (shouldStop.value) throw Object.assign(new Error("任务已停止"), { stopped: true });
+          return tokenStore.sendMessageWithPromise(tokenId, command, params, HELPER_COMMAND_TIMEOUT_MS);
+        });
+        const config = await loadShoeToyConfig(send);
+        const result = await runShoeToyUpgrade({
+          send,
+          queryRole: () => queryFormationRole(tokenId, tokenName),
+          config,
+          shouldStop: () => shouldStop.value,
+          log,
+          applyFormation: (targetHeroes) => applyTargetFormation({
+            tokenId, tokenName, targetHeroes, formationName: "皮鞋被动激活高星阵容",
+            checkStop: () => {
+              if (shouldStop.value) throw Object.assign(new Error("任务已停止"), { stopped: true });
+            },
+          }),
+          restoreFormation: () => adjustMainLevelFormation(tokenId, tokenName),
+        });
         tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 皮鞋玩具升级完成：主动升级${activeUpgraded}次，当前${finalToy?.level || activePlan.finalLevel}级；${openedPassiveCount}个被动已开放，共升级${passiveUpgraded}次`,
-          type: "success",
-        });
+        if (result?.skipped) log("皮鞋玩具任务已跳过", "warning");
+        else log(`皮鞋玩具升级完成：主动升级${result.activeUpgraded}次，当前${result.finalLevel}级；${result.openedPassiveCount}个被动已开放，共升级${result.passiveUpgraded}次`, "success");
       } catch (error) {
-        tokenStatus.value[tokenId] = "failed";
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 自动升级皮鞋玩具失败：${getErrorMessage(error)}`,
-          type: "error",
-        });
+        tokenStatus.value[tokenId] = error.stopped ? "stopped" : "failed";
+        log(`皮鞋玩具任务${error.stopped ? "已停止" : "失败"}：${getErrorMessage(error)}`, error.stopped ? "warning" : "error");
       } finally {
         tokenStore.closeWebSocketConnection(tokenId);
         releaseConnectionSlot();
       }
-    });
-
-    await Promise.all(taskPromises);
+    }));
     currentRunningTokenId.value = null;
     isRunning.value = false;
     shouldStop.value = false;
-    message.success("自动升级皮鞋玩具任务结束");
+    message.info("皮鞋玩具任务结束，请查看各账号结果");
   };
 
   /** 查询角色成就进度，并领取所有当前已经达成的奖励。 */
@@ -3236,7 +3109,9 @@ export function createTasksItem(deps) {
     formationName,
     recycleSlots = new Set(),
     initialRoleInfo = null,
+    checkStop = () => {},
   }) => {
+    checkStop();
     const currentRoleInfo = initialRoleInfo || await runFormationCommand(
       tokenId,
       tokenName,
@@ -3247,12 +3122,14 @@ export function createTasksItem(deps) {
     const currentHeroes = getRoleTeamHeroes(currentRoleInfo);
 
     for (const target of targetHeroes) {
+      checkStop();
       const targetCurrent = currentHeroes.find(
         (hero) => hero.heroId === target.heroId,
       );
       if (targetCurrent?.slot === target.slot) continue;
 
       if (targetCurrent) {
+        checkStop();
         await runFormationCommand(
           tokenId,
           tokenName,
@@ -3268,6 +3145,7 @@ export function createTasksItem(deps) {
         (hero) => hero.slot === target.slot,
       );
       if (currentAtTargetSlot) {
+        checkStop();
         await runFormationCommand(
           tokenId,
           tokenName,
@@ -3280,6 +3158,7 @@ export function createTasksItem(deps) {
         );
         currentAtTargetSlot.heroId = target.heroId;
       } else {
+        checkStop();
         await runFormationCommand(
           tokenId,
           tokenName,
@@ -3295,6 +3174,7 @@ export function createTasksItem(deps) {
     const targetHeroIds = new Set(targetHeroes.map((hero) => hero.heroId));
     for (const hero of [...currentHeroes]) {
       if (targetHeroIds.has(hero.heroId)) continue;
+      checkStop();
       await runFormationCommand(
         tokenId,
         tokenName,
@@ -3307,6 +3187,7 @@ export function createTasksItem(deps) {
         recycleSlots.has(hero.slot) &&
         (hero.level > 1 || hero.order > 0)
       ) {
+        checkStop();
         await runFormationCommand(
           tokenId,
           tokenName,
