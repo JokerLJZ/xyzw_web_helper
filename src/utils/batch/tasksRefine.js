@@ -1,4 +1,4 @@
-import { DEFAULT_ALT_REFINE_LIMIT, hasAltRefineTarget, runAltAccountRefine } from "../altAccountRefine.js";
+import { DEFAULT_ALT_REFINE_LIMIT, hasAltRefineTarget, hasAltRefineDamageReduction, runAltAccountRefine } from "../altAccountRefine.js";
 import { extractRolePatch } from "../roleSnapshot.js";
 import { HERO_DICT } from "../HeroList.js";
 
@@ -52,7 +52,7 @@ export function createTasksRefine(deps) {
             if (hasAltRefineTarget(equip)) log(`${partNames[part] || part}已有目标属性，跳过`);
           }
           const result = await runAltAccountRefine({
-            heroId, equipment, limit, shouldStop: () => shouldStop.value,
+            heroId, equipment, jadeQuantity: role.items?.[1022]?.quantity, limit, shouldStop: () => shouldStop.value,
             send: async (cmd, params) => {
               if (tokenStore.getWebSocketStatus(id) !== "connected") throw new Error("连接已断开");
               try {
@@ -64,10 +64,10 @@ export function createTasksRefine(deps) {
             },
             onUpdate: update => {
               count = update.count;
-              if (hasAltRefineTarget(update.equipment)) {
+              if ((update.damageReductionStage ? hasAltRefineDamageReduction : hasAltRefineTarget)(update.equipment)) {
                 log(`${partNames[update.part]}已命中目标属性，本次累计${count}次`, "success");
               } else if (count % 100 === 0) {
-                log(`正在洗练${partNames[update.part]}，本次累计${count}/${limit}次`);
+                log(`正在${update.damageReductionStage ? "补减伤，洗练" : "洗练"}${partNames[update.part]}，本次累计${count}/${limit}次`);
               }
             },
             wait: () => new Promise(resolve => setTimeout(resolve,
@@ -76,10 +76,14 @@ export function createTasksRefine(deps) {
           if (result.reason === "stopped") {
             tokenStatus.value[id] = "stopped";
             log(`小号洗练已停止，本次${result.count}次`, "warning");
+          } else if (result.reason === "jade") {
+            failures++;
+            tokenStatus.value[id] = "failed";
+            log(`白玉已耗尽，本次${result.count}次，未完成洗练目标`, "warning");
           } else if (result.reason === "limit") {
             failures++;
             tokenStatus.value[id] = "failed";
-            log(`已达本次白玉洗练上限${limit}次，达标${result.completedParts.length}/4件，剩余装备未继续洗练`, "warning");
+            log(`已达本次白玉洗练上限${limit}次，达标${result.completedParts.length}/4件，未完成的装备或武器补减伤未继续洗练`, "warning");
           } else {
             tokenStatus.value[id] = "completed";
             log(`四件装备均已达标，本次累计${result.count}次`, "success");

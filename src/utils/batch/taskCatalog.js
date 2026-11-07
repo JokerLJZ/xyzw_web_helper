@@ -151,6 +151,7 @@ export const TASK_GROUPS = [
       "batchBuyPearlFish",
       "batchReplaceBestFishArtifact",
       "batchUpgradeShoeToy",
+      "batchAltGenieSweep",
       "batchChallengeGroupGenie",
       "batchChallengeThreeKingdomsGenie",
       "batchMaxWarriorLegionTech",

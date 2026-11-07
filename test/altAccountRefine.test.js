@@ -113,3 +113,50 @@ test("无效上限或装备等级不足时不发送请求",async()=>{
   assert.equal(calls[1].quenchId,2);assert.deepEqual(calls[1].quenches,next);
   assert.notEqual(calls[0].quenches,first);
 });
+
+const allAttack = () => Object.fromEntries([1,2,3,4].map(p => [p, {...equipment()[p], ...target(1,6)}]));
+test("四件目标但无减伤时推掉武器，红攻击不停止，直到橙减伤", async () => {
+  const equip=allAttack(), calls=[]; let rolls=0;
+  const r=await runAltAccountRefine({heroId:107,equipment:equip,send:async(cmd,p)=>{
+    calls.push({cmd,p});
+    return response(1,cmd==='equipment_confirm'?{seed:123}:++rolls===1?target(14,6):target());
+  }});
+  assert.equal(r.reason,'completed'); assert.equal(r.count,2);
+  assert.deepEqual(calls.map(c=>c.p.part),[1,1,1,1]);
+  assert.equal(calls[0].p.quenches[1].attrId,1);
+  assert.equal(calls[2].p.quenches[1].attrId,14);
+  for(const p of [2,3,4]) assert.equal(equip[p].quenches[1].attrId,1);
+});
+test("任意其他部位已有橙红减伤不推武器，低品质减伤仍补洗", async()=>{
+  for(const color of [4,5,6]) {
+    const equip=allAttack(); equip[2].quenches[2]={attrId:9,colorId:color}; let calls=0;
+    const r=await runAltAccountRefine({heroId:107,equipment:equip,send:async(cmd,p)=>{calls++;return response(p.part,cmd==='equipment_confirm'?{seed:1}:target(9,6));}});
+    assert.equal(r.reason,'completed');assert.equal(calls,color===4?2:0);
+  }
+});
+test("补洗共享次数上限，白玉耗尽和用户停止后不继续请求",async()=>{
+  for(const kind of ['limit','jade','stop']) {
+    const equip=allAttack(); let stop=false, rolls=0;
+    const r=await runAltAccountRefine({heroId:107,equipment:equip,limit:1,shouldStop:()=>stop,send:async(cmd,p)=>{
+      if(cmd==='equipment_confirm')return response(p.part,{seed:1});
+      rolls++;stop=kind==='stop';return response(p.part,target(14,6),kind==='jade'?{1022:{quantity:0}}:undefined);
+    }});
+    assert.equal(r.reason,kind==='stop'?'stopped':'limit');assert.equal(rolls,1);
+  }
+  let rolls=0;
+  const r=await runAltAccountRefine({heroId:107,equipment:allAttack(),send:async(cmd,p)=>{
+    if(cmd==='equipment_confirm')return response(p.part,{seed:1});
+    rolls++;return response(p.part,target(1,6),{1022:{quantity:0}});
+  }});
+  assert.equal(r.reason,'jade');assert.equal(rolls,1);
+});
+test("四件刚达标且无减伤时仍进入武器阶段；初始白玉为0不确认不消耗",async()=>{
+  const equip=equipment();let rolls=0;
+  const r=await runAltAccountRefine({heroId:107,equipment:equip,send:async(cmd,p)=>{
+    if(cmd==='equipment_confirm')return response(p.part,{seed:1});
+    rolls++;return response(p.part,rolls<=4?target(1,6):target());
+  }});
+  assert.equal(r.count,5);assert.equal(r.reason,'completed');
+  const empty=await runAltAccountRefine({heroId:107,equipment:allAttack(),jadeQuantity:0,send:async()=>assert.fail('不能发送')});
+  assert.equal(empty.reason,'jade');
+});

@@ -103,6 +103,7 @@ export const availableTasks = [
   { label: "批量领取特权功法", value: "batchLegacyClaimChargeReward" },
   { label: "批量赠送功法残卷", value: "batchLegacyGiftSendEnhanced" },
   { label: "一键领取蟠桃园任务", value: "batchClaimPeachTasks" },
+  { label: "灯神到达11层扫荡魔毯", value: "batchAltGenieSweep" },
   { label: "一键扫荡灯神", value: "batchGenieSweep" },
   { label: "自动挑战群雄灯神", value: "batchChallengeGroupGenie" },
   { label: "自动挑战魏蜀吴灯神", value: "batchChallengeThreeKingdomsGenie" },

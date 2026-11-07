@@ -831,6 +831,11 @@
                 >
                   自动升级皮鞋玩具
                 </n-button>
+                <n-button size="small" @click="batchAltGenieSweep"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                  title="魏蜀吴群可扫荡层数达到11层，且单次奖励为3个万能红将碎片后，用完现有魔毯；未达标保留魔毯">
+                  灯神到达11层扫荡魔毯
+                </n-button>
                 <n-button
                   size="small"
                   @click="batchChallengeGroupGenie"
@@ -8159,6 +8164,7 @@ const {
   batchChallengeThreeKingdomsGenie,
   batchClaimPeachTasks,
   batchGenieSweep,
+  batchAltGenieSweep,
   batchUpgradeCrystal,
   batchUpgradeEquipment,
   batchReplaceBestFishArtifact,
@@ -8348,6 +8354,7 @@ const getScheduledTaskFunction = (name) => {
     batchLegacyGiftSendEnhanced,
     batchClaimPeachTasks,
     batchGenieSweep,
+    batchAltGenieSweep,
     batchChallengeGroupGenie,
     batchChallengeThreeKingdomsGenie,
     batchPushMainLevelInfo,

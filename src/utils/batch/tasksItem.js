@@ -1,3 +1,4 @@
+import { loadGenieSweepConfig, readGenieRole, sweepAltAccountGenie } from "../altAccountGenieSweep.js";
 import { claimSkinBookRewards } from "../skinBookRewards.js";
 import { classifyWarehouseActivityItem } from "../warehouseActivityItems.js";
 import { loadRechargeConfig } from "../rechargeActivity.js";
@@ -4387,7 +4388,9 @@ export function createTasksItem(deps) {
   /**
    * 一键灯神扫荡
    */
-  const batchGenieSweep = async () => {
+  const batchAltGenieSweep = () => batchGenieSweep(true);
+
+  const batchGenieSweep = async (requireLayer11 = false) => {
     if (selectedTokens.value.length === 0) return;
 
     isRunning.value = true;
@@ -4411,6 +4414,19 @@ export function createTasksItem(deps) {
         });
 
         await ensureConnection(tokenId);
+
+        if (requireLayer11 === true) {
+          await sweepAltAccountGenie({
+            loadConfig: () => loadGenieSweepConfig((cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 8000)),
+            queryRole: async () => readGenieRole(await tokenStore.sendMessageWithPromise(tokenId, "role_getroleinfo", {}, 5000)),
+            sendSweep: (params) => tokenStore.sendMessageWithPromise(tokenId, "genie_sweep", params, 5000),
+            shouldStop: () => shouldStop.value,
+            sleep: () => wait(delayConfig.action),
+            log: (text) => addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} ${text}`, type: "info" }),
+          });
+          tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "completed";
+          return;
+        }
 
         // 获取最新角色信息
         const roleInfoRes = await tokenStore.sendMessageWithPromise(
@@ -6949,5 +6965,6 @@ export function createTasksItem(deps) {
     batchChallengeGroupGenie,
     batchChallengeThreeKingdomsGenie,
     batchGenieSweep,
+    batchAltGenieSweep,
   };
 }

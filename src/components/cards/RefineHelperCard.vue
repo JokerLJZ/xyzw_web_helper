@@ -53,7 +53,7 @@
 
         <div v-if="selectedHeroId" class="auto-section">
           <h4>小号自动洗练</h4>
-          <p>所选武将按武器 → 铠甲 → 头冠 → 坐骑顺序洗练，每件装备出现橙色减伤、红色攻击、红色减伤或红色技能伤害中的任一属性即跳到下一件，已有目标属性直接跳过。</p>
+          <p>所选武将按武器 → 铠甲 → 头冠 → 坐骑顺序洗练，每件装备出现橙色减伤、红色攻击、红色减伤或红色技能伤害中的任一属性即跳到下一件，已有目标属性直接跳过。四件均有目标属性但没有橙色或红色减伤时，继续重洗武器直到出现减伤或白玉耗尽（仍受本次次数上限限制）。</p>
           <div class="auto-form">
             <span>单次白玉使用次数上限</span>
             <n-input-number v-model:value="altRefineLimit" :min="1" :precision="0"
@@ -1074,7 +1074,7 @@ const startAltRefine = async () => {
     jadeCount.value = role.items?.["1022"]?.quantity ?? jadeCount.value;
     colorJadeCount.value = role.items?.["1023"]?.quantity ?? colorJadeCount.value;
     const result = await runAltAccountRefine({
-      heroId, equipment, limit, shouldStop,
+      heroId, equipment, jadeQuantity: role.items?.["1022"]?.quantity, limit, shouldStop,
       send: async (cmd, params) => {
         if (tokenStore.getWebSocketStatus(tokenId) !== "connected") throw new Error("连接已断开");
         altRefineStatus.value = `正在洗练${partMap[params.part]}`;
@@ -1095,7 +1095,7 @@ const startAltRefine = async () => {
       wait: () => new Promise(resolve => setTimeout(resolve, Math.max(350, delay.value || 350))),
     });
     altRefineStatus.value = result.reason === "completed" ? "四件装备均已达标" :
-      result.reason === "limit" ? "已达本次次数上限" : "已停止";
+      result.reason === "limit" ? "已达本次次数上限" : result.reason === "jade" ? "白玉已耗尽" : "已停止";
     if (!disposed) message.info(altRefineStatus.value);
   } catch (error) {
     altRefineStatus.value = `已停止：${error.message}`;

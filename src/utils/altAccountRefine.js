@@ -1,5 +1,4 @@
-// API 依据：magic/api采集/养号/洗练命令.txt、洗练响应.txt，
-// 洗练/equipment_confirm橙.txt、equipment_quench.txt、锁定.txt。
+// 当前客户端依据及响应限制见 docs/小号洗练补减伤.md。
 export const DEFAULT_ALT_REFINE_LIMIT = 1000;
 export const REFINE_PARTS = [1, 2, 3, 4];
 
@@ -11,12 +10,18 @@ export function hasAltRefineTarget(equipment) {
   );
 }
 
+export function hasAltRefineDamageReduction(equipment) {
+  return Object.values(equipment?.quenches ?? {}).some(
+    ({ colorId, attrId }) => attrId === 9 && [5, 6].includes(colorId),
+  );
+}
+
 function bodyOf(result) {
   return result?._raw?.body ?? result?.body ?? result;
 }
 
 export async function runAltAccountRefine({
-  heroId, equipment, limit = DEFAULT_ALT_REFINE_LIMIT, send,
+  heroId, equipment, jadeQuantity, limit = DEFAULT_ALT_REFINE_LIMIT, send,
   shouldStop = () => false, onUpdate = () => {},
   wait = () => Promise.resolve(),
 }) {
@@ -25,13 +30,18 @@ export async function runAltAccountRefine({
   }
   let count = 0;
   const completedParts = [];
-  const finish = (reason) => ({ reason, count, completedParts });
-  for (const part of REFINE_PARTS) {
+  const finish = (reason) => ({ reason, count, completedParts: completedParts.filter(p => hasAltRefineTarget(equipment[p])) });
+  // 最后一轮只重洗武器，开始后持续追减伤，不再接受攻击/技能伤害。
+  for (const [index, part] of [...REFINE_PARTS, 1].entries()) {
+    const damageReductionStage = index === REFINE_PARTS.length;
+    if (damageReductionStage && REFINE_PARTS.some(p => hasAltRefineDamageReduction(equipment[p]))) break;
+    const matches = damageReductionStage ? hasAltRefineDamageReduction : hasAltRefineTarget;
     if (shouldStop()) return finish("stopped");
     if (!equipment[part]) throw new Error(`未获取到装备${part}的数据，请刷新阵容`);
-    while (!hasAltRefineTarget(equipment[part])) {
+    while (!matches(equipment[part])) {
       if (shouldStop()) return finish("stopped");
       if (count >= limit) return finish("limit");
+      if (jadeQuantity === 0) return finish("jade");
       const current = equipment[part];
       if (current.level < 4000) throw new Error(`装备${part}等级不足4000级`);
       // 小号模式仅使用白玉；锁定孔位可能消耗彩玉，不自动解锁。
@@ -62,12 +72,13 @@ export async function runAltAccountRefine({
       if (!updated?.quenches) throw new Error("洗练响应缺少装备孔位数据，已停止以避免继续消耗白玉");
       // confirm 只返回 seed，quench 只返回本次装备；保留其他装备及字段。
       equipment[part] = { ...equipment[part], ...updated };
-      onUpdate({ part, count, equipment: equipment[part], items: result.role?.items });
+      if (result.role?.items?.[1022]?.quantity != null) jadeQuantity = result.role.items[1022].quantity;
+      onUpdate({ part, count, damageReductionStage, equipment: equipment[part], items: result.role?.items });
       if (shouldStop()) return finish("stopped");
-      if (!hasAltRefineTarget(equipment[part]) && count >= limit) return finish("limit");
+      if (!matches(equipment[part]) && count >= limit) return finish("limit");
       await wait();
     }
-    completedParts.push(part);
+    if (!completedParts.includes(part)) completedParts.push(part);
   }
   return finish("completed");
 }
