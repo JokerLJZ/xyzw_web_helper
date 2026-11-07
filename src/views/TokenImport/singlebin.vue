@@ -1,25 +1,48 @@
 <template>
-  <!-- 手动输入表单 -->
   <n-form :model="importForm" :label-placement="'top'" :size="'large'" :show-label="true">
-    <n-form-item :label="'游戏角色名称'" :show-label="true">
-      <n-input v-model:value="importForm.name" placeholder="例如：主号战士" clearable />
+    <n-alert type="info" :show-icon="false" class="batch-tip">
+      可一次选择多个单角色 BIN 文件，系统会按文件逐个解析并加入待导入列表。
+    </n-alert>
+
+    <n-form-item :label="'默认角色名称'" :show-label="true">
+      <n-input v-model:value="importForm.name" placeholder="文件名无法识别时使用，例如：主号战士" clearable />
     </n-form-item>
 
     <n-form-item :label="'bin文件'" :show-label="true">
-      <a-upload multiple accept="*.bin,*.dmp" @before-upload="uploadBin" draggable dropzone placeholder="粘贴Token字符串..."
+      <a-upload multiple accept=".bin,.dmp" @before-upload="uploadBin" draggable dropzone placeholder="选择或拖拽多个BIN文件"
         clearable>
         <!-- <div class="dropzone-content">
           请点击上传或将bind文件拖拽到此处
         </div> -->
       </a-upload>
     </n-form-item>
+
+    <n-form-item label="角色命名格式" :show-label="true">
+      <n-input v-model:value="importForm.nameTemplate" placeholder="{name}-{index}-{id}" />
+      <template #feedback>
+        支持变量: {name}角色名, {id}角色ID, {index}角色序号, {server}区服
+      </template>
+    </n-form-item>
+
+    <div v-if="roleList.length > 0" class="batch-summary">
+      <span>待导入 {{ roleList.length }} 个Token</span>
+      <n-button size="tiny" quaternary type="error" @click="clearRoles">清空列表</n-button>
+    </div>
+
     <a-list>
       <a-list-item v-for="(role, index) in roleList" :key="index">
-        <div>
-          <strong>角色名称:</strong> {{ role.name || "未命名角色" }}<br />
-          <strong>Token:</strong>
-          <span style="word-break: break-all">{{ role.token }}</span><br />
-          <strong>服务器:</strong> {{ role.server || "未指定" }}
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 12px">
+          <div>
+            <strong>角色名称:</strong> {{ role.name || "未命名角色" }}<br />
+            <strong>文件名:</strong> {{ role.fileName }}<br />
+            <strong>Token:</strong>
+            <span style="word-break: break-all">{{ role.token }}</span><br />
+            <strong>服务器:</strong> {{ role.server || "未指定" }}
+            <span v-if="role.roleIndex !== undefined"> / 序号: {{ role.roleIndex }}</span>
+          </div>
+          <n-button type="error" size="small" @click="removeRole(index)">
+            删除
+          </n-button>
         </div>
       </a-list-item>
     </a-list>
@@ -40,13 +63,13 @@
     </n-collapse>
 
     <div class="form-actions">
-      <n-button type="primary" size="large" block :loading="isImporting" @click="handleImport">
+      <n-button type="primary" size="large" block :loading="isImporting || isReadingBins" @click="handleImport">
         <template #icon>
           <n-icon>
             <CloudUpload />
           </n-icon>
         </template>
-        添加Token
+        批量添加Token
       </n-button>
 
       <n-button v-if="tokenStore.hasTokens" size="large" block @click="cancel">
@@ -62,6 +85,7 @@ import { useTokenStore } from "@/stores/tokenStore";
 import { CloudUpload } from "@vicons/ionicons5";
 
 import {
+  NAlert,
   NForm,
   NFormItem,
   NInput,
@@ -93,30 +117,40 @@ const importForm = reactive({
   server: "",
   wsUrl: "",
   importMethod: "",
+  nameTemplate: "{name}-{index}-{id}",
 });
 const roleList = ref<
   Array<{
     id: string;
     name: string;
+    roleId?: string;
+    roleIndex?: number;
+    fileName: string;
     token: string;
     server: string;
     wsUrl: string;
     importMethod: string;
   }>
 >([]);
+const isReadingBins = ref(false);
 
 const tQueue = new PQueue({ concurrency: 1, interval: 1000 });
 
 const initName = (fileName: string) => {
-  if (!fileName) return;
+  if (!fileName) {
+    return {
+      server: "",
+      roleIndex: undefined,
+      roleId: "",
+      roleName: importForm.name || "",
+    };
+  }
   fileName = fileName.trim();
   let binRes = fileName.match(/^bin-(.*?)服-([0-2])-([0-9]{6,12})-(.*)\.bin$/);
-  console.log(binRes);
   if (binRes) {
-    importForm.name = `${binRes[1]}_${binRes[2]}_${binRes[4]}`;
     return {
-      server: binRes[1],
-      roleIndex: binRes[2],
+      server: `${binRes[1]}服`,
+      roleIndex: Number(binRes[2]),
       roleId: binRes[3],
       roleName: binRes[4],
     };
@@ -129,50 +163,78 @@ const initName = (fileName: string) => {
   };
 };
 
+const readFileAsArrayBuffer = (file: File) => {
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target?.result as ArrayBuffer);
+    reader.onerror = () => reject(new Error("读取文件失败，请重试"));
+    reader.readAsArrayBuffer(file);
+  });
+};
+
+const formatRoleName = (roleMeta: any, fileName: string) => {
+  const rawName = roleMeta.roleName || importForm.name || fileName.replace(/\.(bin|dmp)$/i, "");
+  const template = importForm.nameTemplate || "{name}-{index}-{id}";
+  return template
+    .replace(/{name}/g, () => rawName)
+    .replace(/{index}/g, () => String(roleMeta.roleIndex ?? ""))
+    .replace(/{id}/g, () => String(roleMeta.roleId || ""))
+    .replace(/{server}/g, () => roleMeta.server || "");
+};
+
+const removeRole = (index: number) => {
+  roleList.value.splice(index, 1);
+};
+
+const clearRoles = () => {
+  roleList.value = [];
+};
+
 const uploadBin = (binFile: File) => {
   tQueue.add(async () => {
-    console.log("上传文件数据:", binFile);
-    const roleMeta = initName(binFile.name) as any;
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const userToken = e.target?.result as ArrayBuffer;
-      // console.log('转换Token:', userToken);
+    isReadingBins.value = true;
+    try {
+      const roleMeta = initName(binFile.name) as any;
+      const userToken = await readFileAsArrayBuffer(binFile);
       const tokenId = getTokenId(userToken);
+
+      if (roleList.value.some((role) => role.id === tokenId)) {
+        message.warning(`文件 ${binFile.name} 已在待导入列表中`);
+        return;
+      }
+
       const roleToken = await transformToken(userToken);
-      const roleName = roleMeta.roleName || binFile.name.split(".")?.[0] || "";
-      // 刷新indexDB数据库token数据
       const saved = await storeArrayBuffer(tokenId, userToken);
       if (!saved) {
-        message.error("保存BIN数据到IndexedDB失败");
-        return;
+        throw new Error("保存BIN数据到IndexedDB失败，请检查浏览器存储空间或权限");
       }
-      
-      // 上传列表中发现已存在的重复名称，提示消息
-      if (roleList.value.some((role) => role.id === tokenId)) {
-        message.error("上传列表中已存在同名角色! ");
-        return;
-      }
-      // 检查待上传的角色是否已在tokenStore中存在
+
+      const roleName = formatRoleName(roleMeta, binFile.name);
       const existingToken = tokenStore.gameTokens.find(
         (t) => t.id === tokenId,
       );
       if (existingToken) {
         message.warning(`角色"${roleName}"已存在，将更新该角色的Token`);
       }
-      message.success("Token读取成功，请检查角色名称等信息后提交");
+
       roleList.value.push({
         id: tokenId,
         token: roleToken,
         name: roleName,
-        server: roleMeta.server + "" + roleMeta.roleIndex || "",
+        roleId: roleMeta.roleId || "",
+        roleIndex: roleMeta.roleIndex,
+        fileName: binFile.name,
+        server: roleMeta.server || importForm.server || "",
         wsUrl: importForm.wsUrl || "",
         importMethod: "bin",
       });
-    };
-    reader.onerror = () => {
-      message.error("读取文件失败，请重试");
-    };
-    reader.readAsArrayBuffer(binFile);
+      message.success(`已加入待导入: ${roleName}`);
+    } catch (error: any) {
+      console.error("读取BIN文件失败:", error);
+      message.error(`${binFile.name} 读取失败: ${error.message || error}`);
+    } finally {
+      isReadingBins.value = tQueue.size > 0 || tQueue.pending > 1;
+    }
   });
   return false; // 阻止自动上传
 };
@@ -182,29 +244,48 @@ const handleImport = async () => {
     message.error("请先上传bin文件！");
     return;
   }
-  roleList.value.forEach((role) => {
-    // tokenStore.gameTokens中发现已存在的重复名称，则移出token后重新添加
+  isImporting.value = true;
+  try {
+    let addedCount = 0;
+    let updatedCount = 0;
+
+    roleList.value.forEach((role) => {
     const gameToken = tokenStore.gameTokens.find((t) => t.id === role.id);
     if (gameToken) {
-      console.log("移除同名token:", gameToken);
-      // tokenStore.removeToken(gameToken.id);
       tokenStore.updateToken(gameToken.id, {
         ...role,
       });
+      updatedCount++;
     } else {
       tokenStore.addToken({
         ...role,
       });
+      addedCount++;
     }
   });
-  console.log("当前Token列表:", tokenStore.gameTokens);
-  message.success("Token添加成功");
-  roleList.value = [];
-  $emit("ok");
+    message.success(`批量导入完成：新增 ${addedCount} 个，更新 ${updatedCount} 个`);
+    roleList.value = [];
+    $emit("ok");
+  } finally {
+    isImporting.value = false;
+  }
 };
 </script>
 
 <style scoped lang="scss">
+.batch-tip {
+  margin-bottom: 16px;
+}
+
+.batch-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
 .optional-fields {
   display: flex;
   gap: 16px;
