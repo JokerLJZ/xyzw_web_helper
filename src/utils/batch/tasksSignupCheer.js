@@ -134,7 +134,7 @@ export async function runAutoPeachSignup({
   const members = values(info.legion.members),
     self = members.find(m => String(m.roleId) === String(role?.roleId));
   if (![1, 2].includes(Number(self?.job))) return skipped("仅会长或副会长可报名蟠桃");
-  if (Number(info.lockedLegionId) !== 0) return skipped("当前俱乐部已锁定，无法报名蟠桃");
+  // 官方客户端仅将 lockedLegionId 用于铃铛购买提示，不作为报名条件。
   const legionInfo = data(await send("legion_getinfo", {}));
   if (legionInfo?.firstMonthDate === undefined) throw new Error("蟠桃赛季信息不完整");
   const bellNeed = payloadBellLimit(config, legionInfo.firstMonthDate, time);

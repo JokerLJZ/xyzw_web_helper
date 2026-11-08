@@ -49,7 +49,7 @@ function fixture(kind, options = {}) {
     };
     if (cmd === "legion_getpayloadlegioninfo") return {
       legion: structuredClone(legion),
-      lockedLegionId: 0
+      ...(Object.hasOwn(options, "lockedLegionId") ? { lockedLegionId: options.lockedLegionId } : {})
     };
     if (cmd === "club_getinfo") return {
       club: structuredClone(club)
@@ -284,4 +284,12 @@ test("用户停止后不再启动下一账号，不发送报名并释放连接",
   assert.deepEqual(connected, ["a"]); assert.deepEqual(closed, ["a"]);
   assert.deepEqual(status, { a: "stopped", b: "stopped" });
   assert.ok(!f.calls.some(call => call.cmd === "club_signup"));
+});
+
+test("蟠桃锁定字段缺省或非零均不拦截符合条件的报名", async () => {
+  for (const options of [{}, { lockedLegionId: 0 }, { lockedLegionId: 12345 }]) {
+    const f = fixture("peach", options);
+    assert.equal((await f.run()).status, "completed");
+    assert.equal(f.calls.filter(c => c.cmd === "legion_payloadsignup").length, 1);
+  }
 });
