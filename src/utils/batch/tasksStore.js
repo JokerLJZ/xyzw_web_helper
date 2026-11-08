@@ -120,7 +120,8 @@ export function createTasksStore(deps) {
         const roleInfo = await tokenStore.sendMessageWithPromise(tokenId, "role_getroleinfo", {}, 5000);
         if (roleInfo?.role?.legionId == null) throw new Error("未获取到当前俱乐部状态，未发送申请");
         const currentLegionId = Number(roleInfo.role.legionId);
-        if (!Number.isSafeInteger(currentLegionId) || currentLegionId < 0) throw new Error("当前俱乐部状态无效，未发送申请");
+        // 当前官方 LegionModule.hasLegion 仅判断 legionId > 0；非正整数均为未入会。
+        if (!["number", "string"].includes(typeof roleInfo.role.legionId) || String(roleInfo.role.legionId).trim() === "" || !Number.isSafeInteger(currentLegionId)) throw new Error("当前俱乐部状态无效，未发送申请");
         if (currentLegionId > 0) {
           tokenStatus.value[tokenId] = "completed";
           addLog({ time: new Date().toLocaleTimeString(), type: "info", message: `${tokenName} ${currentLegionId === legionId ? "已在目标俱乐部" : `已在其他俱乐部(${currentLegionId})`}，跳过申请` });

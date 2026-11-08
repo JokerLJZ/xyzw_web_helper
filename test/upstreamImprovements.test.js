@@ -90,10 +90,10 @@ function storeScenario({ currentLegionId = 0, target = { id: 123, name: "目标"
   return { tasks: createTasksStore(deps), calls, statuses, deps };
 }
 test("俱乐部只为无归属账号发申请，已入会或目标无效时跳过", async () => {
-  for (const currentLegionId of [0, 123, 456]) {
+  for (const currentLegionId of [-1, "-1", 0, "0", 123, 456]) {
     const s = storeScenario({ currentLegionId });
     await s.tasks.batchJoinLegion();
-    assert.equal(s.calls.some(item => item.cmd === "legion_applyjoin"), currentLegionId === 0);
+    assert.equal(s.calls.some(item => item.cmd === "legion_applyjoin"), Number(currentLegionId) <= 0);
     assert.equal(s.statuses.a, "completed");
   }
   const s = storeScenario({ target: null });
@@ -171,4 +171,13 @@ test("自动怪异塔使用公用爬塔次数，达到配置后即使仍有体�
   await createTasksTower(deps).climbWeirdTower();
   assert.equal(calls.filter(item => item.cmd === "evotower_readyfight").length, 2);
   assert.equal(calls.filter(item => item.cmd === "evotower_fight").length, 2);
+});
+
+test("入会状态缺失、非整数或畸形时仍不发申请", async () => {
+  for (const currentLegionId of [null, NaN, 1.5, "bad", "", false, {}]) {
+    const s=storeScenario({currentLegionId});
+    await s.tasks.batchJoinLegion();
+    assert.equal(s.statuses.a,"failed");
+    assert.equal(s.calls.some(c=>c.cmd==='legion_applyjoin'),false);
+  }
 });
