@@ -17,7 +17,7 @@ test("只匹配橙色减伤和红色攻击、减伤、技能伤害，任一孔�
 test("按装备顺序运行并跳过已有目标，每件命中即停止；请求与采集一致", async () => {
   const equip = equipment(); equip[2] = {...equip[2], ...target(1,6)};
   const calls = [];
-  const r = await runAltAccountRefine({heroId:107, equipment:equip, send:async(cmd,params)=>{
+  const r = await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107, equipment:equip, send:async(cmd,params)=>{
     calls.push({cmd,params}); return response(params.part,target());
   }});
   assert.equal(r.reason,"completed"); assert.equal(r.count,3);
@@ -28,7 +28,7 @@ test("按装备顺序运行并跳过已有目标，每件命中即停止；请�
 test("真实采集响应按增量合并，未达标持续洗练；次数上限跨装备累计", async () => {
   const capture = JSON.parse(fs.readFileSync(new URL("./fixtures/altAccountRefine-quench.json",import.meta.url)));
   const equip = equipment(); const calls=[];
-  const r=await runAltAccountRefine({heroId:107,equipment:equip,limit:2,send:async(cmd,p)=>{
+  const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equip,limit:2,send:async(cmd,p)=>{
     calls.push(p.part); return calls.length===1 ? response(1,target()) : {...capture,_raw:{...capture._raw,body:response(2,capture._raw.body.role.heroes[107].equipment[1])}};
   }});
   assert.equal(r.reason,"limit"); assert.equal(r.count,2); assert.deepEqual(calls,[1,2]);
@@ -38,14 +38,14 @@ test("真实采集响应按增量合并，未达标持续洗练；次数上限�
 
 test("默认总上限1000次，不多发送一次",async()=>{
   let count=0;
-  const r=await runAltAccountRefine({heroId:107,equipment:equipment(),send:async()=>{count++;return response(1,{quenches:{}});}});
+  const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equipment(),send:async()=>{count++;return response(1,{quenches:{}});}});
   assert.equal(count,1000); assert.equal(r.reason,"limit");
 });
 
 test("非目标橙红属性先确认，确认仅返回seed仍保留装备，再传seed洗练",async()=>{
   const equip=equipment(); equip[1]={...equip[1],...target(2,6)};
   const calls=[];
-  const r=await runAltAccountRefine({heroId:107,equipment:equip,send:async(cmd,p)=>{
+  const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equip,send:async(cmd,p)=>{
     calls.push({cmd,p});
     return cmd==="equipment_confirm" ? {_raw:{body:response(p.part,{seed:867222})}} : response(p.part,target());
   }});
@@ -56,12 +56,12 @@ test("非目标橙红属性先确认，确认仅返回seed仍保留装备，再�
 
 test("停止在请求期间发生时更新该次结果，不再洗练下一件",async()=>{
   let stop=false, count=0;
-  const r=await runAltAccountRefine({heroId:107,equipment:equipment(),shouldStop:()=>stop,send:async()=>{count++;stop=true;return response(1,target());}});
+  const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equipment(),shouldStop:()=>stop,send:async()=>{count++;stop=true;return response(1,target());}});
   assert.equal(r.reason,"stopped"); assert.equal(count,1); assert.equal(r.count,1);
 });
 
 test("达到最后一次上限时四件均达标仍报告完成",async()=>{
-  const r=await runAltAccountRefine({heroId:107,equipment:equipment(),limit:4,send:async(cmd,p)=>response(p.part,target())});
+  const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equipment(),limit:4,send:async(cmd,p)=>response(p.part,target())});
   assert.equal(r.reason,"completed"); assert.equal(r.count,4);
 });
 
@@ -71,21 +71,21 @@ test("无数据、锁定孔位、无seed和异常响应停止，避免继续消�
     if(kind==="missing") delete equip[1];
     if(kind==="locked") equip[1].quenches={1:{isLocked:true}};
     if(kind==="seed") equip[1]={...equip[1],...target(2,6)};
-    await assert.rejects(runAltAccountRefine({heroId:107,equipment:equip,send:async()=>{count++;if(kind==="server")throw new Error("白玉不足");return {};}}));
+    await assert.rejects(runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equip,send:async()=>{count++;if(kind==="server")throw new Error("白玉不足");return {};}}));
     assert.ok(count<=1);
   }
 });
 
 test("增量items中数量为0时仍传给界面",async()=>{
   let items;
-  await runAltAccountRefine({heroId:107,equipment:equipment(),send:async(cmd,p)=>response(p.part,target(),{1022:{quantity:0}}),onUpdate:update=>items=update.items});
+  await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equipment(),send:async(cmd,p)=>response(p.part,target(),{1022:{quantity:0}}),onUpdate:update=>items=update.items});
   assert.equal(items[1022].quantity,0);
 });
 
 test("停止发生在确认请求期间时不再发送消耗白玉的请求",async()=>{
   const equip=equipment(); equip[1]={...equip[1],...target(2,5)};
   let stop=false; const calls=[];
-  const result=await runAltAccountRefine({heroId:107,equipment:equip,shouldStop:()=>stop,send:async(cmd,p)=>{
+  const result=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equip,shouldStop:()=>stop,send:async(cmd,p)=>{
     calls.push(cmd); stop=true; return response(p.part,{seed:867222});
   }});
   assert.deepEqual(calls,["equipment_confirm"]); assert.equal(result.count,0);
@@ -94,9 +94,9 @@ test("停止发生在确认请求期间时不再发送消耗白玉的请求",asy
 
 test("无效上限或装备等级不足时不发送请求",async()=>{
   const send=async()=>assert.fail("不应发送请求");
-  for(const limit of [null,0,-1,1.5,NaN]) await assert.rejects(runAltAccountRefine({heroId:107,equipment:equipment(),limit,send}));
+  for(const limit of [null,0,-1,1.5,NaN]) await assert.rejects(runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equipment(),limit,send}));
   const equip=equipment(); equip[1].level=3999;
-  await assert.rejects(runAltAccountRefine({heroId:107,equipment:equip,send}),/等级不足/);
+  await assert.rejects(runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equip,send}),/等级不足/);
 });
 
  test("已有普通属性使用当前方案和完整属性；后续请求使用增量更新后的属性",async()=>{
@@ -105,7 +105,7 @@ test("无效上限或装备等级不足时不发送请求",async()=>{
   const next={1:{attrId:6,attrNum:4,colorId:1,isLocked:false,allAttrNum:4}};
   equip[1]={...equip[1],curQuenchId:1,quenches:first};
   const calls=[];
-  const r=await runAltAccountRefine({heroId:107,equipment:equip,limit:2,send:async(cmd,p)=>{
+  const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equip,limit:2,send:async(cmd,p)=>{
     calls.push(p);return response(1,{curQuenchId:2,quenches:next});
   }});
   assert.equal(r.reason,"limit");
@@ -117,7 +117,7 @@ test("无效上限或装备等级不足时不发送请求",async()=>{
 const allAttack = () => Object.fromEntries([1,2,3,4].map(p => [p, {...equipment()[p], ...target(1,6)}]));
 test("四件目标但无减伤时推掉武器，红攻击不停止，直到橙减伤", async () => {
   const equip=allAttack(), calls=[]; let rolls=0;
-  const r=await runAltAccountRefine({heroId:107,equipment:equip,send:async(cmd,p)=>{
+  const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equip,send:async(cmd,p)=>{
     calls.push({cmd,p});
     return response(1,cmd==='equipment_confirm'?{seed:123}:++rolls===1?target(14,6):target());
   }});
@@ -130,21 +130,21 @@ test("四件目标但无减伤时推掉武器，红攻击不停止，直到橙�
 test("任意其他部位已有橙红减伤不推武器，低品质减伤仍补洗", async()=>{
   for(const color of [4,5,6]) {
     const equip=allAttack(); equip[2].quenches[2]={attrId:9,colorId:color}; let calls=0;
-    const r=await runAltAccountRefine({heroId:107,equipment:equip,send:async(cmd,p)=>{calls++;return response(p.part,cmd==='equipment_confirm'?{seed:1}:target(9,6));}});
+    const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equip,send:async(cmd,p)=>{calls++;return response(p.part,cmd==='equipment_confirm'?{seed:1}:target(9,6));}});
     assert.equal(r.reason,'completed');assert.equal(calls,color===4?2:0);
   }
 });
 test("补洗共享次数上限，白玉耗尽和用户停止后不继续请求",async()=>{
   for(const kind of ['limit','jade','stop']) {
     const equip=allAttack(); let stop=false, rolls=0;
-    const r=await runAltAccountRefine({heroId:107,equipment:equip,limit:1,shouldStop:()=>stop,send:async(cmd,p)=>{
+    const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equip,limit:1,shouldStop:()=>stop,send:async(cmd,p)=>{
       if(cmd==='equipment_confirm')return response(p.part,{seed:1});
       rolls++;stop=kind==='stop';return response(p.part,target(14,6),kind==='jade'?{1022:{quantity:0}}:undefined);
     }});
     assert.equal(r.reason,kind==='stop'?'stopped':'limit');assert.equal(rolls,1);
   }
   let rolls=0;
-  const r=await runAltAccountRefine({heroId:107,equipment:allAttack(),send:async(cmd,p)=>{
+  const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:allAttack(),send:async(cmd,p)=>{
     if(cmd==='equipment_confirm')return response(p.part,{seed:1});
     rolls++;return response(p.part,target(1,6),{1022:{quantity:0}});
   }});
@@ -152,11 +152,29 @@ test("补洗共享次数上限，白玉耗尽和用户停止后不继续请求",
 });
 test("四件刚达标且无减伤时仍进入武器阶段；初始白玉为0不确认不消耗",async()=>{
   const equip=equipment();let rolls=0;
-  const r=await runAltAccountRefine({heroId:107,equipment:equip,send:async(cmd,p)=>{
+  const r=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:equip,send:async(cmd,p)=>{
     if(cmd==='equipment_confirm')return response(p.part,{seed:1});
     rolls++;return response(p.part,rolls<=4?target(1,6):target());
   }});
   assert.equal(r.count,5);assert.equal(r.reason,'completed');
-  const empty=await runAltAccountRefine({heroId:107,equipment:allAttack(),jadeQuantity:0,send:async()=>assert.fail('不能发送')});
+  const empty=await runAltAccountRefine({jadeQuantity:1000000, quenchCost:100,heroId:107,equipment:allAttack(),jadeQuantity:0,send:async()=>assert.fail('不能发送')});
   assert.equal(empty.reason,'jade');
+});
+
+test("白玉预算向下取整，增量省略库存也不超限，后续库存增加不抬高上限", async () => {
+  for (const items of [undefined, {1022:{quantity:99999}}, {1022:{quantity:50}}]) {
+    let calls=0;
+    const r=await runAltAccountRefine({heroId:107,equipment:equipment(),jadeQuantity:250,quenchCost:100,limit:10,send:async()=>{
+      calls++; return response(1,{quenches:{}},items);
+    }});
+    assert.equal(calls, items?.[1022]?.quantity===50 ? 1 : 2);
+    assert.equal(r.reason,"jade");
+  }
+});
+test("白玉不足单次和无效库存不发送确认或洗练",async()=>{
+  for(const jadeQuantity of [0,99]) {
+    const r=await runAltAccountRefine({heroId:107,equipment:allAttack(),jadeQuantity,quenchCost:100,send:async()=>assert.fail("不应发送")});
+    assert.equal(r.reason,"jade"); assert.equal(r.count,0);
+  }
+  for(const jadeQuantity of [undefined,NaN,-1]) await assert.rejects(runAltAccountRefine({heroId:107,equipment:equipment(),jadeQuantity,quenchCost:100,send:async()=>assert.fail("不应发送")}),/白玉数量/);
 });

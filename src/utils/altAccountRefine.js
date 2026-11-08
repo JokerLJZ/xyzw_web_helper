@@ -21,13 +21,17 @@ function bodyOf(result) {
 }
 
 export async function runAltAccountRefine({
-  heroId, equipment, jadeQuantity, limit = DEFAULT_ALT_REFINE_LIMIT, send,
+  heroId, equipment, jadeQuantity, quenchCost, limit = DEFAULT_ALT_REFINE_LIMIT, send,
   shouldStop = () => false, onUpdate = () => {},
   wait = () => Promise.resolve(),
 }) {
   if (!Number.isSafeInteger(limit) || limit < 1) {
     throw new Error("白玉使用次数上限必须为正整数");
   }
+  if (!Number.isSafeInteger(jadeQuantity) || jadeQuantity < 0) throw new Error("未获取到有效白玉数量，已停止");
+  if (!Number.isSafeInteger(quenchCost) || quenchCost < 1) throw new Error("白玉单次消耗配置异常");
+  const jadeLimit = Math.floor(jadeQuantity / quenchCost);
+  const plannedLimit = Math.min(limit, jadeLimit);
   let count = 0;
   const completedParts = [];
   const finish = (reason) => ({ reason, count, completedParts: completedParts.filter(p => hasAltRefineTarget(equipment[p])) });
@@ -40,8 +44,8 @@ export async function runAltAccountRefine({
     if (!equipment[part]) throw new Error(`未获取到装备${part}的数据，请刷新阵容`);
     while (!matches(equipment[part])) {
       if (shouldStop()) return finish("stopped");
-      if (count >= limit) return finish("limit");
-      if (jadeQuantity === 0) return finish("jade");
+      if (jadeQuantity < quenchCost || (count >= plannedLimit && jadeLimit < limit)) return finish("jade");
+      if (count >= plannedLimit) return finish("limit");
       const current = equipment[part];
       if (current.level < 4000) throw new Error(`装备${part}等级不足4000级`);
       // 小号模式仅使用白玉；锁定孔位可能消耗彩玉，不自动解锁。
@@ -68,11 +72,16 @@ export async function runAltAccountRefine({
         ...params, seed, skipOrange: false,
       }));
       count++;
+      jadeQuantity -= quenchCost;
       const updated = result?.role?.heroes?.[heroId]?.equipment?.[part];
       if (!updated?.quenches) throw new Error("洗练响应缺少装备孔位数据，已停止以避免继续消耗白玉");
       // confirm 只返回 seed，quench 只返回本次装备；保留其他装备及字段。
       equipment[part] = { ...equipment[part], ...updated };
-      if (result.role?.items?.[1022]?.quantity != null) jadeQuantity = result.role.items[1022].quantity;
+      if (result.role?.items?.[1022]?.quantity != null) {
+        const reported = result.role.items[1022].quantity;
+        if (!Number.isSafeInteger(reported) || reported < 0) throw new Error("洗练响应白玉数量异常，已停止");
+        jadeQuantity = Math.min(jadeQuantity, reported);
+      }
       onUpdate({ part, count, damageReductionStage, equipment: equipment[part], items: result.role?.items });
       if (shouldStop()) return finish("stopped");
       if (!matches(equipment[part]) && count >= limit) return finish("limit");

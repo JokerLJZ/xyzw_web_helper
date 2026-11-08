@@ -1,3 +1,4 @@
+import { loadSignupCheerConfig } from "./tasksSignupCheer.js";
 import { DEFAULT_ALT_REFINE_LIMIT, hasAltRefineTarget, hasAltRefineDamageReduction, runAltAccountRefine } from "../altAccountRefine.js";
 import { extractRolePatch } from "../roleSnapshot.js";
 import { HERO_DICT } from "../HeroList.js";
@@ -47,12 +48,19 @@ export function createTasksRefine(deps) {
           const role = extractRolePatch(info) ?? info;
           if (!role?.heroes?.[heroId]) throw new Error(`账号未拥有配置武将${HERO_DICT[heroId].name}`);
           const equipment = { ...role?.heroes?.[heroId]?.equipment };
+          const config = await (deps.loadRefineConfig || loadSignupCheerConfig)((cmd, params) => tokenStore.sendMessageWithPromise(id, cmd, params, 15000));
+          if (shouldStop.value) { tokenStatus.value[id] = "stopped"; break; }
+          const quenchCost = config?.ConstantConf?.quenchCostNum;
+          if (config?.ConstantConf?.quenchCostId !== 1022) throw new Error("洗练消耗道具配置异常");
+          const jadeQuantity = role.items?.[1022]?.quantity ?? (role.items && !Object.hasOwn(role.items, 1022) ? 0 : undefined);
+          const plannedLimit = Math.min(limit, Math.floor(jadeQuantity / quenchCost));
+          log(`白玉${jadeQuantity}，单次消耗${quenchCost}，计划最多洗练${plannedLimit}次`);
           log(`开始${HERO_DICT[heroId].name}小号自动洗练，本账号本次上限${limit}次`);
           for (const [part, equip] of Object.entries(equipment)) {
             if (hasAltRefineTarget(equip)) log(`${partNames[part] || part}已有目标属性，跳过`);
           }
           const result = await runAltAccountRefine({
-            heroId, equipment, jadeQuantity: role.items?.[1022]?.quantity, limit, shouldStop: () => shouldStop.value,
+            heroId, equipment, jadeQuantity, quenchCost, limit, shouldStop: () => shouldStop.value,
             send: async (cmd, params) => {
               if (tokenStore.getWebSocketStatus(id) !== "connected") throw new Error("连接已断开");
               try {
@@ -77,12 +85,10 @@ export function createTasksRefine(deps) {
             tokenStatus.value[id] = "stopped";
             log(`小号洗练已停止，本次${result.count}次`, "warning");
           } else if (result.reason === "jade") {
-            failures++;
-            tokenStatus.value[id] = "failed";
-            log(`白玉已耗尽，本次${result.count}次，未完成洗练目标`, "warning");
+            tokenStatus.value[id] = "completed";
+            log(`白玉不足或已达白玉预算，本次计划最多${plannedLimit}次；已确认洗练${result.count}次，未完成洗练目标`, "warning");
           } else if (result.reason === "limit") {
-            failures++;
-            tokenStatus.value[id] = "failed";
+            tokenStatus.value[id] = "completed";
             log(`已达本次白玉洗练上限${limit}次，达标${result.completedParts.length}/4件，未完成的装备或武器补减伤未继续洗练`, "warning");
           } else {
             tokenStatus.value[id] = "completed";

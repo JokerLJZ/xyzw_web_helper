@@ -11,6 +11,7 @@ function fixture({ limit = 1, ids = ["a", "b"], allDone = false, fail = null } =
   const calls = [], logs = [], closed = [], connected = [];
   let released = 0;
   const deps = {
+    loadRefineConfig: async () => ({ConstantConf:{quenchCostId:1022,quenchCostNum:100}}),
     selectedTokens: { value: ids }, tokens: { value: ids.map(id => ({ id, name: id })) },
     tokenStatus: { value: {} }, isRunning: { value: false }, shouldStop: { value: false },
     currentRunningTokenId: { value: null }, batchSettings: { altRefineHeroId: 107, altRefineLimit: limit, commandDelay: 0 },
@@ -23,7 +24,7 @@ function fixture({ limit = 1, ids = ["a", "b"], allDone = false, fail = null } =
       async sendGetRoleInfo(id) {
         const equipment = Object.fromEntries([1,2,3,4].map(p => [p, { level:4000, quenches: allDone ? {1:target} : {} }]));
         if (fail === "locked" && id === "a") equipment[1].quenches = {1:{isLocked:true}};
-        return {role:{heroes:{107:{equipment}}}};
+        return {role:{items:{1022:{quantity:100000}},heroes:{107:{equipment}}}};
       },
       async sendMessageWithPromise(id, cmd, params) {
         calls.push({id,cmd,params});
@@ -39,7 +40,7 @@ test("各账号独立按上限洗练，达上限不误报达标，全部释放�
   const f=fixture(); await f.run();
   assert.deepEqual(f.calls.map(x=>x.id),["a","b"]);
   assert.deepEqual(f.calls[0].params,{heroId:107,part:1,quenchId:0,quenches:{},seed:0,skipOrange:false});
-  assert.deepEqual(f.deps.tokenStatus.value,{a:"failed",b:"failed"});
+  assert.deepEqual(f.deps.tokenStatus.value,{a:"completed",b:"completed"});
   assert.deepEqual(f.closed,["a","b"]); assert.equal(f.released(),2);
   assert.equal(f.deps.isRunning.value,false); assert.equal(f.deps.currentRunningTokenId.value,null);
   assert.equal(f.logs.filter(x=>x.message.includes("已达本次白玉洗练上限1次")).length,2);
@@ -123,4 +124,13 @@ test("铠甲已达标不影响武器请求，版本错误注明武器并停止�
   assert.ok(f.logs.some(x=>x.message.includes("铠甲已有目标属性")));
   assert.ok(f.logs.some(x=>x.message.includes("武器洗练请求(equipment_quench)失败") && x.message.includes("版本过低，请升级")));
   assert.equal(f.deps.tokenStatus.value.a,"failed");
+});
+
+test("各账号白玉独立预算，无白玉正常结束且不请求洗练",async()=>{
+  const f=fixture({limit:10}); const get=f.deps.tokenStore.sendGetRoleInfo;
+  f.deps.tokenStore.sendGetRoleInfo=async id=>{const r=await get(id);r.role.items=id==='a'?{}:{1022:{quantity:250}};return r;};
+  await f.run();
+  assert.equal(f.calls.filter(x=>x.id==='a').length,0);
+  assert.equal(f.calls.filter(x=>x.id==='b').length,2);
+  assert.deepEqual(f.deps.tokenStatus.value,{a:'completed',b:'completed'});
 });

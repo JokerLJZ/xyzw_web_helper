@@ -279,6 +279,7 @@ import { useMessage } from "naive-ui";
 import { useTokenStore } from "@/stores/tokenStore";
 import MyCard from "../Common/MyCard.vue";
 import { HERO_DICT } from "@/utils/HeroList.js";
+import { loadSignupCheerConfig } from "@/utils/batch/tasksSignupCheer.js";
 import { DEFAULT_ALT_REFINE_LIMIT, runAltAccountRefine } from "@/utils/altAccountRefine.js";
 
 const tokenStore = useTokenStore();
@@ -1073,8 +1074,11 @@ const startAltRefine = async () => {
     heroEquipment.value = equipment;
     jadeCount.value = role.items?.["1022"]?.quantity ?? jadeCount.value;
     colorJadeCount.value = role.items?.["1023"]?.quantity ?? colorJadeCount.value;
+    const config = await loadSignupCheerConfig((cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params));
+    if (config?.ConstantConf?.quenchCostId !== 1022) throw new Error("洗练消耗道具配置异常");
+    if (shouldStop()) return;
     const result = await runAltAccountRefine({
-      heroId, equipment, jadeQuantity: role.items?.["1022"]?.quantity, limit, shouldStop,
+      heroId, equipment, jadeQuantity: role.items?.["1022"]?.quantity ?? (role.items ? 0 : undefined), quenchCost: config.ConstantConf.quenchCostNum, limit, shouldStop,
       send: async (cmd, params) => {
         if (tokenStore.getWebSocketStatus(tokenId) !== "connected") throw new Error("连接已断开");
         altRefineStatus.value = `正在洗练${partMap[params.part]}`;
