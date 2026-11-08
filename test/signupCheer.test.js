@@ -293,3 +293,14 @@ test("蟠桃锁定字段缺省或非零均不拦截符合条件的报名", async
     assert.equal(f.calls.filter(c => c.cmd === "legion_payloadsignup").length, 1);
   }
 });
+
+test("营地数值期次与字符串期次具有相同的报名与重复检查行为", async () => {
+  const f = fixture("camp");
+  const send = async (cmd, params) => {
+    const response = await f.send(cmd, params);
+    if (cmd === "club_getinfo") response.club.phase = Number(response.club.phase);
+    return response;
+  };
+  assert.equal((await runAutoCampSignup({ send, config, now })).status, "completed");
+  assert.equal((await runAutoCampSignup({ send, config, now })).status, "skipped");
+});

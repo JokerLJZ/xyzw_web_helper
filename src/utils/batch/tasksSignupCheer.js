@@ -68,6 +68,17 @@ function getWeek(now) {
     monday: today - (weekday + 6) % 7 * DAY
   };
 }
+function campSignupPhase(response) {
+  const info = data(response);
+  const value = info?.club?.phase;
+  // BON 原始响应可能是数值期次，先统一格式再校验，不能用 JS 类型判断报名资格。
+  if (!info?.club || !["string", "number"].includes(typeof value)) {
+    throw new Error(`营地报名状态不完整（club=${info?.club ? "存在" : "缺失"}，phase类型=${typeof value}）`);
+  }
+  const text = String(value);
+  if (text && !/^\d{6}$/.test(text)) throw new Error("营地报名期次格式异常");
+  return text;
+}
 export async function runAutoCampSignup({
   send,
   config,
@@ -77,8 +88,8 @@ export async function runAutoCampSignup({
   if (week.weekday !== 0) return skipped("自动营地报名仅周日执行");
   if (!values(config.ClubWarScheduleConf).some(row => dayTime(row.startDate) <= +now() && +now() < dayTime(row.endDate) + DAY)) return skipped("当前没有营地赛季");
   const info = data(await send("club_getinfo", {}));
-  if (!info?.club || typeof info.club.phase !== "string" || (info.club.phase && !/^\d{6}$/.test(info.club.phase))) throw new Error("营地报名状态不完整");
-  if (info.club.phase && dayTime(`20${info.club.phase.slice(0, 2)}-${info.club.phase.slice(2, 4)}-${info.club.phase.slice(4, 6)}`) > week.monday) return skipped("本轮营地已报名");
+  const currentPhase = campSignupPhase(info);
+  if (currentPhase && dayTime(`20${currentPhase.slice(0, 2)}-${currentPhase.slice(2, 4)}-${currentPhase.slice(4, 6)}`) > week.monday) return skipped("本轮营地已报名");
   const role = extractRolePatch(await send("role_getroleinfo", {}));
   const legionInfo = data(await send("legion_getinfo", {}));
   const legion = legionInfo?.info;
@@ -95,7 +106,11 @@ export async function runAutoCampSignup({
   if (getWeek(now()).monday !== week.monday || getWeek(now()).weekday !== 0) return skipped("营地报名窗口已变化");
   await send("club_signup", {});
   const fresh = data(await send("club_getinfo", {}));
-  if (!fresh?.club?.phase || fresh.club.phase <= phase(week.monday)) throw new Error("营地报名结果未确认，请查看游戏状态");
+  let confirmedPhase;
+  try { confirmedPhase = campSignupPhase(fresh); } catch (error) {
+    throw new Error(`营地报名结果未确认，请查看游戏状态：${error.message}`);
+  }
+  if (!confirmedPhase || confirmedPhase <= phase(week.monday)) throw new Error("营地报名结果未确认，请查看游戏状态");
   return {
     status: "completed",
     reason: "营地报名成功"
