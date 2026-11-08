@@ -304,3 +304,26 @@ test("营地数值期次与字符串期次具有相同的报名与重复检查�
   assert.equal((await runAutoCampSignup({ send, config, now })).status, "completed");
   assert.equal((await runAutoCampSignup({ send, config, now })).status, "skipped");
 });
+
+test("营地club存在而phase缺省时应用协议空字符串默认值，报名后仍复查期次", async () => {
+  for (const confirmed of [true, false]) {
+    const f = fixture("camp"); let written=false;
+    const send=async(cmd,params)=>{
+      const result=await f.send(cmd,params);
+      if(cmd==='club_signup')written=true;
+      if(cmd==='club_getinfo' && (!written || !confirmed)) delete result.club.phase;
+      return result;
+    };
+    const run=()=>runAutoCampSignup({send,config,now});
+    if(confirmed) assert.equal((await run()).status,'completed');
+    else await assert.rejects(run(),/结果未确认/);
+    assert.equal(f.calls.filter(c=>c.cmd==='club_signup').length,1);
+  }
+});
+test("营地club缺失或期次畸形仍不得发起报名",async()=>{
+  for(const response of [{},{club:null},{club:[]},{club:{phase:null}},{club:{phase:'bad'}}]) {
+    const calls=[];
+    await assert.rejects(runAutoCampSignup({config,now,send:async cmd=>{calls.push(cmd);return response;}}),/状态不完整|期次格式异常/);
+    assert.deepEqual(calls,['club_getinfo']);
+  }
+});

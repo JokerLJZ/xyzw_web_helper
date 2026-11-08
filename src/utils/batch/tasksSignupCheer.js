@@ -70,9 +70,10 @@ function getWeek(now) {
 }
 function campSignupPhase(response) {
   const info = data(response);
-  const value = info?.club?.phase;
+  // 当前协议 GDClub 构造器默认 phase=""；BON 省略字段时补齐模型默认值。
+  const value = info?.club?.phase === undefined ? "" : info.club.phase;
   // BON 原始响应可能是数值期次，先统一格式再校验，不能用 JS 类型判断报名资格。
-  if (!info?.club || !["string", "number"].includes(typeof value)) {
+  if (!info?.club || typeof info.club !== "object" || Array.isArray(info.club) || !["string", "number"].includes(typeof value)) {
     throw new Error(`营地报名状态不完整（club=${info?.club ? "存在" : "缺失"}，phase类型=${typeof value}）`);
   }
   const text = String(value);
