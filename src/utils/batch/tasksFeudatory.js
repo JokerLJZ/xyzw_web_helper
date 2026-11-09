@@ -165,15 +165,15 @@ export function createTasksFeudatory(deps) {
       log('WxPusher未配置，咸臣报表未推送', 'warning'); return;
     }
     const chunks = [];
-    let current = '';
+    let current = [];
+    const fits = html => html.length <= 38000 && new TextEncoder().encode(html).length <= 60000;
     for (const row of unique) {
-      const block = feudatoryReport([row]);
-      if (block.length > 38000 || new TextEncoder().encode(block).length > 60000) throw new Error('单账号咸臣报表过长，未发送');
-      const next = current + block;
-      if (current && (next.length > 38000 || new TextEncoder().encode(next).length > 60000)) { chunks.push(current); current = block; }
+      if (!fits(feudatoryReport([row], unique))) throw new Error('单账号咸臣报表过长，未发送');
+      const next = [...current, row];
+      if (current.length && !fits(feudatoryReport(next, unique))) { chunks.push(feudatoryReport(current, unique)); current = [row]; }
       else current = next;
     }
-    if (current) chunks.push(current);
+    if (current.length) chunks.push(feudatoryReport(current, unique));
     for (let i = 0; i < chunks.length; i++) {
       if (i) await wait(600);
       await push({ appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids }, `自动寻找咸臣结果${chunks.length > 1 ? `（${i + 1}/${chunks.length}）` : ''}`, chunks[i], 2);

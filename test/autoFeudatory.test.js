@@ -64,9 +64,9 @@ test('用户停止或成员状态缺失不发送消耗请求',async()=>{
   const f=scenario({shouldStop:()=>true});assert.equal((await f.run()).reason,'已停止');assert.equal(f.fights(),0);
   const bad=scenario({role:{feudatory:null}});assert.match((await bad.run()).error,/名单/);assert.equal(bad.fights(),0);
 });
-test('报表包含累计合计、咸主及时间，不将未知金币算0，转义名称',()=>{
+test('总表包含批次累计合计、咸主，不将未知金币算0并转义名称',()=>{
   const report=feudatoryReport([{name:'<x>',reason:'名额已满',members:[{id:2,name:'a|b',gold:50,observedAt:time},{id:3,gold:70,capturedAt:time}],boss:{id:8,name:'boss'},actions:[]}]);
-  assert.match(report,/120金币/);assert.match(report,/boss \/ 8/);assert.match(report,/&lt;x&gt;/);assert.match(report,/观察/);assert.match(report,/抓取/);
+  assert.match(report,/120金币/);assert.match(report,/boss/);assert.match(report,/&lt;x&gt;/);assert.equal(report.includes('观察开始'),false);assert.equal(report.includes('抓取时间'),false);
   assert.match(feudatoryReport([{members:[{id:2}],actions:[]}]),/未知金币/);
 });
 test('批量任务按角色隔离保存、正常释放连接，推送失败不重跑',async()=>{
@@ -160,11 +160,11 @@ test('所选账号身份无法确认时整轮不抓取也不释放',async()=>{
   await createTasksFeudatory(deps).batchAutoFeudatory();assert.equal(writes,1);assert.equal(deps.tokenStatus.value.a,'failed');
 });
 
-test('咸臣推送生成窄屏HTML表格，转义内容、时间缺失明确标未知',()=>{
+test('咸臣总表五列且每账号一行，转义内容并省略明细',()=>{
   const html=feudatoryReport([{name:'<script>x</script>',reason:'完成',members:[{id:2,name:'A|B',gold:0}],actions:['<img src=x>']}]);
-  assert.match(html,/<table/);assert.match(html,/colspan="2"/);assert.match(html,/A\|B/);
+  assert.match(html,/<table/);assert.equal((html.match(/<th style=/g)||[]).length,5);assert.equal((html.match(/<tbody><tr>/g)||[]).length,1);assert.match(html,/A\|B/);
   assert.equal(html.includes('<script>'),false);assert.equal(html.includes('<img'),false);
-  assert.equal(html.includes('Invalid Date'),false);assert.match(html,/观察开始/);assert.match(html,/未知/);
+  assert.equal(html.includes('Invalid Date'),false);assert.equal(html.includes('观察开始'),false);assert.equal(html.includes('战力'),false);
 });
 test('多账号HTML报表按UTF-8字节分段，保持HTML类型与完整账号表格',async()=>{
   const sent=[],delays=[];
@@ -173,5 +173,12 @@ test('多账号HTML报表按UTF-8字节分段，保持HTML类型与完整账号�
   await createTasksFeudatory(deps).pushFeudatoryInfo(rows);
   assert.ok(sent.length>1);assert.equal(delays.length,sent.length-1);
   for(const part of sent){assert.equal(part.type,2);assert.ok(new TextEncoder().encode(part.content).length<=60000);assert.ok(part.content.length<=38000);assert.equal((part.content.match(/<table /g)||[]).length,(part.content.match(/<\/table>/g)||[]).length);}
-  assert.equal(sent.reduce((n,p)=>n+(p.content.match(/<h3>/g)||[]).length,0),50);
+  assert.equal(sent.reduce((n,p)=>n+(p.content.match(/font-weight:bold;/g)||[]).length,0),50);
+});
+
+test('小批次一张完整总表，金额千位分隔，批次汇总与账号行一致',async()=>{
+ const rows=[{tokenId:'a',name:'小号1',reason:'满员',members:[{name:'张三',gold:12000},{name:'李四',gold:8000}],actions:['抓取 2','抓取 3','释放 4'],boss:null},{tokenId:'b',name:'小号2',reason:'精力不足',members:[{name:'赵六',gold:6000}],actions:[],boss:{name:'咸主'}}];
+ const sent=[];await createTasksFeudatory({batchSettings:{wxpusherEnabled:true,wxpusherAppToken:'t',wxpusherUids:'u'},addLog(){},sendWxPusherMessage:async(c,t,html)=>sent.push(html)}).pushFeudatoryInfo(rows);
+ assert.equal(sent.length,1);const html=sent[0];assert.equal((html.match(/<table /g)||[]).length,1);assert.equal((html.match(/font-weight:bold;/g)||[]).length,2);
+ assert.match(html,/本批2个账号｜抓取2人｜释放1人/);assert.match(html,/26,000金币/);assert.match(html,/张三：12,000<br>李四：8,000/);assert.equal(html.includes('推关'),false);
 });

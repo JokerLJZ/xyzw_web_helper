@@ -131,23 +131,25 @@ export async function runAutoFeudatory({ send, config, battleVersion, history, s
 }
 const cell = v => String(v ?? '未知').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const tableCell = 'border:1px solid #d9d9d9;padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;';
-const timeText = value => Number.isFinite(value) && value > 0 && !Number.isNaN(new Date(value).getTime())
-  ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未知';
-/** WxPusher HTML正文；每账号两列表格，避免手机上五列被挤压。 */
-export function feudatoryReport(results) {
-  const row = (label, value) => `<tr><th style="${tableCell}width:28%;">${cell(label)}</th><td style="${tableCell}">${cell(value)}</td></tr>`;
-  return results.map(r => {
-    const total = r.snapshotKnown !== false && r.members?.every(m => Number.isSafeInteger(m.gold) && m.gold >= 0) ? r.members.reduce((s,m) => s + m.gold, 0) : '未知';
-    const rows = [row('执行结果', `${r.reason ?? '未知'}${r.error ? `（${r.error}）` : ''}`), row('累计金币', `${total}金币（当前咸臣合计）`)];
-    for (const m of r.members || []) {
-      rows.push(`<tr><th colspan="2" style="${tableCell}background:#f2f5f8;">咸臣：${cell(m.name)} / ${cell(m.id)}</th></tr>`,
-        row('累计贡献', m.gold), row('战力 / 推关', `${m.power ?? '未知'} / ${m.levelId ?? '未知'}`),
-        row(m.capturedAt ? '抓取时间' : '观察开始', timeText(m.capturedAt ?? m.observedAt)));
-    }
-    if (!r.members?.length) rows.push(row('咸臣名单', r.snapshotKnown === false ? '未知' : '暂无咸臣'));
-    rows.push(row('咸主', r.boss ? `${r.boss.name ?? '未知'} / ${r.boss.id}` : r.snapshotKnown === false ? '未知' : '无'), row('本次操作', r.actions?.join('；') || '无'));
-    return `<h3>${cell(r.name)}</h3><table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:14px;line-height:1.6;"><tbody>${rows.join('')}</tbody></table>`;
-  }).join('<br>');
+const goldTotal = row => row.snapshotKnown !== false && Array.isArray(row.members) && row.members.every(m => Number.isSafeInteger(m.gold) && m.gold >= 0)
+  ? row.members.reduce((sum, m) => sum + m.gold, 0) : null;
+const numberText = value => value == null ? '未知' : value.toLocaleString('zh-CN');
+const actionCount = (rows, action) => rows.reduce((sum, row) => sum + (row.actions || []).filter(text => text.startsWith(`${action} `)).length, 0);
+/** 一批一张五列总表；分段时重复完整批次汇总和表头。 */
+export function feudatoryReport(results, summaryResults = results) {
+  const totals = summaryResults.map(goldTotal);
+  const total = totals.every(value => value !== null) ? totals.reduce((sum, value) => sum + value, 0) : null;
+  const summary = `本批${summaryResults.length}个账号｜抓取${actionCount(summaryResults, '抓取')}人｜释放${actionCount(summaryResults, '释放')}人｜当前咸臣贡献合计${numberText(total)}金币`;
+  const headers = ['账号', '执行结果', '咸臣清单（贡献金币）', '金币合计', '我的咸主'];
+  const rows = results.map(row => {
+    const actions = [`抓取${actionCount([row], '抓取')}`, `释放${actionCount([row], '释放')}`, row.reason || '未知'];
+    if (row.error) actions.push(String(row.error).replace(/[\r\n]+/g, ' ').slice(0, 36));
+    const members = row.snapshotKnown === false ? '未知' : row.members?.length
+      ? row.members.map(m => `${cell(m.name)}：${cell(numberText(Number.isSafeInteger(m.gold) && m.gold >= 0 ? m.gold : null))}`).join('<br>') : '无';
+    const boss = row.boss ? cell(row.boss.name) : row.snapshotKnown === false ? '未知' : '无';
+    return `<tr><td style="${tableCell}font-weight:bold;">${cell(row.name)}</td><td style="${tableCell}">${cell(actions.join(' · '))}</td><td style="${tableCell}">${members}</td><td style="${tableCell}text-align:right;">${cell(numberText(goldTotal(row)))}</td><td style="${tableCell}">${boss}</td></tr>`;
+  }).join('');
+  return `<p>${cell(summary)}</p><table style="width:100%;border-collapse:collapse;font-size:13px;line-height:1.5;"><thead><tr>${headers.map(label => `<th style="${tableCell}background:#f2f5f8;">${cell(label)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 /** 只释放开始时的名单，失败或超时后查状态，不重复发送写请求。 */
