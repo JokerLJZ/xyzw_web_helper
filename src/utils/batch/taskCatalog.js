@@ -161,6 +161,7 @@ export const TASK_GROUPS = [
       "batchTopUpGoldFish",
       "batchCheckSaltMasters",
       "batchAutoFeudatory",
+      "batchReleaseFeudatory",
       "batchPushMainLevelInfo",
       "batchUpgradeLordTo6000",
       "batchUseWarehouseItems",

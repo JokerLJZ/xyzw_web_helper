@@ -1,4 +1,4 @@
-import { runAutoFeudatory, feudatoryReport } from '../autoFeudatory.js';
+import { releaseAllFeudatory, runAutoFeudatory, feudatoryReport } from '../autoFeudatory.js';
 import { loadSignupCheerConfig } from './tasksSignupCheer.js';
 import { sendWxPusherMessage } from '../wxpusher.js';
 import { extractRolePatch } from '../roleSnapshot.js';
@@ -112,6 +112,52 @@ export function createTasksFeudatory(deps) {
     if (!options.deferPush) message.info('咸主查询结束，请查看账号日志');
     return results;
   };
+  const batchReleaseFeudatory = async () => {
+    const ids = [...selectedTokens.value];
+    if (!ids.length) return;
+    isRunning.value = true; shouldStop.value = false;
+    ids.forEach(id => { tokenStatus.value[id] = 'waiting'; });
+    try {
+      for (const id of ids) {
+        if (shouldStop.value) break;
+        const name = tokens.value.find(t => t.id === id)?.name || id;
+        let ownsSlot = false, count = 0;
+        currentRunningTokenId.value = id; tokenStatus.value[id] = 'running';
+        try {
+          await ensureConnection(id, 2, acquired => { ownsSlot = acquired; }, { readOnly: true });
+          const result = await releaseAllFeudatory({
+            send: (cmd, params) => {
+              if (tokenStore.getWebSocketStatus(id) !== 'connected') throw new Error('连接已断开');
+              return tokenStore.sendMessageWithPromise(id, cmd, params, 15000);
+            },
+            shouldStop: () => shouldStop.value,
+            wait: () => wait(Math.max(500, Number(batchSettings.commandDelay) || 0)),
+            onReleased: update => {
+              count = update.count;
+              log(`${name} 已确认释放咸臣 ${update.targetId}，累计${count}人`);
+              // 清理对应关系的观察时间，其他咸臣记录不受影响。
+              try {
+                const storage = deps.storage || globalThis.localStorage;
+                const key = `xyzw-feudatory-history-v1:${update.roleId}`;
+                const history = JSON.parse(storage.getItem(key) || '{}');
+                delete history[update.targetId]; storage.setItem(key, JSON.stringify(history));
+              } catch (error) { log(`${name} 观察记录清理失败：${error.message}`, 'warning'); }
+            },
+          });
+          tokenStatus.value[id] = result.stopped ? 'stopped' : 'completed';
+          log(`${name} 一键释放咸臣${result.stopped ? '已停止' : '完成'}，已确认释放${result.count}人`);
+        } catch (error) {
+          tokenStatus.value[id] = shouldStop.value ? 'stopped' : 'failed';
+          log(`${name} 一键释放咸臣停止：${error.message}，已确认释放${count}人`, 'warning');
+        } finally {
+          if (ownsSlot) { try { tokenStore.closeWebSocketConnection(id); } finally { releaseConnectionSlot(); } }
+        }
+      }
+    } finally {
+      ids.forEach(id => { if (tokenStatus.value[id] === 'waiting') tokenStatus.value[id] = 'stopped'; });
+      isRunning.value = false; currentRunningTokenId.value = null;
+    }
+  };
   const pushFeudatoryInfo = async results => {
     const unique = [...new Map(results.map(r => [r.tokenId, r])).values()];
     if (!unique.length) return;
@@ -174,5 +220,5 @@ export function createTasksFeudatory(deps) {
     }
     return results;
   };
-  return { pushFeudatoryInfo, batchAutoFeudatory, batchCheckSaltMasters, pushSaltMasterInfo };
+  return { batchReleaseFeudatory, pushFeudatoryInfo, batchAutoFeudatory, batchCheckSaltMasters, pushSaltMasterInfo };
 }

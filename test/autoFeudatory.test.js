@@ -122,5 +122,5 @@ test('注册小号与定时入口，定时合并报表且禁止自动补跑抓�
   assert.match(view,/@click="batchAutoFeudatory"/);
   assert.match(view,/aggregatedFeudatoryResults.push/);
   assert.match(view,/pushFeudatoryInfo\(aggregatedFeudatoryResults\)/);
-  assert.match(view,/"batchCampfireLottery", "batchAutoFeudatory"\]\.includes\(name\)/);
+  assert.match(view,/"batchCampfireLottery", "batchAutoFeudatory", "batchReleaseFeudatory"\]\.includes\(name\)/);
 });

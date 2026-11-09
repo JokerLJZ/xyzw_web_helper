@@ -133,3 +133,40 @@ export function feudatoryReport(results) {
     return [`### ${cell(r.name)}：${cell(r.reason)}${r.error ? `（${cell(r.error)}）` : ''}`, `当前咸臣累计贡献合计：${total}金币`, '| 咸臣 / ID | 战力 | 推关 | 累计金币 | 抓取或观察时间 |', '|---|---|---|---|---|', ...(r.members || []).map(m => `| ${cell(m.name)} / ${m.id} | ${cell(m.power)} | ${cell(m.levelId)} | ${cell(m.gold)} | ${m.capturedAt ? '抓取' : '观察'}：${cell(new Date(m.capturedAt ?? m.observedAt).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'}))} |`), `咸主：${r.boss ? `${cell(r.boss.name)} / ${r.boss.id}` : r.snapshotKnown === false ? '未知' : '无'}`, `本次操作：${cell(r.actions?.join('；') || '无')}`].join('\n');
   }).join('\n\n');
 }
+
+/** 只释放开始时的名单，失败或超时后查状态，不重复发送写请求。 */
+export async function releaseAllFeudatory({ send, shouldStop = () => false, wait = async () => {}, onReleased = () => {} }) {
+  const request = async (cmd, params = {}) => {
+    if (shouldStop()) throw new Error('用户已停止');
+    const response = await send(cmd, params);
+    const body = feudatoryBody(response);
+    if (response?.code || body?.code || response?.error) throw new Error(response?.error || `请求${cmd}失败`);
+    return response;
+  };
+  let role = readFeudatoryRole(await request('role_getroleinfo'));
+  const ownerId = role.roleId;
+  const ids = entries(role.feudatory).map(([id]) => Number(id));
+  if (ids.some(id => !Number.isSafeInteger(id) || id <= 0 || id === ownerId)) throw new Error('咸臣ID异常，未发送释放请求');
+  let count = 0;
+  for (const targetId of ids) {
+    if (shouldStop()) return { count, stopped: true };
+    role = readFeudatoryRole(await request('role_getroleinfo'));
+    if (role.roleId !== ownerId) throw new Error('角色已变化，已停止释放');
+    if (!entries(role.feudatory).some(([id]) => Number(id) === targetId)) continue;
+    let writeError;
+    try { await request('feudatory_exiled', { targetId, result: true }); }
+    catch (error) { writeError = error; }
+    // 已发送的写请求即使超时或用户停止，也只做一次只读核验。
+    const response = await send('role_getroleinfo', {});
+    if (response?.code || feudatoryBody(response)?.code || response?.error) throw new Error('释放结果查询失败，已停止');
+    const fresh = readFeudatoryRole(response);
+    if (fresh.roleId !== ownerId) throw new Error('角色已变化，释放结果未确认');
+    if (entries(fresh.feudatory).some(([id]) => Number(id) === targetId)) throw new Error(`释放咸臣${targetId}未确认${writeError ? `：${writeError.message}` : ''}`);
+    count++;
+    onReleased({ roleId: ownerId, targetId, count });
+    if (writeError) throw new Error(`咸臣${targetId}已确认释放，但请求异常，已停止：${writeError.message}`);
+    if (shouldStop()) return { count, stopped: true };
+    await wait();
+  }
+  return { count, stopped: shouldStop() };
+}

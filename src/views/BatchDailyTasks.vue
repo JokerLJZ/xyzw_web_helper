@@ -890,6 +890,10 @@
                 >
                   一键金鱼杆补齐
                 </n-button>
+                <n-button size="small" @click="batchReleaseFeudatory" :disabled="isRunning || selectedTokens.length === 0"
+                  title="释放所选账号当前全部咸臣，无论贡献和抓取时间；逐个查询确认结果">
+                  一键释放咸臣
+                </n-button>
                 <n-button size="small" @click="batchAutoFeudatory" :disabled="isRunning || selectedTokens.length === 0"
                   title="竞技场优先、好友补位，清理观察超过48小时且零贡献的咸臣，并推送报表">
                   自动寻找咸臣
@@ -6596,7 +6600,7 @@ const executeScheduledTask = async (task) => {
       if (shouldStop.value) break;
       await runScheduledAccount(tokenId);
     }
-    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.some(name => ["batchCheerShopPurchase", "batchCampfireLottery", "batchAutoFeudatory"].includes(name)) ? 0 : 2) && !shouldStop.value; retryRound++) {
+    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.some(name => ["batchCheerShopPurchase", "batchCampfireLottery", "batchAutoFeudatory", "batchReleaseFeudatory"].includes(name)) ? 0 : 2) && !shouldStop.value; retryRound++) {
     const retryIds = getBatchRetryTokenIds(availableTokens, tokenStatus.value, shouldStop.value);
     for (const tokenId of retryIds) {
       if (shouldStop.value) break;
@@ -8284,7 +8288,7 @@ const handleGoldenCheer = async () => {
   await batchGoldenCheer();
 };
 
-const { pushFeudatoryInfo, batchAutoFeudatory, batchCheckSaltMasters, pushSaltMasterInfo } = createTasksFeudatory(createTaskDeps());
+const { batchReleaseFeudatory, pushFeudatoryInfo, batchAutoFeudatory, batchCheckSaltMasters, pushSaltMasterInfo } = createTasksFeudatory(createTaskDeps());
 const tasksMainLevel = createTasksMainLevel(createTaskDeps());
 const { batchPushMainLevelInfo, pushMainLevelInfo } = tasksMainLevel;
 
@@ -8371,6 +8375,7 @@ const getScheduledTaskFunction = (name) => {
     batchPushMainLevelInfo,
     batchCheckSaltMasters,
     batchAutoFeudatory,
+    batchReleaseFeudatory,
     batchAdjustEarlyMainLevelFormation,
     batchAdjustMainLevelFormation,
     batchUpgradeHangUpAndClaimOrderRewards,
