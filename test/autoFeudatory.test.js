@@ -25,7 +25,7 @@ function scenario(options = {}) {
     }
     throw new Error(cmd);
   };
-  const run = () => runAutoFeudatory({send,config:{ConstantConf:{lordEnergyCount:10,lordCount:[1,100,300,500,1000]}},battleVersion:240522,history,saveHistory(){},now:()=>time,shouldStop:options.shouldStop});
+  const run = () => runAutoFeudatory({send,config:{ConstantConf:{lordEnergyCount:10,lordCount:[1,100,300,500,1000]}},battleVersion:240522,history,excludedRoleIds:options.excludedRoleIds || [],saveHistory(){},now:()=>time,shouldStop:options.shouldStop});
   return {run,role,history,calls,fights:()=>fights};
 }
 test('竞技场先抓满5人，准确传参并持久化抓取时间，不读取好友',async()=>{
@@ -67,14 +67,14 @@ test('用户停止或成员状态缺失不发送消耗请求',async()=>{
 test('报表包含累计合计、咸主及时间，不将未知金币算0，转义名称',()=>{
   const report=feudatoryReport([{name:'<x>',reason:'名额已满',members:[{id:2,name:'a|b',gold:50,observedAt:time},{id:3,gold:70,capturedAt:time}],boss:{id:8,name:'boss'},actions:[]}]);
   assert.match(report,/120金币/);assert.match(report,/boss \/ 8/);assert.match(report,/&lt;x&gt;/);assert.match(report,/观察/);assert.match(report,/抓取/);
-  assert.match(feudatoryReport([{members:[{id:2}],actions:[]}]),/合计：未知/);
+  assert.match(feudatoryReport([{members:[{id:2}],actions:[]}]),/未知金币/);
 });
 test('批量任务按角色隔离保存、正常释放连接，推送失败不重跑',async()=>{
   const f=scenario({role:{hallEnergy:0}}),saved=new Map(),logs=[];let closed=0,released=0,pushes=0;
-  const deps={selectedTokens:{value:['a']},tokens:{value:[{id:'a',name:'账号'}]},tokenStatus:{value:{}},isRunning:{value:false},shouldStop:{value:false},currentRunningTokenId:{value:null},batchSettings:{wxpusherEnabled:true,wxpusherAppToken:'test',wxpusherUids:'test'},ensureConnection:async(id,n,cb)=>cb(true),releaseConnectionSlot(){released++;},tokenStore:{getWebSocketStatus:()=> 'connected',getBattleVersion:()=>240522,sendMessageWithPromise:(id,cmd,p)=>{
+  const deps={selectedTokens:{value:['a']},tokens:{value:[{id:'a',name:'账号',roleId:1}]},tokenStatus:{value:{}},isRunning:{value:false},shouldStop:{value:false},currentRunningTokenId:{value:null},batchSettings:{wxpusherEnabled:true,wxpusherAppToken:'test',wxpusherUids:'test'},ensureConnection:async(id,n,cb)=>cb(true),releaseConnectionSlot(){released++;},tokenStore:{getWebSocketStatus:()=> 'connected',getBattleVersion:()=>240522,sendMessageWithPromise:(id,cmd,p)=>{
     if(cmd==='role_getroleinfo')return {role:structuredClone(f.role)};
     return f.calls.push({cmd,p}),cmd==='hall_getinfo'?{}:{};
-  },closeWebSocketConnection(){closed++;}},loadFeudatoryConfig:async()=>({ConstantConf:{lordEnergyCount:10,lordCount:[1,100,300,500,1000]}}),storage:{getItem:k=>saved.get(k),setItem:(k,v)=>saved.set(k,v)},sleep:async()=>{},sendWxPusherMessage:async()=>{pushes++;throw Error('offline');},addLog:x=>logs.push(x),message:{}};
+  },closeWebSocketConnection(){closed++;}},loadFeudatoryConfig:async()=>({ConstantConf:{lordEnergyCount:10,lordCount:[1,100,300,500,1000]}}),storage:{getItem:k=>saved.get(k),setItem:(k,v)=>saved.set(k,v)},sleep:async()=>{},sendWxPusherMessage:async(config,title,content,type)=>{assert.equal(type,2);assert.match(content,/<table/);pushes++;throw Error('offline');},addLog:x=>logs.push(x),message:{}};
   await createTasksFeudatory(deps).batchAutoFeudatory();assert.equal(closed,1);assert.equal(released,1);assert.equal(pushes,1);assert.ok(saved.has('xyzw-feudatory-history-v1:1'));assert.equal(deps.isRunning.value,false);assert.equal(deps.tokenStatus.value.a,'completed');assert.ok(logs.some(l=>l.message.includes('推送失败')));
 });
 
@@ -121,6 +121,57 @@ test('注册小号与定时入口，定时合并报表且禁止自动补跑抓�
   const view=fs.readFileSync(new URL('../src/views/BatchDailyTasks.vue',import.meta.url),'utf8');
   assert.match(view,/@click="batchAutoFeudatory"/);
   assert.match(view,/aggregatedFeudatoryResults.push/);
+  assert.match(view,/protectedTokenIds: availableTokens/);
   assert.match(view,/pushFeudatoryInfo\(aggregatedFeudatoryResults\)/);
   assert.match(view,/"batchCampfireLottery", "batchAutoFeudatory", "batchReleaseFeudatory"\]\.includes\(name\)/);
+});
+
+test('保护账号从竞技场与好友排除，已有受保护咸臣无视48小时及贡献释放',async()=>{
+  const f=scenario({excludedRoleIds:['2',3],role:{feudatory:{2:{goldTotal:999}}},arena:[2,3],friends:[{roleId:3,lastLogin:time/1000},{roleId:4,lastLogin:time/1000}]});
+  const r=await f.run();
+  assert.deepEqual(f.calls.filter(c=>c.cmd==='feudatory_exiled').map(c=>c.p.targetId),[2]);
+  assert.deepEqual(f.calls.filter(c=>c.cmd==='fight_startconquer').map(c=>c.p.targetId),[4]);
+  assert.equal(f.history[2],undefined);assert.ok(r.actions.includes('释放 2'));
+});
+
+test('批量只解析本次选中的账号身份，未选中账号不受保护',async()=>{
+  const { createTasksFeudatory }=await import('../src/utils/batch/tasksFeudatory.js');
+  const calls=[],connected=[];let released=0;
+  const role={roleId:1,bossId:0,levelId:6000,power:1000,hallEnergy:10,feudatory:{2:{goldTotal:100},3:{goldTotal:100}}};
+  const deps={selectedTokens:{value:['a','b']},tokens:{value:[{id:'a',roleId:1},{id:'b'},{id:'c',roleId:3}]},tokenStatus:{value:{}},isRunning:{value:false},shouldStop:{value:false},currentRunningTokenId:{value:null},batchSettings:{},ensureConnection:async(id,n,cb)=>{connected.push(id);cb(true);},releaseConnectionSlot(){released++;},tokenStore:{getWebSocketStatus:()=> 'connected',getBattleVersion:()=>1,updateToken(){},closeWebSocketConnection(){},sendMessageWithPromise:async(id,cmd,p)=>{
+    calls.push({id,cmd,p});
+    if(id==='b')return {role:{roleId:2,bossId:0,levelId:6000,power:1000,hallEnergy:0,feudatory:{}}};
+    if(cmd==='role_getroleinfo')return {role:structuredClone(role)};
+    if(cmd==='feudatory_exiled'){delete role.feudatory[p.targetId];return {};}
+    if(cmd==='hall_getinfo'||cmd==='arena_startarea')return {};
+    if(cmd==='arena_getarearank')return {list:[]};
+    if(cmd==='friend_list')return {friendList:[]};
+    if(cmd==='rank_getroleinfo')return {roleInfo:{roleId:p.roleId}};
+    throw Error(cmd);
+  }},storage:{getItem:()=>null,setItem(){}},loadFeudatoryConfig:async()=>({ConstantConf:{lordEnergyCount:10,lordCount:[1,100,300,500,1000]}}),sleep:async()=>{},addLog(){},message:{}};
+  await createTasksFeudatory(deps).batchAutoFeudatory();
+  assert.equal(connected.includes('c'),false);
+  assert.deepEqual(calls.filter(c=>c.cmd==='feudatory_exiled').map(c=>c.p.targetId),[2]);
+  assert.ok(role.feudatory[3]); assert.equal(released,3);
+});
+test('所选账号身份无法确认时整轮不抓取也不释放',async()=>{
+  const {createTasksFeudatory}=await import('../src/utils/batch/tasksFeudatory.js');let writes=0;
+  const deps={selectedTokens:{value:['a']},tokens:{value:[{id:'a'}]},tokenStatus:{value:{}},isRunning:{value:false},shouldStop:{value:false},currentRunningTokenId:{value:null},batchSettings:{},ensureConnection:async()=>{},releaseConnectionSlot(){},tokenStore:{sendMessageWithPromise:async()=>{writes++;throw Error('查询失败');}},sleep:async()=>{},addLog(){},message:{}};
+  await createTasksFeudatory(deps).batchAutoFeudatory();assert.equal(writes,1);assert.equal(deps.tokenStatus.value.a,'failed');
+});
+
+test('咸臣推送生成窄屏HTML表格，转义内容、时间缺失明确标未知',()=>{
+  const html=feudatoryReport([{name:'<script>x</script>',reason:'完成',members:[{id:2,name:'A|B',gold:0}],actions:['<img src=x>']}]);
+  assert.match(html,/<table/);assert.match(html,/colspan="2"/);assert.match(html,/A\|B/);
+  assert.equal(html.includes('<script>'),false);assert.equal(html.includes('<img'),false);
+  assert.equal(html.includes('Invalid Date'),false);assert.match(html,/观察开始/);assert.match(html,/未知/);
+});
+test('多账号HTML报表按UTF-8字节分段，保持HTML类型与完整账号表格',async()=>{
+  const sent=[],delays=[];
+  const deps={batchSettings:{wxpusherEnabled:true,wxpusherAppToken:'test',wxpusherUids:'test'},addLog(){},sendWxPusherMessage:async(c,title,content,type)=>sent.push({title,content,type}),sleep:async ms=>delays.push(ms)};
+  const rows=Array.from({length:50},(_,i)=>({tokenId:String(i),name:`账号${i}`,reason:'完成',members:Array.from({length:5},(_,j)=>({id:i*10+j,name:'中文名称'.repeat(5),gold:100,observedAt:1})),actions:[]}));
+  await createTasksFeudatory(deps).pushFeudatoryInfo(rows);
+  assert.ok(sent.length>1);assert.equal(delays.length,sent.length-1);
+  for(const part of sent){assert.equal(part.type,2);assert.ok(new TextEncoder().encode(part.content).length<=60000);assert.ok(part.content.length<=38000);assert.equal((part.content.match(/<table /g)||[]).length,(part.content.match(/<\/table>/g)||[]).length);}
+  assert.equal(sent.reduce((n,p)=>n+(p.content.match(/<h3>/g)||[]).length,0),50);
 });

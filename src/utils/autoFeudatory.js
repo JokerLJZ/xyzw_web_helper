@@ -21,10 +21,11 @@ export function syncFeudatoryHistory(role, history, now) {
   for (const id of Object.keys(history)) if (!active.has(id)) delete history[id];
   for (const id of active) if (!history[id]) history[id] = { observedAt: now };
 }
-export async function runAutoFeudatory({ send, config, battleVersion, history, saveHistory, now = Date.now, shouldStop = () => false, wait = async () => {}, log = () => {} }) {
+export async function runAutoFeudatory({ send, config, battleVersion, history, saveHistory, excludedRoleIds = [], now = Date.now, shouldStop = () => false, wait = async () => {}, log = () => {} }) {
   let role, energy, stopped = false;
   const actions = [];
   const released = new Set();
+  const excluded = new Set([...excludedRoleIds].map(String));
   let ownerId;
   const request = async (cmd, params = {}) => {
     if (shouldStop()) { stopped = true; throw new Error('用户已停止'); }
@@ -55,10 +56,12 @@ export async function runAutoFeudatory({ send, config, battleVersion, history, s
     const capacity = Math.min(5, rules.lordCount.filter(lv => Number.isFinite(lv) && role.levelId > lv).length);
     for (const [id, member] of entries(role.feudatory)) {
       const record = history[id], since = record?.capturedAt ?? record?.observedAt;
-      if (!Number.isFinite(since) || now() - since < 48 * 3600000 || (member?.goldTotal === undefined ? 0 : member.goldTotal) !== 0) continue;
+      const isOwnAccount = excluded.has(String(id));
+      if (!isOwnAccount && (!Number.isFinite(since) || now() - since < 48 * 3600000 || (member?.goldTotal === undefined ? 0 : member.goldTotal) !== 0)) continue;
       await refresh();
       const fresh = entries(role.feudatory).find(([key]) => String(key) === String(id))?.[1];
-      if (!fresh || (fresh.goldTotal === undefined ? 0 : fresh.goldTotal) !== 0 || !history[id] || (history[id].capturedAt ?? history[id].observedAt) !== since) continue;
+      if (!fresh) continue;
+      if (!isOwnAccount && ((fresh.goldTotal === undefined ? 0 : fresh.goldTotal) !== 0 || !history[id] || (history[id].capturedAt ?? history[id].observedAt) !== since)) continue;
       await request('feudatory_exiled', { targetId: Number(id), result: true });
       await refresh();
       if (entries(role.feudatory).some(([key]) => String(key) === String(id))) throw new Error('释放结果未确认，已停止');
@@ -68,7 +71,7 @@ export async function runAutoFeudatory({ send, config, battleVersion, history, s
     if (count() < capacity) {
       await request('hall_getinfo'); await refresh();
       energy = integer(role.hallEnergy, '精力');
-      const seen = new Set([...released, String(role.roleId), String(role.bossId), ...entries(role.feudatory).map(([id]) => String(id))]);
+      const seen = new Set([...excluded, ...released, String(role.roleId), String(role.bossId), ...entries(role.feudatory).map(([id]) => String(id))]);
       const capture = async ids => {
         for (const id of ids) {
           if (count() >= capacity || energy < cost) return;
@@ -126,12 +129,25 @@ export async function runAutoFeudatory({ send, config, battleVersion, history, s
   if (role?.bossId > 0) { boss = { id: role.bossId }; if (!shouldStop()) try { Object.assign(boss, await details(role.bossId)); } catch { /* ID remains known. */ } }
   return { reason, error, snapshotKnown: Boolean(role), members, boss, actions };
 }
-const cell = v => String(v ?? '未知').replace(/[|\r\n]/g, ' ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const cell = v => String(v ?? '未知').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const tableCell = 'border:1px solid #d9d9d9;padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;';
+const timeText = value => Number.isFinite(value) && value > 0 && !Number.isNaN(new Date(value).getTime())
+  ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未知';
+/** WxPusher HTML正文；每账号两列表格，避免手机上五列被挤压。 */
 export function feudatoryReport(results) {
+  const row = (label, value) => `<tr><th style="${tableCell}width:28%;">${cell(label)}</th><td style="${tableCell}">${cell(value)}</td></tr>`;
   return results.map(r => {
     const total = r.snapshotKnown !== false && r.members?.every(m => Number.isSafeInteger(m.gold) && m.gold >= 0) ? r.members.reduce((s,m) => s + m.gold, 0) : '未知';
-    return [`### ${cell(r.name)}：${cell(r.reason)}${r.error ? `（${cell(r.error)}）` : ''}`, `当前咸臣累计贡献合计：${total}金币`, '| 咸臣 / ID | 战力 | 推关 | 累计金币 | 抓取或观察时间 |', '|---|---|---|---|---|', ...(r.members || []).map(m => `| ${cell(m.name)} / ${m.id} | ${cell(m.power)} | ${cell(m.levelId)} | ${cell(m.gold)} | ${m.capturedAt ? '抓取' : '观察'}：${cell(new Date(m.capturedAt ?? m.observedAt).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'}))} |`), `咸主：${r.boss ? `${cell(r.boss.name)} / ${r.boss.id}` : r.snapshotKnown === false ? '未知' : '无'}`, `本次操作：${cell(r.actions?.join('；') || '无')}`].join('\n');
-  }).join('\n\n');
+    const rows = [row('执行结果', `${r.reason ?? '未知'}${r.error ? `（${r.error}）` : ''}`), row('累计金币', `${total}金币（当前咸臣合计）`)];
+    for (const m of r.members || []) {
+      rows.push(`<tr><th colspan="2" style="${tableCell}background:#f2f5f8;">咸臣：${cell(m.name)} / ${cell(m.id)}</th></tr>`,
+        row('累计贡献', m.gold), row('战力 / 推关', `${m.power ?? '未知'} / ${m.levelId ?? '未知'}`),
+        row(m.capturedAt ? '抓取时间' : '观察开始', timeText(m.capturedAt ?? m.observedAt)));
+    }
+    if (!r.members?.length) rows.push(row('咸臣名单', r.snapshotKnown === false ? '未知' : '暂无咸臣'));
+    rows.push(row('咸主', r.boss ? `${r.boss.name ?? '未知'} / ${r.boss.id}` : r.snapshotKnown === false ? '未知' : '无'), row('本次操作', r.actions?.join('；') || '无'));
+    return `<h3>${cell(r.name)}</h3><table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:14px;line-height:1.6;"><tbody>${rows.join('')}</tbody></table>`;
+  }).join('<br>');
 }
 
 /** 只释放开始时的名单，失败或超时后查状态，不重复发送写请求。 */

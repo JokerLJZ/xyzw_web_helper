@@ -164,7 +164,45 @@ export function createTasksFeudatory(deps) {
     if (!batchSettings.wxpusherEnabled || !batchSettings.wxpusherAppToken || !batchSettings.wxpusherUids) {
       log('WxPusher未配置，咸臣报表未推送', 'warning'); return;
     }
-    await push({ appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids }, '自动寻找咸臣结果', feudatoryReport(unique));
+    const chunks = [];
+    let current = '';
+    for (const row of unique) {
+      const block = feudatoryReport([row]);
+      if (block.length > 38000 || new TextEncoder().encode(block).length > 60000) throw new Error('单账号咸臣报表过长，未发送');
+      const next = current + block;
+      if (current && (next.length > 38000 || new TextEncoder().encode(next).length > 60000)) { chunks.push(current); current = block; }
+      else current = next;
+    }
+    if (current) chunks.push(current);
+    for (let i = 0; i < chunks.length; i++) {
+      if (i) await wait(600);
+      await push({ appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids }, `自动寻找咸臣结果${chunks.length > 1 ? `（${i + 1}/${chunks.length}）` : ''}`, chunks[i], 2);
+    }
+  };
+  const resolveOwnRoleIds = async selectedIds => {
+    const own = new Set();
+    // 仅保护本次勾选账号；未知身份先只读查询，不能漏掉后继续抓取。
+    for (const selectedId of selectedIds) {
+      const token = tokens.value.find(item => item.id === selectedId);
+      if (!token) throw new Error(`所选账号${selectedId}已不在清单中`);
+      if (shouldStop.value) throw new Error('用户已停止');
+      let roleId = Number(token.roleId);
+      if (!Number.isSafeInteger(roleId) || roleId <= 0) {
+        let ownsSlot = false;
+        try {
+          log(`正在确认账号身份：${token.name || token.id}`);
+          await ensureConnection(token.id, 2, acquired => { ownsSlot = acquired; }, { readOnly: true });
+          if (shouldStop.value) throw new Error('用户已停止');
+          const response = await tokenStore.sendMessageWithPromise(token.id, 'role_getroleinfo', {}, 15000);
+          roleId = extractRolePatch(response)?.roleId;
+          if (!Number.isSafeInteger(roleId) || roleId <= 0) throw new Error('角色ID不完整');
+          tokenStore.updateToken?.(token.id, { roleId });
+        } catch (error) { throw new Error(`无法确认所选账号${token.name || token.id}的身份：${error.message}`); }
+        finally { if (ownsSlot) { try { tokenStore.closeWebSocketConnection(token.id); } finally { releaseConnectionSlot(); } } }
+      }
+      own.add(String(roleId));
+    }
+    return own;
   };
   const batchAutoFeudatory = async (options = {}) => {
     const ids = [...selectedTokens.value], results = [];
@@ -172,6 +210,13 @@ export function createTasksFeudatory(deps) {
     isRunning.value = true; shouldStop.value = false;
     ids.forEach(id => { tokenStatus.value[id] = 'waiting'; });
     try {
+      let excludedRoleIds;
+      try { excludedRoleIds = await resolveOwnRoleIds(options.protectedTokenIds || ids); }
+      catch (error) {
+        log(`自动寻找咸臣未开始：${error.message}`, 'error');
+        ids.forEach(id => { tokenStatus.value[id] = shouldStop.value ? 'stopped' : 'failed'; });
+        return results;
+      }
       for (const id of ids) {
         if (shouldStop.value) break;
         const name = tokens.value.find(t => t.id === id)?.name || id;
@@ -193,7 +238,7 @@ export function createTasksFeudatory(deps) {
           const key = `xyzw-feudatory-history-v1:${role.roleId}`;
           const history = JSON.parse(storage.getItem(key) || '{}');
           if (!history || typeof history !== 'object' || Array.isArray(history)) throw new Error('咸臣观察记录损坏');
-          const result = await runAutoFeudatory({ send, config, battleVersion: tokenStore.getBattleVersion(), history,
+          const result = await runAutoFeudatory({ send, config, excludedRoleIds, battleVersion: tokenStore.getBattleVersion(), history,
             saveHistory: value => storage.setItem(key, JSON.stringify(value)),
             shouldStop: () => shouldStop.value,
             wait: () => wait(Math.max(500, Number(batchSettings.commandDelay) || 0)),

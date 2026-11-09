@@ -6459,6 +6459,10 @@ const executeScheduledTask = async (task) => {
         type: "info",
       });
 
+      if (taskName === "batchAutoFeudatory") {
+        // 定时按账号执行会临时只选中一人，保护范围仍取本轮完整账号清单。
+        return taskFunction({ deferPush: true, protectedTokenIds: availableTokens });
+      }
       if (["batchPushMainLevelInfo", "batchCheckSaltMasters", "batchAutoFeudatory"].includes(taskName)) {
         // 按账号执行阶段只采集结果，等所有账号完成后由调度器统一推送一份报告。
         return taskFunction({ deferPush: true });
