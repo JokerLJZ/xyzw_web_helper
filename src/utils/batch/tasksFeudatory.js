@@ -1,3 +1,5 @@
+import { runAutoFeudatory, feudatoryReport } from '../autoFeudatory.js';
+import { loadSignupCheerConfig } from './tasksSignupCheer.js';
 import { sendWxPusherMessage } from '../wxpusher.js';
 import { extractRolePatch } from '../roleSnapshot.js';
 
@@ -110,5 +112,67 @@ export function createTasksFeudatory(deps) {
     if (!options.deferPush) message.info('咸主查询结束，请查看账号日志');
     return results;
   };
-  return { batchCheckSaltMasters, pushSaltMasterInfo };
+  const pushFeudatoryInfo = async results => {
+    const unique = [...new Map(results.map(r => [r.tokenId, r])).values()];
+    if (!unique.length) return;
+    if (!batchSettings.wxpusherEnabled || !batchSettings.wxpusherAppToken || !batchSettings.wxpusherUids) {
+      log('WxPusher未配置，咸臣报表未推送', 'warning'); return;
+    }
+    await push({ appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids }, '自动寻找咸臣结果', feudatoryReport(unique));
+  };
+  const batchAutoFeudatory = async (options = {}) => {
+    const ids = [...selectedTokens.value], results = [];
+    if (!ids.length) return results;
+    isRunning.value = true; shouldStop.value = false;
+    ids.forEach(id => { tokenStatus.value[id] = 'waiting'; });
+    try {
+      for (const id of ids) {
+        if (shouldStop.value) break;
+        const name = tokens.value.find(t => t.id === id)?.name || id;
+        let ownsSlot = false;
+        currentRunningTokenId.value = id; tokenStatus.value[id] = 'running';
+        try {
+          await ensureConnection(id, 2, acquired => { ownsSlot = acquired; });
+          const send = (cmd, params) => {
+            if (shouldStop.value) throw new Error('用户已停止');
+            if (tokenStore.getWebSocketStatus(id) !== 'connected') throw new Error('连接已断开');
+            return tokenStore.sendMessageWithPromise(id, cmd, params, 15000);
+          };
+          const config = await (deps.loadFeudatoryConfig || loadSignupCheerConfig)(send);
+          // 持久化按角色ID隔离，token重导入也能保留观察记录；读取失败不进行释放。
+          const response = await send('role_getroleinfo', {});
+          const role = extractRolePatch(response);
+          if (!Number.isSafeInteger(role?.roleId) || role.roleId <= 0) throw new Error('角色ID不完整');
+          const storage = deps.storage || globalThis.localStorage;
+          const key = `xyzw-feudatory-history-v1:${role.roleId}`;
+          const history = JSON.parse(storage.getItem(key) || '{}');
+          if (!history || typeof history !== 'object' || Array.isArray(history)) throw new Error('咸臣观察记录损坏');
+          const result = await runAutoFeudatory({ send, config, battleVersion: tokenStore.getBattleVersion(), history,
+            saveHistory: value => storage.setItem(key, JSON.stringify(value)),
+            shouldStop: () => shouldStop.value,
+            wait: () => wait(Math.max(500, Number(batchSettings.commandDelay) || 0)),
+            log: text => log(`${name}：${text}`),
+          });
+          results.push({ tokenId: id, name, ...result });
+          tokenStatus.value[id] = shouldStop.value ? 'stopped' : result.error ? 'failed' : 'completed';
+          log(`${name} 自动寻找咸臣结束：${result.reason}${result.error ? `，${result.error}` : ''}`, result.error ? 'warning' : 'info');
+        } catch (error) {
+          results.push({ tokenId: id, name, reason: shouldStop.value ? '已停止' : '异常停止', error: error.message, snapshotKnown: false, members: [], actions: [] });
+          tokenStatus.value[id] = shouldStop.value ? 'stopped' : 'failed';
+          log(`${name} 自动寻找咸臣停止：${error.message}`, 'error');
+        } finally {
+          if (ownsSlot) { try { tokenStore.closeWebSocketConnection(id); } finally { releaseConnectionSlot(); } }
+        }
+      }
+      if (!options.deferPush) {
+        try { await pushFeudatoryInfo(results); }
+        catch (error) { log(`咸臣报表推送失败：${error.message}`, 'error'); }
+      }
+    } finally {
+      ids.forEach(id => { if (tokenStatus.value[id] === 'waiting') tokenStatus.value[id] = 'stopped'; });
+      isRunning.value = false; currentRunningTokenId.value = null;
+    }
+    return results;
+  };
+  return { pushFeudatoryInfo, batchAutoFeudatory, batchCheckSaltMasters, pushSaltMasterInfo };
 }

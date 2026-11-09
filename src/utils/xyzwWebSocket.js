@@ -198,6 +198,10 @@ export function registerDefaultCommands(reg) {
     .register("rank_getserverrank")
 
     // 竞技场
+    .register("fight_startconquer")
+    .register("feudatory_exiled")
+    .register("hall_getinfo")
+    .register("friend_list")
     .register("arena_startarea")
     .register("fight_startlevel") // 获取 battleVersion
     .register("fight_calcleveltime") // 计算主线关卡战斗时长
@@ -1350,6 +1354,7 @@ export class XyzwWebSocketClient {
       fight_startareaarenaresp: "fight_startareaarena",
       arena_startarearesp: "arena_startarea",
       arena_getareatargetresp: "arena_getareatarget",
+      fight_startconquerresp: "fight_startconquer",
       arena_getarearankresp: "arena_getarearank",
       presetteam_saveteamresp: "presetteam_saveteam",
       presetteam_getinforesp: "presetteam_getinfo",

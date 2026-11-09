@@ -129,5 +129,5 @@ test('注册批量和定时入口，含抽奖的定时任务不做失败自动�
   const view = readFileSync(new URL('../src/views/BatchDailyTasks.vue', import.meta.url), 'utf8');
   assert.match(view, /@click="batchCampfireLottery"/);
   assert.match(view.slice(view.indexOf('const getScheduledTaskFunction')), /batchCampfireLottery,/);
-  assert.match(view, /\["batchCheerShopPurchase", "batchCampfireLottery"\]\.includes\(name\)/);
+  assert.match(view, /\["batchCheerShopPurchase", "batchCampfireLottery", "batchAutoFeudatory"\]\.includes\(name\)/);
 });

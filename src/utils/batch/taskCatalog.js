@@ -160,6 +160,7 @@ export const TASK_GROUPS = [
       "batchAwakenHeroSkills",
       "batchTopUpGoldFish",
       "batchCheckSaltMasters",
+      "batchAutoFeudatory",
       "batchPushMainLevelInfo",
       "batchUpgradeLordTo6000",
       "batchUseWarehouseItems",

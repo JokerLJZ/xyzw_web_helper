@@ -890,6 +890,10 @@
                 >
                   一键金鱼杆补齐
                 </n-button>
+                <n-button size="small" @click="batchAutoFeudatory" :disabled="isRunning || selectedTokens.length === 0"
+                  title="竞技场优先、好友补位，清理观察超过48小时且零贡献的咸臣，并推送报表">
+                  自动寻找咸臣
+                </n-button>
                 <n-button
                   size="small"
                   @click="batchCheckSaltMasters"
@@ -6398,6 +6402,7 @@ const executeScheduledTask = async (task) => {
       availableTasks.find((t) => t.value === taskName)?.label || taskName;
     const aggregatedMainLevelResults = [];
     const aggregatedSaltMasterResults = [];
+    const aggregatedFeudatoryResults = [];
 
     const shouldSkipTaskForActivity = (taskName) => {
       if (
@@ -6450,7 +6455,7 @@ const executeScheduledTask = async (task) => {
         type: "info",
       });
 
-      if (["batchPushMainLevelInfo", "batchCheckSaltMasters"].includes(taskName)) {
+      if (["batchPushMainLevelInfo", "batchCheckSaltMasters", "batchAutoFeudatory"].includes(taskName)) {
         // 按账号执行阶段只采集结果，等所有账号完成后由调度器统一推送一份报告。
         return taskFunction({ deferPush: true });
       }
@@ -6550,6 +6555,7 @@ const executeScheduledTask = async (task) => {
             ) {
               aggregatedMainLevelResults.push(...taskResult);
             }
+            if (taskName === "batchAutoFeudatory" && Array.isArray(taskResult)) aggregatedFeudatoryResults.push(...taskResult);
             if (taskName === "batchCheckSaltMasters" && Array.isArray(taskResult)) {
               aggregatedSaltMasterResults.push(...taskResult);
             }
@@ -6590,7 +6596,7 @@ const executeScheduledTask = async (task) => {
       if (shouldStop.value) break;
       await runScheduledAccount(tokenId);
     }
-    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.some(name => ["batchCheerShopPurchase", "batchCampfireLottery"].includes(name)) ? 0 : 2) && !shouldStop.value; retryRound++) {
+    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.some(name => ["batchCheerShopPurchase", "batchCampfireLottery", "batchAutoFeudatory"].includes(name)) ? 0 : 2) && !shouldStop.value; retryRound++) {
     const retryIds = getBatchRetryTokenIds(availableTokens, tokenStatus.value, shouldStop.value);
     for (const tokenId of retryIds) {
       if (shouldStop.value) break;
@@ -6605,6 +6611,11 @@ const executeScheduledTask = async (task) => {
       await runScheduledAccount(tokenId);
     }
 
+    }
+
+    if (aggregatedFeudatoryResults.length) {
+      try { await pushFeudatoryInfo(aggregatedFeudatoryResults); }
+      catch (error) { addLog({ time: new Date().toLocaleTimeString(), message: `咸臣报表推送失败：${error.message}`, type: "error" }); }
     }
 
     if (aggregatedSaltMasterResults.length > 0) {
@@ -8273,7 +8284,7 @@ const handleGoldenCheer = async () => {
   await batchGoldenCheer();
 };
 
-const { batchCheckSaltMasters, pushSaltMasterInfo } = createTasksFeudatory(createTaskDeps());
+const { pushFeudatoryInfo, batchAutoFeudatory, batchCheckSaltMasters, pushSaltMasterInfo } = createTasksFeudatory(createTaskDeps());
 const tasksMainLevel = createTasksMainLevel(createTaskDeps());
 const { batchPushMainLevelInfo, pushMainLevelInfo } = tasksMainLevel;
 
@@ -8359,6 +8370,7 @@ const getScheduledTaskFunction = (name) => {
     batchChallengeThreeKingdomsGenie,
     batchPushMainLevelInfo,
     batchCheckSaltMasters,
+    batchAutoFeudatory,
     batchAdjustEarlyMainLevelFormation,
     batchAdjustMainLevelFormation,
     batchUpgradeHangUpAndClaimOrderRewards,

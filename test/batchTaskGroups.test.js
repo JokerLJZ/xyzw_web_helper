@@ -6,17 +6,18 @@ import { availableTasks } from '../src/utils/batch/constants.js';
 test('全部已批准任务及兼容任务各归一组，定时可选任务无遗漏', () => {
   const defined = TASK_GROUPS.flatMap(group => group.tasks);
   assert.equal(TASK_GROUPS.length, 12);
-  assert.equal(defined.length, 96);
+  assert.equal(defined.length, 97);
   assert.equal(new Set(defined).size, defined.length);
   const grouped = groupTaskCatalog(availableTasks);
   assert.ok(!grouped.some(group => group.name === 'other'));
   assert.deepEqual(grouped.flatMap(group => group.tasks.map(task => task.value)).sort(), availableTasks.map(task => task.value).sort());
 });
 
-test('小号27项只归小号组，藏品及卡牌领奖归武将与图鉴', () => {
+test('小号28项只归小号组，藏品及卡牌领奖归武将与图鉴', () => {
   const small = TASK_GROUPS.find(group => group.name === 'small-account');
-  assert.equal(small.tasks.length, 27);
+  assert.equal(small.tasks.length, 28);
   assert.ok(small.tasks.includes('batchAltGenieSweep'));
+  assert.ok(small.tasks.includes('batchAutoFeudatory'));
   const grouped = groupTaskCatalog(availableTasks);
   for (const group of grouped.filter(group => group.name !== 'small-account')) {
     assert.ok(group.tasks.every(task => !small.tasks.includes(task.value)));

@@ -1,0 +1,135 @@
+import { extractRolePatch } from './roleSnapshot.js';
+export const feudatoryBody = r => r?.data ?? r?._raw?.body ?? r?.body ?? r;
+const entries = v => v instanceof Map ? [...v] : Object.entries(v || {});
+const list = v => v instanceof Map ? [...v.values()] : Array.isArray(v) ? v : Object.values(v || {});
+const integer = (v, label) => { if (!Number.isSafeInteger(v) || v < 0) throw new Error(`${label}数据不完整`); return v; };
+export function readFeudatoryRole(response) {
+  const role = extractRolePatch(response) || feudatoryBody(response);
+  integer(role?.roleId, '角色');
+  if (!role.roleId) throw new Error('角色数据不完整');
+  // role_getroleinfo完整快照应用协议默认值；null或畸形字段仍拒绝。
+  const normalized = { ...role, bossId: role.bossId === undefined ? 0 : role.bossId, feudatory: role.feudatory === undefined ? {} : role.feudatory, hallEnergy: role.hallEnergy === undefined ? 0 : role.hallEnergy };
+  integer(normalized.bossId, '咸主');
+  if (!normalized.feudatory || typeof normalized.feudatory !== 'object' || Array.isArray(normalized.feudatory)) throw new Error('咸臣名单不完整');
+  for (const [, member] of entries(normalized.feudatory)) {
+    if (!member || typeof member !== 'object' || Array.isArray(member)) throw new Error('咸臣成员数据不完整');
+  }
+  return normalized;
+}
+export function syncFeudatoryHistory(role, history, now) {
+  const active = new Set(entries(role.feudatory).map(([id]) => String(id)));
+  for (const id of Object.keys(history)) if (!active.has(id)) delete history[id];
+  for (const id of active) if (!history[id]) history[id] = { observedAt: now };
+}
+export async function runAutoFeudatory({ send, config, battleVersion, history, saveHistory, now = Date.now, shouldStop = () => false, wait = async () => {}, log = () => {} }) {
+  let role, energy, stopped = false;
+  const actions = [];
+  const released = new Set();
+  let ownerId;
+  const request = async (cmd, params = {}) => {
+    if (shouldStop()) { stopped = true; throw new Error('用户已停止'); }
+    const r = await send(cmd, params);
+    const b = feudatoryBody(r);
+    if (r?.code || b?.code || r?.error) throw new Error(r?.error || `请求${cmd}失败`);
+    await wait();
+    return r;
+  };
+  const refresh = async () => {
+    const freshRole = readFeudatoryRole(await request('role_getroleinfo'));
+    if (ownerId !== undefined && freshRole.roleId !== ownerId) throw new Error('角色已变化，已停止');
+    role = freshRole;
+    ownerId = role.roleId;
+    syncFeudatoryHistory(role, history, now()); saveHistory(history);
+    return role;
+  };
+  const details = async id => feudatoryBody(await request('rank_getroleinfo', { roleId: Number(id), bottleType: 0, includeBottleTeam: false, isSearch: false }))?.roleInfo;
+  const count = () => entries(role.feudatory).length;
+  let reason = '候选已耗尽', error;
+  try {
+    await refresh();
+    const rules = config?.ConstantConf;
+    const cost = integer(rules?.lordEnergyCount, '精力消耗');
+    if (!cost || !Array.isArray(rules?.lordCount)) throw new Error('咸臣名额配置不完整');
+    integer(role.levelId, '自身推关');
+    if (!(Number.isFinite(role.power) && role.power > 0)) throw new Error('自身战力数据不完整');
+    const capacity = Math.min(5, rules.lordCount.filter(lv => Number.isFinite(lv) && role.levelId > lv).length);
+    for (const [id, member] of entries(role.feudatory)) {
+      const record = history[id], since = record?.capturedAt ?? record?.observedAt;
+      if (!Number.isFinite(since) || now() - since < 48 * 3600000 || (member?.goldTotal === undefined ? 0 : member.goldTotal) !== 0) continue;
+      await refresh();
+      const fresh = entries(role.feudatory).find(([key]) => String(key) === String(id))?.[1];
+      if (!fresh || (fresh.goldTotal === undefined ? 0 : fresh.goldTotal) !== 0 || !history[id] || (history[id].capturedAt ?? history[id].observedAt) !== since) continue;
+      await request('feudatory_exiled', { targetId: Number(id), result: true });
+      await refresh();
+      if (entries(role.feudatory).some(([key]) => String(key) === String(id))) throw new Error('释放结果未确认，已停止');
+      released.add(String(id));
+      actions.push(`释放 ${id}`);
+    }
+    if (count() < capacity) {
+      await request('hall_getinfo'); await refresh();
+      energy = integer(role.hallEnergy, '精力');
+      const seen = new Set([...released, String(role.roleId), String(role.bossId), ...entries(role.feudatory).map(([id]) => String(id))]);
+      const capture = async ids => {
+        for (const id of ids) {
+          if (count() >= capacity || energy < cost) return;
+          if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0 || seen.has(String(id))) continue;
+          seen.add(String(id));
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const target = await details(id);
+            if (!target || Number(target.roleId) !== Number(id) || (target.bossId === undefined ? 0 : target.bossId) !== 0 || !(Number.isFinite(target.power) && target.power < role.power) || !(target.power >= 0) || !(Number.isSafeInteger(target.levelId) && target.levelId > 5500)) break;
+            let result;
+            try { result = feudatoryBody(await request('fight_startconquer', { targetId: Number(id), battleVersion: integer(battleVersion, '战斗版本') })); }
+            catch (e) { await refresh(); throw e; }
+            energy -= cost;
+            await refresh();
+            energy = Math.min(energy, integer(role.hallEnergy, '精力'));
+            if (entries(role.feudatory).some(([key]) => String(key) === String(id))) {
+              history[id] = { capturedAt: now(), observedAt: now() }; saveHistory(history);
+              actions.push(`抓取 ${id}`); log(`已抓取咸臣 ${id}（${count()}/${capacity}）`); break;
+            }
+            if (!result?.battleData?.result || (result.battleData.result.isWin !== undefined && result.battleData.result.isWin !== false)) throw new Error('抓取结果未确认，已停止以避免重复消耗');
+            if (energy < cost || count() >= capacity) break;
+          }
+        }
+      };
+      if (energy >= cost) {
+        await request('arena_startarea');
+        const ranks = feudatoryBody(await request('arena_getarearank', { rankType: 0, minRank: 0, maxRank: 0 }));
+        if (!Array.isArray(ranks?.list)) throw new Error('竞技场名单不完整');
+        // 当前官方 FullGetArenaRank 路径使用0/0；仅扫描服务器实际提供的本组榜单。
+        const candidates = [...ranks.list];
+        if (Number.isSafeInteger(ranks.total) && ranks.total > candidates.length) {
+          if (ranks.total > 10000) throw new Error('竞技场榜单规模异常');
+          for (let start = 1; start <= ranks.total; start += 100) {
+            const page = feudatoryBody(await request('arena_getarearank', { rankType: 0, minRank: start, maxRank: Math.min(start + 99, ranks.total) }));
+            if (!Array.isArray(page?.list)) throw new Error('竞技场分页数据不完整');
+            candidates.push(...page.list);
+          }
+        }
+        await capture(candidates.map(r => r.roleId));
+        if (count() < capacity && energy >= cost) {
+          const friends = feudatoryBody(await request('friend_list'));
+          if (!friends?.friendList) throw new Error('好友名单不完整');
+          await capture(list(friends.friendList).filter(f => Number.isFinite(f.lastLogin) && f.lastLogin > 0 && now() - f.lastLogin * 1000 >= 0 && now() - f.lastLogin * 1000 <= 86400000).map(f => f.roleId));
+        }
+      }
+      reason = count() >= capacity ? '名额已满' : energy < cost ? '精力不足' : '候选已耗尽';
+    } else reason = '名额已满';
+  } catch (e) { error = e.message; reason = stopped || shouldStop() ? '已停止' : '异常停止'; }
+  const members = [];
+  for (const [id, member] of entries(role?.feudatory)) {
+    let info;
+    if (!shouldStop()) { try { info = await details(id); } catch { /* Report unknown instead of inventing identity. */ } }
+    members.push({ id, name: info?.name, power: info?.power, levelId: info?.levelId, gold: member?.goldTotal === undefined ? 0 : member.goldTotal, ...history[id] });
+  }
+  let boss;
+  if (role?.bossId > 0) { boss = { id: role.bossId }; if (!shouldStop()) try { Object.assign(boss, await details(role.bossId)); } catch { /* ID remains known. */ } }
+  return { reason, error, snapshotKnown: Boolean(role), members, boss, actions };
+}
+const cell = v => String(v ?? '未知').replace(/[|\r\n]/g, ' ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+export function feudatoryReport(results) {
+  return results.map(r => {
+    const total = r.snapshotKnown !== false && r.members?.every(m => Number.isSafeInteger(m.gold) && m.gold >= 0) ? r.members.reduce((s,m) => s + m.gold, 0) : '未知';
+    return [`### ${cell(r.name)}：${cell(r.reason)}${r.error ? `（${cell(r.error)}）` : ''}`, `当前咸臣累计贡献合计：${total}金币`, '| 咸臣 / ID | 战力 | 推关 | 累计金币 | 抓取或观察时间 |', '|---|---|---|---|---|', ...(r.members || []).map(m => `| ${cell(m.name)} / ${m.id} | ${cell(m.power)} | ${cell(m.levelId)} | ${cell(m.gold)} | ${m.capturedAt ? '抓取' : '观察'}：${cell(new Date(m.capturedAt ?? m.observedAt).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'}))} |`), `咸主：${r.boss ? `${cell(r.boss.name)} / ${r.boss.id}` : r.snapshotKnown === false ? '未知' : '无'}`, `本次操作：${cell(r.actions?.join('；') || '无')}`].join('\n');
+  }).join('\n\n');
+}
