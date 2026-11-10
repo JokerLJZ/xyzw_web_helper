@@ -66,7 +66,7 @@ test('用户停止或成员状态缺失不发送消耗请求',async()=>{
 });
 test('总表包含批次累计合计、咸主，不将未知金币算0并转义名称',()=>{
   const report=feudatoryReport([{name:'<x>',reason:'名额已满',members:[{id:2,name:'a|b',gold:50,observedAt:time},{id:3,gold:70,capturedAt:time}],boss:{id:8,name:'boss'},actions:[]}]);
-  assert.match(report,/0.01万金币/);assert.match(report,/boss/);assert.match(report,/&lt;x&gt;/);assert.equal(report.includes('观察开始'),false);assert.equal(report.includes('抓取时间'),false);
+  assert.match(report,/&lt;1万金币/);assert.match(report,/boss/);assert.match(report,/&lt;x&gt;/);assert.equal(report.includes('观察开始'),false);assert.equal(report.includes('抓取时间'),false);
   assert.match(feudatoryReport([{members:[{id:2}],actions:[]}]),/未知金币/);
 });
 test('批量任务按角色隔离保存、正常释放连接，推送失败不重跑',async()=>{
@@ -180,16 +180,26 @@ test('小批次一张完整总表，金额千位分隔，批次汇总与账号�
  const rows=[{tokenId:'a',name:'小号1',reason:'满员',members:[{name:'张三',gold:12000},{name:'李四',gold:8000}],actions:['抓取 2','抓取 3','释放 4'],boss:null},{tokenId:'b',name:'小号2',reason:'精力不足',members:[{name:'赵六',gold:6000}],actions:[],boss:{name:'咸主'}}];
  const sent=[];await createTasksFeudatory({batchSettings:{wxpusherEnabled:true,wxpusherAppToken:'t',wxpusherUids:'u'},addLog(){},sendWxPusherMessage:async(c,t,html)=>sent.push(html)}).pushFeudatoryInfo(rows);
  assert.equal(sent.length,1);const html=sent[0];assert.equal((html.match(/<table /g)||[]).length,1);assert.equal((html.match(/font-weight:bold;/g)||[]).length,2);
- assert.match(html,/本批2个账号｜抓取2人｜释放1人/);assert.match(html,/2.6万金币/);assert.match(html,/张三：1.2万<br>李四：0.8万/);assert.equal(html.includes('推关'),false);
+ assert.match(html,/本批2个账号｜抓取2人｜释放1人/);assert.match(html,/2万金币/);assert.match(html,/张三：1万<br>李四：&lt;1万/);assert.equal(html.includes('推关'),false);
 });
 
 test('金币统一以万展示，最多两位小数且汇总先相加再换算',()=>{
  const html=feudatoryReport([{name:'测试',reason:'完成',members:[{name:'甲',gold:123456789},{name:'乙',gold:0},{name:'丙',gold:49}],actions:[]}]);
- assert.match(html,/甲：12345.68万/);assert.match(html,/乙：0万/);assert.match(html,/丙：&lt;0.01万/);assert.match(html,/12345.68万金币/);
+ assert.match(html,/甲：12345万/);assert.match(html,/乙：0万/);assert.match(html,/丙：&lt;1万/);assert.match(html,/12345万金币/);
  assert.equal(html.includes('123,456,789'),false);
 });
 
 test('竞技场重复候选和好友重复候选本轮最多挑战一次，失败后继续新目标',async()=>{
  const f=scenario({arena:[2,2,3],lose:[2,3,4],friends:[{roleId:2,lastLogin:time/1000},{roleId:4,lastLogin:time/1000},{roleId:4,lastLogin:time/1000},{roleId:5,lastLogin:time/1000}]});
  await f.run();assert.deepEqual(f.calls.filter(c=>c.cmd==='fight_startconquer').map(c=>c.p.targetId),[2,3,4,5]);
+});
+
+test('相较上次报表变化字段加粗，原始金币变化即便显示整数相同也标记',async()=>{
+ const {feudatoryReportSnapshot}=await import('../src/utils/autoFeudatory.js');
+ const row={name:'账号',members:[{id:2,name:'咸臣',gold:12001}],actions:[],reason:'完成',boss:null};
+ assert.equal(feudatoryReport([row]).includes('<strong>'),false);
+ row.previousReport=feudatoryReportSnapshot(row);
+ assert.equal(feudatoryReport([row]).includes('<strong>'),false);
+ row.members[0].gold=12002;
+ const html=feudatoryReport([row]);assert.match(html,/<strong>咸臣：1万<\/strong>/);assert.match(html,/<strong>1万<\/strong>/);
 });

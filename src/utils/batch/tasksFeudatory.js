@@ -1,5 +1,5 @@
 import { rescueSelectedFeudatory } from '../rescueFeudatory.js';
-import { releaseAllFeudatory, runAutoFeudatory, feudatoryReport } from '../autoFeudatory.js';
+import { releaseAllFeudatory, runAutoFeudatory, feudatoryReport, feudatoryReportSnapshot } from '../autoFeudatory.js';
 import { loadSignupCheerConfig } from './tasksSignupCheer.js';
 import { sendWxPusherMessage } from '../wxpusher.js';
 import { extractRolePatch } from '../roleSnapshot.js';
@@ -165,6 +165,12 @@ export function createTasksFeudatory(deps) {
     if (!batchSettings.wxpusherEnabled || !batchSettings.wxpusherAppToken || !batchSettings.wxpusherUids) {
       log('WxPusher未配置，咸臣报表未推送', 'warning'); return;
     }
+    const storage = deps.storage || globalThis.localStorage;
+    const baselineKey = row => `xyzw-feudatory-report-v1:${row.roleId || row.tokenId}`;
+    for (const row of unique) {
+      try { row.previousReport = JSON.parse(storage?.getItem(baselineKey(row)) || 'null'); }
+      catch { row.previousReport = null; }
+    }
     const chunks = [];
     let current = [];
     const fits = html => html.length <= 38000 && new TextEncoder().encode(html).length <= 60000;
@@ -178,6 +184,12 @@ export function createTasksFeudatory(deps) {
     for (let i = 0; i < chunks.length; i++) {
       if (i) await wait(600);
       await push({ appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids }, `自动寻找咸臣结果${chunks.length > 1 ? `（${i + 1}/${chunks.length}）` : ''}`, chunks[i], 2);
+    }
+    // 仅整批推送成功后更新基准；失败不吞掉待展示的变化。
+    for (const row of unique) {
+      if (row.snapshotKnown === false) continue;
+      try { storage?.setItem(baselineKey(row), JSON.stringify(feudatoryReportSnapshot(row))); }
+      catch { log('咸臣报表变化基准保存失败，下次可能无法标记变化', 'warning'); }
     }
   };
   const finishFeudatoryBatch = async results => {

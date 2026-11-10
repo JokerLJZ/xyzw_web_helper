@@ -131,8 +131,17 @@ const cell = v => String(v ?? '未知').replace(/&/g, '&amp;').replace(/</g, '&l
 const tableCell = 'border:1px solid #d9d9d9;padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;';
 const goldTotal = row => row.snapshotKnown !== false && Array.isArray(row.members) && row.members.every(m => Number.isSafeInteger(m.gold) && m.gold >= 0)
   ? row.members.reduce((sum, m) => sum + m.gold, 0) : null;
-const numberText = value => value == null ? '未知' : value > 0 && value < 100 ? '<0.01万' : `${(value / 10000).toLocaleString('zh-CN', { useGrouping: false, maximumFractionDigits: 2 })}万`;
+const numberText = value => value == null ? '未知' : value > 0 && value < 10000 ? '<1万' : `${Math.floor(value / 10000)}万`;
 const actionCount = (rows, action) => rows.reduce((sum, row) => sum + (row.actions || []).filter(text => text.startsWith(`${action} `)).length, 0);
+export function feudatoryReportSnapshot(row) {
+  return {
+    status: JSON.stringify([row.reason, row.error, row.rescueResult, row.actions || []]),
+    members: JSON.stringify((row.members || []).map(m => [String(m.id), m.name, m.gold]).sort((a,b)=>a[0].localeCompare(b[0]))),
+    total: goldTotal(row),
+    boss: JSON.stringify([row.snapshotKnown, row.boss?.id ?? null, row.boss?.name ?? null]),
+    known: row.snapshotKnown !== false,
+  };
+}
 /** 一批一张五列总表；分段时重复完整批次汇总和表头。 */
 export function feudatoryReport(results, summaryResults = results) {
   const totals = summaryResults.map(goldTotal);
@@ -140,13 +149,15 @@ export function feudatoryReport(results, summaryResults = results) {
   const summary = `本批${summaryResults.length}个账号｜抓取${actionCount(summaryResults, '抓取')}人｜释放${actionCount(summaryResults, '释放')}人｜当前咸臣贡献合计${numberText(total)}金币`;
   const headers = ['账号', '执行结果', '咸臣清单（贡献金币）', '金币合计', '我的咸主'];
   const rows = results.map(row => {
+    const snapshot = feudatoryReportSnapshot(row);
+    const changed = (key, html) => row.previousReport && JSON.stringify(row.previousReport[key]) !== JSON.stringify(snapshot[key]) ? `<strong>${html}</strong>` : html;
     const actions = [`抓取${actionCount([row], '抓取')}`, `释放${actionCount([row], '释放')}`, row.reason || '未知'];
     if (row.rescueResult) actions.push(row.rescueResult);
     if (row.error) actions.push(String(row.error).replace(/[\r\n]+/g, ' ').slice(0, 36));
     const members = row.snapshotKnown === false ? '未知' : row.members?.length
       ? row.members.map(m => `${cell(m.name)}：${cell(numberText(Number.isSafeInteger(m.gold) && m.gold >= 0 ? m.gold : null))}`).join('<br>') : '无';
     const boss = row.boss ? cell(row.boss.name) : row.snapshotKnown === false ? '未知' : '无';
-    return `<tr><td style="${tableCell}font-weight:bold;">${cell(row.name)}</td><td style="${tableCell}">${cell(actions.join(' · '))}</td><td style="${tableCell}">${members}</td><td style="${tableCell}text-align:right;">${cell(numberText(goldTotal(row)))}</td><td style="${tableCell}">${boss}</td></tr>`;
+    return `<tr><td style="${tableCell}font-weight:bold;">${cell(row.name)}</td><td style="${tableCell}">${changed('status', cell(actions.join(' · ')))}</td><td style="${tableCell}">${changed('members', members)}</td><td style="${tableCell}text-align:right;">${changed('total', cell(numberText(goldTotal(row))))}</td><td style="${tableCell}">${changed('boss', boss)}</td></tr>`;
   }).join('');
   return `<p>${cell(summary)}</p><table style="width:100%;border-collapse:collapse;font-size:13px;line-height:1.5;"><thead><tr>${headers.map(label => `<th style="${tableCell}background:#f2f5f8;">${cell(label)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
 }
