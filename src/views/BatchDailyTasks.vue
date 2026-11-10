@@ -2750,6 +2750,11 @@
                 />
                 <span class="setting-description">默认1000次，为每个账号本次四件装备的累计洗练次数。按武器、铠甲、头冠、坐骑顺序执行，已有目标属性直接跳过；未达标装备的锁定孔位需先手动解锁。</span>
               </div>
+              <div class="setting-item">
+                <label class="setting-label">咸臣解救执行账号</label>
+                <n-select v-model:value="batchSettings.feudatoryRescueTokenId" :options="tokens.map(t => ({ label: t.name || t.id, value: t.id }))" clearable filterable placeholder="不设置则跳过解救" size="small" />
+                <span class="setting-description">整批自动寻找咸臣结束后，由此账号征服并释放本轮仍有咸主的账号，再推送报表。每目标最多战败3次，不买精力、不自动腾名额；执行账号无法解救自己。</span>
+              </div>
               <div
                 class="setting-item"
                 style="flex-direction: row; justify-content: space-between; align-items: center"
@@ -4647,6 +4652,7 @@ const batchSettings = reactive({
   crystalHeroId: 107,
   crystalLockAttribute: true,
   equipmentUpgradeHeroId: 107,
+  feudatoryRescueTokenId: null,
   altRefineHeroId: 107,
   altRefineLimit: 1000,
   pearlFishAutoUpgrade: true,
@@ -6622,7 +6628,7 @@ const executeScheduledTask = async (task) => {
     }
 
     if (aggregatedFeudatoryResults.length) {
-      try { await pushFeudatoryInfo(aggregatedFeudatoryResults); }
+      try { await finishFeudatoryBatch(aggregatedFeudatoryResults); }
       catch (error) { addLog({ time: new Date().toLocaleTimeString(), message: `咸臣报表推送失败：${error.message}`, type: "error" }); }
     }
 
@@ -8292,7 +8298,7 @@ const handleGoldenCheer = async () => {
   await batchGoldenCheer();
 };
 
-const { batchReleaseFeudatory, pushFeudatoryInfo, batchAutoFeudatory, batchCheckSaltMasters, pushSaltMasterInfo } = createTasksFeudatory(createTaskDeps());
+const { finishFeudatoryBatch, batchReleaseFeudatory, pushFeudatoryInfo, batchAutoFeudatory, batchCheckSaltMasters, pushSaltMasterInfo } = createTasksFeudatory(createTaskDeps());
 const tasksMainLevel = createTasksMainLevel(createTaskDeps());
 const { batchPushMainLevelInfo, pushMainLevelInfo } = tasksMainLevel;
 

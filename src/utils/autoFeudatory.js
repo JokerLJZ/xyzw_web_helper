@@ -127,7 +127,7 @@ export async function runAutoFeudatory({ send, config, battleVersion, history, s
   }
   let boss;
   if (role?.bossId > 0) { boss = { id: role.bossId }; if (!shouldStop()) try { Object.assign(boss, await details(role.bossId)); } catch { /* ID remains known. */ } }
-  return { reason, error, snapshotKnown: Boolean(role), members, boss, actions };
+  return { roleId: role?.roleId, reason, error, snapshotKnown: Boolean(role), members, boss, actions };
 }
 const cell = v => String(v ?? '未知').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const tableCell = 'border:1px solid #d9d9d9;padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;';
@@ -143,6 +143,7 @@ export function feudatoryReport(results, summaryResults = results) {
   const headers = ['账号', '执行结果', '咸臣清单（贡献金币）', '金币合计', '我的咸主'];
   const rows = results.map(row => {
     const actions = [`抓取${actionCount([row], '抓取')}`, `释放${actionCount([row], '释放')}`, row.reason || '未知'];
+    if (row.rescueResult) actions.push(row.rescueResult);
     if (row.error) actions.push(String(row.error).replace(/[\r\n]+/g, ' ').slice(0, 36));
     const members = row.snapshotKnown === false ? '未知' : row.members?.length
       ? row.members.map(m => `${cell(m.name)}：${cell(numberText(Number.isSafeInteger(m.gold) && m.gold >= 0 ? m.gold : null))}`).join('<br>') : '无';

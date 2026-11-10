@@ -207,6 +207,7 @@ export const defaultBatchSettings = {
   saltBattle: { ...DEFAULT_SALT_BATTLE_SETTINGS },
   legionId: null,
   crystalHeroId: 107,
+  feudatoryRescueTokenId: null,
   altRefineHeroId: 107,
   altRefineLimit: 1000,
   pearlFishAutoUpgrade: true,

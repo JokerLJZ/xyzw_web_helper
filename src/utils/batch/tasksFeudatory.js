@@ -1,3 +1,4 @@
+import { rescueSelectedFeudatory } from '../rescueFeudatory.js';
 import { releaseAllFeudatory, runAutoFeudatory, feudatoryReport } from '../autoFeudatory.js';
 import { loadSignupCheerConfig } from './tasksSignupCheer.js';
 import { sendWxPusherMessage } from '../wxpusher.js';
@@ -179,6 +180,46 @@ export function createTasksFeudatory(deps) {
       await push({ appToken: batchSettings.wxpusherAppToken, uids: batchSettings.wxpusherUids }, `自动寻找咸臣结果${chunks.length > 1 ? `（${i + 1}/${chunks.length}）` : ''}`, chunks[i], 2);
     }
   };
+  const finishFeudatoryBatch = async results => {
+    const executorTokenId = batchSettings.feudatoryRescueTokenId;
+    if (executorTokenId && results.length && !shouldStop.value) {
+      let ownsSlot = false;
+      try {
+        if (!tokens.value.some(t => t.id === executorTokenId)) throw new Error('解救执行账号已不在账号清单中');
+        currentRunningTokenId.value = executorTokenId;
+        await ensureConnection(executorTokenId, 2, acquired => { ownsSlot = acquired; });
+        const send = (cmd, params) => {
+          if (tokenStore.getWebSocketStatus(executorTokenId) !== 'connected') throw new Error('解救执行账号连接已断开');
+          return tokenStore.sendMessageWithPromise(executorTokenId, cmd, params, 15000);
+        };
+        const config = await (deps.loadFeudatoryConfig || loadSignupCheerConfig)(send);
+        for (const row of results) row.roleId ??= tokens.value.find(t => t.id === row.tokenId)?.roleId;
+        await rescueSelectedFeudatory({rows:results,send,config,battleVersion:tokenStore.getBattleVersion(),shouldStop:()=>shouldStop.value,
+          wait:()=>wait(Math.max(500, Number(batchSettings.commandDelay) || 0)),log,
+          onReleased: ({roleId,targetId}) => {
+            try {
+              const storage = deps.storage || globalThis.localStorage, key = `xyzw-feudatory-history-v1:${roleId}`;
+              const history = JSON.parse(storage.getItem(key) || '{}'); delete history[targetId]; storage.setItem(key, JSON.stringify(history));
+            } catch (error) { log(`解救观察记录清理失败：${error.message}`, 'warning'); }
+          },
+        });
+      } catch (error) {
+        log(`咸臣解救收尾停止：${error.message}`, 'warning');
+        for (const row of results) row.rescueResult ||= `未解救：${error.message}`;
+      } finally {
+        if (ownsSlot) { try { tokenStore.closeWebSocketConnection(executorTokenId); } finally { releaseConnectionSlot(); } }
+        currentRunningTokenId.value = null;
+      }
+    }
+    for (const row of results) {
+      if (row.rescueResult?.startsWith('未解救')) {
+        log(`${row.name}：${row.rescueResult}`, 'warning');
+        if (tokenStatus.value[row.tokenId] === 'completed') tokenStatus.value[row.tokenId] = 'pending';
+      }
+    }
+    await pushFeudatoryInfo(results);
+    return results;
+  };
   const resolveOwnRoleIds = async selectedIds => {
     const own = new Set();
     // 仅保护本次勾选账号；未知身份先只读查询，不能漏掉后继续抓取。
@@ -256,7 +297,7 @@ export function createTasksFeudatory(deps) {
         }
       }
       if (!options.deferPush) {
-        try { await pushFeudatoryInfo(results); }
+        try { await finishFeudatoryBatch(results); }
         catch (error) { log(`咸臣报表推送失败：${error.message}`, 'error'); }
       }
     } finally {
@@ -265,5 +306,5 @@ export function createTasksFeudatory(deps) {
     }
     return results;
   };
-  return { batchReleaseFeudatory, pushFeudatoryInfo, batchAutoFeudatory, batchCheckSaltMasters, pushSaltMasterInfo };
+  return { finishFeudatoryBatch, batchReleaseFeudatory, pushFeudatoryInfo, batchAutoFeudatory, batchCheckSaltMasters, pushSaltMasterInfo };
 }
