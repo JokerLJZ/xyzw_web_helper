@@ -77,22 +77,20 @@ export async function runAutoFeudatory({ send, config, battleVersion, history, s
           if (count() >= capacity || energy < cost) return;
           if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0 || seen.has(String(id))) continue;
           seen.add(String(id));
-          for (let attempt = 0; attempt < 3; attempt++) {
-            const target = await details(id);
-            if (!target || Number(target.roleId) !== Number(id) || (target.bossId === undefined ? 0 : target.bossId) !== 0 || !(Number.isFinite(target.power) && target.power < role.power) || !(target.power >= 0) || !(Number.isSafeInteger(target.levelId) && target.levelId > 5500)) break;
-            let result;
-            try { result = feudatoryBody(await request('fight_startconquer', { targetId: Number(id), battleVersion: integer(battleVersion, '战斗版本') })); }
-            catch (e) { await refresh(); throw e; }
-            energy -= cost;
-            await refresh();
-            energy = Math.min(energy, integer(role.hallEnergy, '精力'));
-            if (entries(role.feudatory).some(([key]) => String(key) === String(id))) {
-              history[id] = { capturedAt: now(), observedAt: now() }; saveHistory(history);
-              actions.push(`抓取 ${id}`); log(`已抓取咸臣 ${id}（${count()}/${capacity}）`); break;
-            }
-            if (!result?.battleData?.result || (result.battleData.result.isWin !== undefined && result.battleData.result.isWin !== false)) throw new Error('抓取结果未确认，已停止以避免重复消耗');
-            if (energy < cost || count() >= capacity) break;
+          // 每个候选本轮仅挑战一次；seen同时防止竞技场和好友重复挑战。
+          const target = await details(id);
+          if (!target || Number(target.roleId) !== Number(id) || (target.bossId === undefined ? 0 : target.bossId) !== 0 || !(Number.isFinite(target.power) && target.power < role.power) || !(target.power >= 0) || !(Number.isSafeInteger(target.levelId) && target.levelId > 5500)) continue;
+          let result;
+          try { result = feudatoryBody(await request('fight_startconquer', { targetId: Number(id), battleVersion: integer(battleVersion, '战斗版本') })); }
+          catch (e) { await refresh(); throw e; }
+          energy -= cost;
+          await refresh();
+          energy = Math.min(energy, integer(role.hallEnergy, '精力'));
+          if (entries(role.feudatory).some(([key]) => String(key) === String(id))) {
+            history[id] = { capturedAt: now(), observedAt: now() }; saveHistory(history);
+            actions.push(`抓取 ${id}`); log(`已抓取咸臣 ${id}（${count()}/${capacity}）`); continue;
           }
+          if (!result?.battleData?.result || (result.battleData.result.isWin !== undefined && result.battleData.result.isWin !== false)) throw new Error('抓取结果未确认，已停止以避免重复消耗');
         }
       };
       if (energy >= cost) {

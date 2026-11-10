@@ -39,10 +39,10 @@ test('无咸主、严格低战力、5500关以上筛选，重复目标不再挑�
   const f=scenario({arena:[2,2,3,4,5],targets:{2:{bossId:8},3:{power:1000},4:{levelId:5500},5:{bossId:null}}});
   const r=await f.run(); assert.equal(f.fights(),0); assert.equal(r.reason,'候选已耗尽');
 });
-test('同目标三次实际战败后换人，竞技场用尽才回退24小时登录好友',async()=>{
+test('同目标只尝试一次，战败后换人，竞技场用尽才回退24小时登录好友',async()=>{
   const f=scenario({arena:[2],lose:[2],friends:[{roleId:3,lastLogin:time/1000-86400},{roleId:4,lastLogin:time/1000-86401},{roleId:5,lastOnline:time/1000}]});
   const r=await f.run(); assert.equal(r.members.length,1);
-  assert.deepEqual(f.calls.filter(c=>c.cmd==='fight_startconquer').map(c=>c.p.targetId),[2,2,2,3]);
+  assert.deepEqual(f.calls.filter(c=>c.cmd==='fight_startconquer').map(c=>c.p.targetId),[2,3]);
 });
 test('不足单次精力不寻找目标，不购买；失败次数受精力限制',async()=>{
   const zero=scenario({role:{hallEnergy:9}});assert.equal((await zero.run()).reason,'精力不足');assert.equal(zero.fights(),0);
@@ -187,4 +187,9 @@ test('金币统一以万展示，最多两位小数且汇总先相加再换算',
  const html=feudatoryReport([{name:'测试',reason:'完成',members:[{name:'甲',gold:123456789},{name:'乙',gold:0},{name:'丙',gold:49}],actions:[]}]);
  assert.match(html,/甲：12345.68万/);assert.match(html,/乙：0万/);assert.match(html,/丙：&lt;0.01万/);assert.match(html,/12345.68万金币/);
  assert.equal(html.includes('123,456,789'),false);
+});
+
+test('竞技场重复候选和好友重复候选本轮最多挑战一次，失败后继续新目标',async()=>{
+ const f=scenario({arena:[2,2,3],lose:[2,3,4],friends:[{roleId:2,lastLogin:time/1000},{roleId:4,lastLogin:time/1000},{roleId:4,lastLogin:time/1000},{roleId:5,lastLogin:time/1000}]});
+ await f.run();assert.deepEqual(f.calls.filter(c=>c.cmd==='fight_startconquer').map(c=>c.p.targetId),[2,3,4,5]);
 });
