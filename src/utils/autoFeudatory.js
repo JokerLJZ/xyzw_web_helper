@@ -133,7 +133,7 @@ const cell = v => String(v ?? '未知').replace(/&/g, '&amp;').replace(/</g, '&l
 const tableCell = 'border:1px solid #d9d9d9;padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;';
 const goldTotal = row => row.snapshotKnown !== false && Array.isArray(row.members) && row.members.every(m => Number.isSafeInteger(m.gold) && m.gold >= 0)
   ? row.members.reduce((sum, m) => sum + m.gold, 0) : null;
-const numberText = value => value == null ? '未知' : value.toLocaleString('zh-CN');
+const numberText = value => value == null ? '未知' : value > 0 && value < 100 ? '<0.01万' : `${(value / 10000).toLocaleString('zh-CN', { useGrouping: false, maximumFractionDigits: 2 })}万`;
 const actionCount = (rows, action) => rows.reduce((sum, row) => sum + (row.actions || []).filter(text => text.startsWith(`${action} `)).length, 0);
 /** 一批一张五列总表；分段时重复完整批次汇总和表头。 */
 export function feudatoryReport(results, summaryResults = results) {
