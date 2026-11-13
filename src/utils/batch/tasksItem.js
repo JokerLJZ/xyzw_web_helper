@@ -1,3 +1,4 @@
+import { loadEmptyFormationConfig, runEmptyFormation } from "../emptyFormation.js";
 import { loadGenieSweepConfig, readGenieRole, sweepAltAccountGenie } from "../altAccountGenieSweep.js";
 import { claimSkinBookRewards } from "../skinBookRewards.js";
 import { classifyWarehouseActivityItem } from "../warehouseActivityItems.js";
@@ -3435,6 +3436,46 @@ export function createTasksItem(deps) {
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.info("小号前期推图阵容任务结束，请查看各账号结果");
+  };
+
+  const batchEmptyFormation = async () => {
+    if (isRunning.value || !selectedTokens.value.length) return;
+    isRunning.value = true;
+    shouldStop.value = false;
+    try {
+      await Promise.all([...selectedTokens.value].map(async tokenId => {
+        const tokenName = tokens.value.find(t => t.id === tokenId)?.name || tokenId;
+        tokenStatus.value[tokenId] = "waiting";
+        let connected = false;
+        try {
+          if (shouldStop.value) return;
+          await ensureConnection(tokenId);
+          connected = true;
+          tokenStatus.value[tokenId] = "running";
+          const send = (cmd, params) => gateFormationRequest(tokenId, () => {
+            if (shouldStop.value) throw new Error("任务已停止");
+            return tokenStore.sendMessageWithPromise(tokenId, cmd, params, HELPER_COMMAND_TIMEOUT_MS);
+          });
+          const config = await loadEmptyFormationConfig(send);
+          const hero = await runEmptyFormation({ config, send, stopped: () => shouldStop.value,
+            getRole: async () => (await queryFormationRole(tokenId, tokenName)).role,
+            applyFormation: heroId => applyTargetFormation({tokenId, tokenName, targetHeroes:[{heroId,slot:0}], formationName:"无将阵容",
+              checkStop: () => { if (shouldStop.value) throw new Error("任务已停止"); } }),
+          });
+          tokenStatus.value[tokenId] = "completed";
+          addLog({ time:new Date().toLocaleTimeString(),message:`${tokenName} 无将阵容完成：1号位${HERO_DICT[hero.heroId]?.name || hero.heroId}，星级${hero.star}，等级${hero.level}；玩具和宠物已卸下`,type:"success" });
+        } catch (error) {
+          tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : "failed";
+          addLog({time:new Date().toLocaleTimeString(),message:`${tokenName} 无将阵容调整失败：${error.message}`,type:"error"});
+        } finally {
+          if (connected) { tokenStore.closeWebSocketConnection(tokenId); releaseConnectionSlot(); }
+        }
+      }));
+    } finally {
+      isRunning.value = false;
+      currentRunningTokenId.value = null;
+    }
+    message.info("无将阵容处理结束，请查看各账号结果");
   };
 
   /** 小号推图准备：按拥有情况升级武将并设置默认推图阵容。 */
@@ -6959,6 +7000,7 @@ export function createTasksItem(deps) {
     batchUpgradeLordTo6000,
     batchAdjustEarlyMainLevelFormation,
     batchAdjustMainLevelFormation,
+    batchEmptyFormation,
     batchBookUpgrade,
     batchClaimStarRewards,
     batchClaimPeachTasks,

@@ -694,6 +694,7 @@
             </n-tab-pane>
             <n-tab-pane name="formation" tab="阵容管理">
               <n-space>
+                <n-button size="small" @click="batchEmptyFormation" :disabled="isRunning || selectedTokens.length === 0" title="仅1号位放星级最低、同星级等级最低的紫将，并卸下玩具和宠物">无将阵容</n-button>
                 <n-button
                   size="small"
                   @click="batchAdjustEarlyMainLevelFormation"
@@ -8193,6 +8194,7 @@ const {
   batchUpgradeLordTo6000,
   batchAdjustEarlyMainLevelFormation,
   batchAdjustMainLevelFormation,
+  batchEmptyFormation,
   batchChallengeGroupGenie,
   batchChallengeThreeKingdomsGenie,
   batchClaimPeachTasks,
