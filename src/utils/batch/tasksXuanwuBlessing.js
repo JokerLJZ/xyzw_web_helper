@@ -1,3 +1,4 @@
+import { getBlessingLotteryItemId, getBlessingDrawTimes } from "@/utils/blessingLottery";
 import { extractRolePatch } from "@/utils/roleSnapshot";
 import { loadXuanwuActivityConfig, getClaimableXuanwuMissions } from "@/utils/xuanwuActivityConfig";
 /**
@@ -19,7 +20,7 @@ const SIGN_SUFFIX = "5";
 const GOODS_SUFFIX = "41";
 
 // 防止异常响应导致无限抽奖；正常情况会在玄武灵契耗尽时由服务器终止。
-const MAX_DRAW_TIMES = 20;
+const MAX_DRAW_TIMES = 50;
 const MAX_RATE_LIMIT_RETRIES = 4;
 const RATE_LIMIT_RETRY_DELAY_MS = 6000;
 
@@ -195,6 +196,7 @@ export function createTasksXuanwuBlessing(deps) {
     maxDrawTimes = MAX_DRAW_TIMES,
     reportIssue,
     drawState,
+    itemId,
   ) => {
     if (drawState.blocked) return 0;
     try {
@@ -210,8 +212,21 @@ export function createTasksXuanwuBlessing(deps) {
     }
 
     let count = 0;
-    for (let i = 0; i < maxDrawTimes; i++) {
+    while (count < maxDrawTimes) {
       if (shouldStop.value) break;
+      let times;
+      try {
+        const role = extractRolePatch(await tokenStore.sendGetRoleInfo(tokenId));
+        times = getBlessingDrawTimes(role, itemId, maxDrawTimes - count);
+      } catch (error) {
+        drawState.blocked = true;
+        reportIssue(`抽奖库存查询失败，本次任务不再重试: ${error.message}`);
+        return count;
+      }
+      if (!times) {
+        log(`${tokenName} 当前活动道具${itemId}库存为0，本轮抽奖${count}次`);
+        return count;
+      }
       let drawn = false;
       for (
         let attempt = 0;
@@ -223,14 +238,14 @@ export function createTasksXuanwuBlessing(deps) {
           const res = await tokenStore.sendMessageWithPromise(
             tokenId,
             "activity_lottery",
-            { times: 1 },
+            { times },
             8000,
           );
           log(
-            `${tokenName} 抽奖第${count + 1}次: ${formatReward(res?.reward || []) || "无奖励"}`,
+            `${tokenName} 本次${times}连抽，累计${count + times}次: ${formatReward(res?.reward || []) || "无奖励"}`,
             "success",
           );
-          count++;
+          count += times;
           drawn = true;
           break;
         } catch (error) {
@@ -246,20 +261,9 @@ export function createTasksXuanwuBlessing(deps) {
             await delay(RATE_LIMIT_RETRY_DELAY_MS);
             continue;
           }
-          // 仅当库存查询明确为零时报告耗尽；超时/限流等错误不能据此认定成功。
-          let exhausted = false;
-          if (!rateLimited && !/超时|timeout|断开|连接/i.test(errorMessage)) {
-            try {
-              const role = extractRolePatch(await tokenStore.sendGetRoleInfo(tokenId));
-              const item = role?.items?.[5283];
-              exhausted = !!role?.items && Number(item?.quantity ?? item?.count ?? item ?? 0) === 0;
-            } catch { /* 保留原错误 */ }
-          }
-          if (exhausted) log(`${tokenName} 当前玄武灵契库存为0，本轮抽奖${count}次`);
-          else {
-            drawState.blocked = true;
-            reportIssue(`抽奖失败，本次任务不再重试: ${errorMessage}`);
-          }
+          // 写请求结果不明确时不降级单抽或重发，避免重复消耗。
+          drawState.blocked = true;
+          reportIssue(`抽奖失败，本次任务不再重试: ${errorMessage}`);
           return count;
         }
       }
@@ -334,6 +338,7 @@ export function createTasksXuanwuBlessing(deps) {
         const reportIssue = text => { issues.push(text); log(`${token.name} ${text}`, "warning"); };
         const config = await loadXuanwuActivityConfig((cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 8000));
         const base = String(actId).slice(0, 6);
+        const lotteryItemId = getBlessingLotteryItemId(config, Number(base + "2"));
         const signActivityId = Number(base + SIGN_SUFFIX);
         const goodsId = Number(base + GOODS_SUFFIX);
         const claimLotteryRewards = createLotteryCumulativeClaimer({
@@ -374,6 +379,7 @@ export function createTasksXuanwuBlessing(deps) {
             remainingDrawTimes,
             reportIssue,
             drawState,
+            lotteryItemId,
           );
           lotteryCnt += drawn;
           const claimedLotteryRewards = await claimLotteryRewards();

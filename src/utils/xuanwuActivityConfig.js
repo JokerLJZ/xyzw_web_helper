@@ -11,6 +11,7 @@ export async function loadXuanwuActivityConfig(send, fetchConfig = globalThis.fe
       if (!response.ok) throw new Error(`读取活动配置失败: ${response.status}`);
       const config = await response.json();
       return { cumulativeDrawConf: config.cumulativeDrawConf || config.CumulativeDrawConf,
+        ActFestivalConf: config.ActFestivalConf,
         BattlePassMissionConf: config.BattlePassMissionConf };
     })();
     cache.set(version, loading);
