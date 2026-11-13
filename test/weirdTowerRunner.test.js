@@ -33,7 +33,7 @@ function fixture() {
     if (cmd === "evotower_getlegionjoinmembers") return { memberScores: snapshot(state.members) };
     if (cmd === "evotower_getlegionprivilege") return { legionPrivilege: snapshot(state.privilege) };
     if (cmd === "evotower_claimlegionprivilege") { state.privilege = { 1: 1 }; return {}; }
-    if (cmd === "evotower_getinfo") return { evoTower: snapshot(state.tower) };
+    if (cmd === "evotower_getinfo") return { evoTower: { ...snapshot(state.tower), legionPrivilege: snapshot(state.privilege) } };
     if (cmd === "mergebox_getinfo") return { mergeBox: snapshot(state.box) };
     if (cmd === "role_getroleinfo") return { role: snapshot(state.role) };
     if (cmd === "activity_get") return { activity: snapshot(state.activity) };
@@ -554,7 +554,7 @@ test("节流等待跨日期后不发送原日期的写请求", async () => {
 test("怪异塔在后续动作之前激活并复查俱乐部特权", async () => {
   const f = fixture(); f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0]));
   await f.run({ mode: "claim" });
-  assert.deepEqual(f.calls.slice(0, 6).map(x => x.cmd), ["evotower_getinfo", "evotower_getlegionjoinmembers", "evotower_getlegionprivilege", "evotower_claimlegionprivilege", "evotower_getlegionprivilege", "mergebox_getinfo"]);
+  assert.deepEqual(f.calls.slice(0, 5).map(x => x.cmd), ["evotower_getinfo", "evotower_getlegionjoinmembers", "evotower_claimlegionprivilege", "evotower_getinfo", "mergebox_getinfo"]);
 });
 
 test("已激活或人数不足时不重复激活", async () => {
@@ -593,4 +593,25 @@ test("更高档位按参与人数升级，复查后才继续", async () => {
     return f.send(cmd, params);
   } });
   assert.equal(claims, 1);
+});
+
+test("激活按怪异塔主状态确认，不使用独立特权查询的空记录", async () => {
+  const f = fixture();
+  f.state.members = Object.fromEntries(Array.from({length:10}, (_, i) => [i,0]));
+  await f.run({mode:'claim',send:async(cmd,params)=>{
+    if(cmd==='evotower_getlegionprivilege') throw new Error('不应以独立接口确认激活');
+    return f.send(cmd,params);
+  }});
+  assert.equal(f.calls.filter(x=>x.cmd==='evotower_claimlegionprivilege').length,1);
+  assert.ok(f.calls.some(x=>x.cmd==='mergebox_getinfo'));
+});
+
+test("主状态仍未激活时即使独立接口显示档位也不继续", async () => {
+ const f=fixture();f.state.members=Object.fromEntries(Array.from({length:10},(_,i)=>[i,0]));
+ await assert.rejects(f.run({mode:'claim',send:async(cmd,params)=>{
+   if(cmd==='evotower_claimlegionprivilege')return {legionPrivilege:{1:1}};
+   if(cmd==='evotower_getlegionprivilege')return {legionPrivilege:{1:1}};
+   return f.send(cmd,params);
+ }}),/激活未确认/);
+ assert.equal(f.calls.some(x=>x.cmd==='mergebox_getinfo'),false);
 });

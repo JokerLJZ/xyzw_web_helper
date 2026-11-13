@@ -100,10 +100,11 @@ export async function runWeirdTowerAccount({
     if (!levels.length) throw new Error("未取得怪异塔俱乐部特权配置");
     const members = fullField(await request("evotower_getlegionjoinmembers"), "memberScores", "俱乐部参与人数");
     const target = levels.filter(conf => mapEntries(members).length >= number(conf.memberNeed, "特权参与人数")).length;
-    const readLevel = async () => {
-      const data = await request("evotower_getlegionprivilege");
-      const privileges = fullField(data, "legionPrivilege", "俱乐部特权状态");
-      tower.legionPrivilege = privileges;
+    const readLevel = async (refresh = false) => {
+      // 官方界面以SERVER_DATA.evoTower.legionPrivilege判断已激活档位。
+      // 独立特权接口不能代替角色当前怪异塔状态。
+      if (refresh) await getTower();
+      const privileges = tower.legionPrivilege || {};
       return Math.max(0, ...mapEntries(privileges).map(([key]) => number(key, "特权等级")));
     };
     let level = await readLevel();
@@ -115,7 +116,7 @@ export async function runWeirdTowerAccount({
       let uncertain;
       try { apply(await request("evotower_claimlegionprivilege")); }
       catch (error) { if (!timedOut(error)) throw error; uncertain = error; }
-      const next = await readLevel();
+      const next = await readLevel(true);
       if (next <= level) throw new Error(`俱乐部特权激活未确认${uncertain ? "（请求超时，复查仍未生效）" : ""}，停止后续动作`);
       level = next;
     }
