@@ -1,3 +1,5 @@
+import { extractRolePatch } from "@/utils/roleSnapshot";
+import { loadXuanwuActivityConfig, getClaimableXuanwuMissions } from "@/utils/xuanwuActivityConfig";
 /**
  * 玄武赐福（通行证活动）批量任务
  * 顺序执行：任务领取 -> 通行证奖励 -> 免费珍宝 -> 点卯 -> 抽奖 -> 累抽奖励 -> 抽奖后二次领取
@@ -98,16 +100,14 @@ export function createTasksXuanwuBlessing(deps) {
   };
 
   /** 领取通行证任务（每日/每周/本期），返回领取/跳过数 */
-  const claimTasks = async (tokenId, actId, info, tokenName) => {
-    const complete = info?.complete || {};
+  const claimTasks = async (tokenId, actId, info, tokenName, config, reportIssue) => {
     const claimedMap = info?.taskClaimed || {};
     let claimed = 0;
     let skipped = 0;
 
-    for (const [missionIdStr, progress] of Object.entries(complete)) {
+    for (const mission of getClaimableXuanwuMissions(config, actId, info)) {
       if (shouldStop.value) break;
-      if (claimedMap[missionIdStr] === true) continue;
-      if (!(progress > 0)) continue;
+      const missionIdStr = String(mission.id);
 
       try {
         const res = await tokenStore.sendMessageWithPromise(
@@ -125,8 +125,9 @@ export function createTasksXuanwuBlessing(deps) {
         } else {
           skipped++;
         }
-      } catch {
+      } catch (error) {
         skipped++;
+        reportIssue(`任务${missionIdStr}领取失败: ${error?.message || "未知错误"}`);
       }
       await delay(commandDelay);
     }
@@ -192,7 +193,10 @@ export function createTasksXuanwuBlessing(deps) {
     tokenId,
     tokenName,
     maxDrawTimes = MAX_DRAW_TIMES,
+    reportIssue,
+    drawState,
   ) => {
+    if (drawState.blocked) return 0;
     try {
       const lotteryInfo = await tokenStore.sendMessageWithPromise(
         tokenId,
@@ -214,6 +218,7 @@ export function createTasksXuanwuBlessing(deps) {
         attempt <= MAX_RATE_LIMIT_RETRIES;
         attempt += 1
       ) {
+        if (shouldStop.value) return count;
         try {
           const res = await tokenStore.sendMessageWithPromise(
             tokenId,
@@ -241,12 +246,20 @@ export function createTasksXuanwuBlessing(deps) {
             await delay(RATE_LIMIT_RETRY_DELAY_MS);
             continue;
           }
-          log(
-            count > 0
-              ? `${tokenName} 玄武灵契已抽完，本轮共抽奖${count}次`
-              : `${tokenName} 当前没有可用玄武灵契`,
-            "info",
-          );
+          // 仅当库存查询明确为零时报告耗尽；超时/限流等错误不能据此认定成功。
+          let exhausted = false;
+          if (!rateLimited && !/超时|timeout|断开|连接/i.test(errorMessage)) {
+            try {
+              const role = extractRolePatch(await tokenStore.sendGetRoleInfo(tokenId));
+              const item = role?.items?.[5283];
+              exhausted = !!role?.items && Number(item?.quantity ?? item?.count ?? item ?? 0) === 0;
+            } catch { /* 保留原错误 */ }
+          }
+          if (exhausted) log(`${tokenName} 当前玄武灵契库存为0，本轮抽奖${count}次`);
+          else {
+            drawState.blocked = true;
+            reportIssue(`抽奖失败，本次任务不再重试: ${errorMessage}`);
+          }
           return count;
         }
       }
@@ -317,20 +330,24 @@ export function createTasksXuanwuBlessing(deps) {
           throw new Error("未找到玄武赐福活动，请确认活动是否开启");
         }
         const { actId, info } = resolved;
+        const issues = [];
+        const reportIssue = text => { issues.push(text); log(`${token.name} ${text}`, "warning"); };
+        const config = await loadXuanwuActivityConfig((cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 8000));
         const base = String(actId).slice(0, 6);
         const signActivityId = Number(base + SIGN_SUFFIX);
         const goodsId = Number(base + GOODS_SUFFIX);
         const claimLotteryRewards = createLotteryCumulativeClaimer({
           send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 8000),
           actId: Number(base + "2"),
+          config,
           wait: () => delay(commandDelay),
           shouldStop: () => shouldStop.value,
           onClaim: (id, reward) => log(`${token.name} 寻宝累抽奖励${id}已确认领取: ${formatReward(reward)}`, "success"),
-          onError: error => log(`${token.name} 寻宝累抽奖励领取失败，本次任务不再重试: ${error?.message || "未知错误"}`, "warning"),
+          onError: error => reportIssue(`寻宝累抽奖励领取失败，本次任务不再重试: ${error?.message || "未知错误"}`),
         });
 
         // 1. 先领一轮任务 + 通行证奖励，同时攒抽奖券
-        const first = await claimTasks(tokenId, actId, info, token.name);
+        const first = await claimTasks(tokenId, actId, info, token.name, config, reportIssue);
         let passRewards = await claimPassRewards(tokenId, actId, token.name);
 
         // 2. 免费珍宝购买（产出抽奖券）
@@ -341,29 +358,29 @@ export function createTasksXuanwuBlessing(deps) {
         const signCnt = await claimSign(tokenId, signActivityId, token.name);
 
         // 4. 抽完全部玄武灵契；领奖若再次产出灵契，则继续抽取并再次领奖。
+        const drawState = { blocked: false };
         let lotteryCnt = 0;
         let lotteryRewards = 0;
         let secondClaimed = 0;
         for (let round = 0; round < MAX_REWARD_ROUNDS; round++) {
           const remainingDrawTimes = MAX_DRAW_TIMES - lotteryCnt;
           if (remainingDrawTimes <= 0) {
-            log(
-              `${token.name} 本次抽奖已达到安全上限${MAX_DRAW_TIMES}次，停止继续抽奖`,
-              "warning",
-            );
+            reportIssue(`本次抽奖已达到安全上限${MAX_DRAW_TIMES}次，剩余灵契未确认`);
             break;
           }
           const drawn = await doLottery(
             tokenId,
             token.name,
             remainingDrawTimes,
+            reportIssue,
+            drawState,
           );
           lotteryCnt += drawn;
           const claimedLotteryRewards = await claimLotteryRewards();
           lotteryRewards += claimedLotteryRewards;
           const latestInfo = await fetchWarOrder(tokenId, actId);
-          if (!latestInfo) break;
-          const second = await claimTasks(tokenId, actId, latestInfo, token.name);
+          if (!latestInfo) { reportIssue("刷新通行证状态失败"); break; }
+          const second = await claimTasks(tokenId, actId, latestInfo, token.name, config, reportIssue);
           secondClaimed += second.claimed;
           const newPassRewards =
             second.claimed > 0
@@ -382,11 +399,11 @@ export function createTasksXuanwuBlessing(deps) {
         lotteryRewards += await claimLotteryRewards();
 
         log(
-          `${token.name} 玄武赐福完成: 任务${first.claimed + secondClaimed}, 通行证奖励${passRewards}, 点卯${signCnt}, 抽奖${lotteryCnt}, 累抽奖励${lotteryRewards}档`,
-          "success",
+          `${token.name} 玄武赐福${shouldStop.value ? "已停止" : issues.length ? "部分完成" : "完成"}: 任务${first.claimed + secondClaimed}, 通行证奖励${passRewards}, 点卯${signCnt}, 抽奖${lotteryCnt}, 累抽奖励${lotteryRewards}档`,
+          shouldStop.value || issues.length ? "warning" : "success",
         );
 
-        tokenStatus.value[tokenId] = "completed";
+        tokenStatus.value[tokenId] = shouldStop.value || issues.length ? "failed" : "completed";
       } catch (error) {
         console.error(error);
         tokenStatus.value[tokenId] = "failed";

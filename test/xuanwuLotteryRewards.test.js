@@ -34,3 +34,13 @@ for(const mode of ['error','unconfirmed'])test(`${mode}后同一次任务不重�
 test('停止时不发请求',async()=>{
  const claim=createLotteryCumulativeClaimer({shouldStop:()=>true,send:()=>assert.fail()});assert.equal(await claim(),0);
 });
+
+test('领取增量有lotteryInfo但缺少标记时重新查询确认',async()=>{
+ let queries=0, received=false;
+ const claim=createLotteryCumulativeClaimer({actId:1,config:{cumulativeDrawConf:[{id:8,actId:1,cumulativeNum:5}]},
+ shouldStop:()=>false,onClaim:()=>{},onError:()=>assert.fail('应查询确认'),send:async(cmd)=>{
+ if(cmd==='activity_getlotteryinfo'){queries++;return {lotteryInfo:{lotteryNum:5,cumulativeClaimedMap:received?{8:true}:{}}};}
+ received=true;return {lotteryInfo:{fragProgress:5},reward:[]};
+ }});
+ assert.equal(await claim(),1);assert.equal(queries,2);
+});
