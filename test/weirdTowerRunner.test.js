@@ -552,14 +552,14 @@ test("节流等待跨日期后不发送原日期的写请求", async () => {
 });
 
 test("怪异塔在后续动作之前激活并复查俱乐部特权", async () => {
-  const f = fixture(); f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0]));
+  const f = fixture(); f.state.tower.towerId = 1; f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0]));
   await f.run({ mode: "claim" });
   assert.deepEqual(f.calls.slice(0, 5).map(x => x.cmd), ["evotower_getinfo", "evotower_getlegionjoinmembers", "evotower_claimlegionprivilege", "evotower_getinfo", "mergebox_getinfo"]);
 });
 
 test("已激活或人数不足时不重复激活", async () => {
   for (const active of [false, true]) {
-    const f = fixture();
+    const f = fixture(); f.state.tower.towerId = 1;
     if (active) { f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0])); f.state.privilege = { 1: 0 }; }
     await f.run({ mode: "claim" });
     assert.equal(f.calls.some(x => x.cmd === "evotower_claimlegionprivilege"), false);
@@ -567,14 +567,14 @@ test("已激活或人数不足时不重复激活", async () => {
 });
 
 test("激活未生效时停止后续动作", async () => {
-  const f = fixture(); f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0]));
+  const f = fixture(); f.state.tower.towerId = 1; f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0]));
   await assert.rejects(f.run({ mode: "claim", send: async (cmd, params) => cmd === "evotower_claimlegionprivilege" ? {} : f.send(cmd, params) }), /激活未确认/);
   assert.equal(f.calls.some(x => x.cmd === "mergebox_getinfo"), false);
 });
 
 test("激活超时先复查，已生效不重复发送，未生效停止", async () => {
   for (const applied of [true, false]) {
-    const f = fixture(); let writes = 0;
+    const f = fixture(); f.state.tower.towerId = 1; let writes = 0;
     f.state.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, 0]));
     const run = f.run({ mode: "claim", send: async (cmd, params) => {
       if (cmd === "evotower_claimlegionprivilege") { writes++; if (applied) f.state.privilege = { 1: 1 }; throw new Error("timeout"); }
@@ -586,7 +586,7 @@ test("激活超时先复查，已生效不重复发送，未生效停止", async
 });
 
 test("更高档位按参与人数升级，复查后才继续", async () => {
-  const f = fixture(); f.state.members = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [i, 0])); f.state.privilege = new Map([[1, 1]]);
+  const f = fixture(); f.state.tower.towerId = 1; f.state.members = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [i, 0])); f.state.privilege = new Map([[1, 1]]);
   let claims = 0;
   await f.run({ mode: "claim", send: async (cmd, params) => {
     if (cmd === "evotower_claimlegionprivilege") { claims++; f.state.privilege = new Map([[3, 1]]); return {}; }
@@ -596,7 +596,7 @@ test("更高档位按参与人数升级，复查后才继续", async () => {
 });
 
 test("激活按怪异塔主状态确认，不使用独立特权查询的空记录", async () => {
-  const f = fixture();
+  const f = fixture(); f.state.tower.towerId = 1;
   f.state.members = Object.fromEntries(Array.from({length:10}, (_, i) => [i,0]));
   await f.run({mode:'claim',send:async(cmd,params)=>{
     if(cmd==='evotower_getlegionprivilege') throw new Error('不应以独立接口确认激活');
@@ -607,11 +607,30 @@ test("激活按怪异塔主状态确认，不使用独立特权查询的空记�
 });
 
 test("主状态仍未激活时即使独立接口显示档位也不继续", async () => {
- const f=fixture();f.state.members=Object.fromEntries(Array.from({length:10},(_,i)=>[i,0]));
+ const f=fixture(); f.state.tower.towerId=1;f.state.members=Object.fromEntries(Array.from({length:10},(_,i)=>[i,0]));
  await assert.rejects(f.run({mode:'claim',send:async(cmd,params)=>{
    if(cmd==='evotower_claimlegionprivilege')return {legionPrivilege:{1:1}};
    if(cmd==='evotower_getlegionprivilege')return {legionPrivilege:{1:1}};
    return f.send(cmd,params);
  }}),/激活未确认/);
  assert.equal(f.calls.some(x=>x.cmd==='mergebox_getinfo'),false);
+});
+
+test("未参与账号先战斗一次再激活特权，确认后继续第二次战斗", async()=>{
+ const f=fixture();f.state.tower.energy=2;f.state.members=Object.fromEntries(Array.from({length:10},(_,i)=>[i,0]));
+ await f.run({mode:'climb',maxClimbs:2});
+ const cmds=f.calls.map(x=>x.cmd),fight=cmds.indexOf('evotower_fight'),claim=cmds.indexOf('evotower_claimlegionprivilege');
+ assert.ok(fight>=0&&claim>fight);assert.ok(cmds.indexOf('evotower_fight',fight+1)>claim);
+ assert.equal(cmds.filter(x=>x==='evotower_claimlegionprivilege').length,1);
+});
+test("未参与且无体力或仅领奖时不为确认特权额外战斗",async()=>{
+ for(const mode of ['climb','claim','use','merge']){
+ const f=fixture();f.state.members=Object.fromEntries(Array.from({length:10},(_,i)=>[i,0]));
+ await f.run({mode});assert.equal(f.calls.some(x=>x.cmd==='evotower_fight'||x.cmd==='evotower_claimlegionprivilege'),false);
+ }
+});
+test("首次战斗后特权仍未确认，不继续第二次战斗",async()=>{
+ const f=fixture();f.state.tower.energy=2;f.state.members=Object.fromEntries(Array.from({length:10},(_,i)=>[i,0]));
+ await assert.rejects(f.run({mode:'climb',send:async(cmd,p)=>cmd==='evotower_claimlegionprivilege'?{}:f.send(cmd,p)}),/激活未确认/);
+ assert.equal(f.calls.filter(x=>x.cmd==='evotower_fight').length,1);
 });

@@ -94,7 +94,14 @@ export async function runWeirdTowerAccount({
     for (const key of ["towerId", "rewardTowerId", "energy", "lotteryLeftCnt"]) tower[key] = number(tower[key], `怪异塔${key}`);
     return tower;
   };
-  const ensureClubPrivilege = async () => {
+  let privilegePending = false;
+  const ensureClubPrivilege = async (afterFirstFight = false) => {
+    if (!afterFirstFight && Number(tower.towerId) === 0) {
+      privilegePending = true;
+      log("尚未参与怪异塔，俱乐部特权延后至首次战斗后检查；非爬塔模式不额外发起战斗");
+      return;
+    }
+    privilegePending = false;
     phase = "俱乐部特权";
     const levels = rows(config.EvoTowerClubPrivilegeConf);
     if (!levels.length) throw new Error("未取得怪异塔俱乐部特权配置");
@@ -296,6 +303,10 @@ export async function runWeirdTowerAccount({
         }
         climbed++;
         log(`爬怪异塔第${climbed}次`);
+        if (privilegePending) {
+          await ensureClubPrivilege(true);
+          phase = "爬塔";
+        }
         await claimTower();
       }
     } catch (error) {
