@@ -607,6 +607,7 @@
                 >
                   一键玄武赐福
                 </n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="queryBlessingShopItems">赐福活动商店兑换</n-button>
                 <n-button
                   size="small"
                   @click="batchClaimConsumptionRewards"
@@ -1022,6 +1023,7 @@
 
     <!-- Settings Modal -->
     <RechargeExchangeDialog v-model:show="rechargeExchangeOpen" :preset="true" :previews="rechargeExchangePreviews" @execute="batchRechargeExchange" />
+    <RechargeExchangeDialog v-model:show="blessingShopOpen" preset title="赐福活动商店兑换" :previews="blessingShopPreviews" @execute="batchBlessingShopExchange" />
     <RechargeExchangeDialog v-model:show="photoExchangeOpen" preset title="闲来入镜商店兑换" :previews="photoExchangePreviews" @execute="batchPhotoExchange" />
     <n-modal
       v-model:show="showSettingsModal"
@@ -3833,6 +3835,7 @@ import { DEFAULT_SALT_BATTLE_SETTINGS } from "@/utils/saltWarRunner.js";
 import { connectWithTokenRefresh } from "@/utils/batch/connectWithTokenRefresh.js";
 import RechargeExchangeDialog from "@/components/RechargeExchangeDialog.vue";
 import { createTasksRecharge } from "@/utils/batch/tasksRecharge.js";
+import { loadBlessingShopCatalog, exchangeBlessingItems } from "@/utils/blessingShop.js";
 import { loadPhotoExchangeCatalog, exchangePhotoItems, runPhotoStandard, runPhotoWhiteJade } from "@/utils/photoActivity.js";
 import { DEFAULT_WEIRD_TOWER_CLIMB_COUNT, normalizeWeirdTowerClimbCount } from "@/utils/evoTowerRewards.js";
 import {
@@ -8312,6 +8315,10 @@ const { batchFootballBet } = tasksFootball;
 
 const tasksApex = createTasksApex(createTaskDeps());
 const { batchApexGuess } = tasksApex;
+
+const { queryRechargeExchangeItems: queryBlessingShopItems, batchRechargeExchange: batchBlessingShopExchange,
+  rechargeExchangeOpen: blessingShopOpen, rechargeExchangePreviews: blessingShopPreviews } = createTasksRecharge(
+    createTaskDeps(), { label: "赐福活动商店", loadCatalog: loadBlessingShopCatalog, exchangeItems: exchangeBlessingItems });
 
 const tasksXuanwuBlessing = createTasksXuanwuBlessing(createTaskDeps());
 const { batchXuanwuBlessing, batchExchangeXuanwuPetCookies } =
