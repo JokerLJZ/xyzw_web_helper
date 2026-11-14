@@ -130,3 +130,12 @@ test("皮鞋任务换高星阵容后停止仍恢复默认站位，且不触发�
   assert.ok(f.logs.some(log => log.message.includes("推图默认阵容已恢复并校验")));
   assert.ok(f.commands.every(row => ["hero_exchange", "hero_gointobattle", "hero_gobackbattle"].includes(row.cmd)));
 }));
+
+test("入门阵容固定站位，已达标时不升级主公或重生", async () => immediateTimers(async () => {
+  const f = fixture(false);
+  f.role.heroes[210].level = 750;
+  await createTasksItem(f.deps).batchAdjustBeginnerFormation();
+  assert.deepEqual([107,116,110,202,210].map(id => f.role.heroes[id].battleTeamSlot), [0,1,2,3,4]);
+  assert.ok(f.commands.every(({cmd}) => !cmd.includes("upgrade") && !cmd.includes("rebirth")));
+  assert.equal(f.deps.tokenStatus.value.a, "completed");
+}));

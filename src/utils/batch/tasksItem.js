@@ -3416,7 +3416,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : cultivationFailed ? "failed" : "completed";
         if (cultivationFailed && !shouldStop.value) addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 推图准备部分完成：阵容已调整，部分培养未完成，请查看前面的失败或资源不足日志`,
+          message: `${tokenName} ${beginner ? "入门阵容" : "推图准备"}部分完成：阵容已调整，部分培养未完成，请查看前面的失败或资源不足日志`,
           type: "warning",
         });
       } catch (error) {
@@ -3479,10 +3479,16 @@ export function createTasksItem(deps) {
   };
 
   /** 小号推图准备：按拥有情况升级武将并设置默认推图阵容。 */
-  const batchAdjustMainLevelFormation = async () => {
+  const batchAdjustBeginnerFormation = () => batchAdjustMainLevelFormation(true);
+
+  const batchAdjustMainLevelFormation = async (beginner = false) => {
+    beginner = beginner === true;
     if (selectedTokens.value.length === 0) return;
 
-    const upgradeGroups = [
+    const upgradeGroups = beginner ? [
+      { targetLevel: 3000, heroIds: [107] },
+      { targetLevel: 750, heroIds: [116, 110, 202, 210] },
+    ] : [
       {
         targetLevel: 900,
         heroIds: [223, 202, 204, 110, 104, 106, 116, 112, 312],
@@ -3506,7 +3512,7 @@ export function createTasksItem(deps) {
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始小号推图准备: ${tokenName} ===`,
+          message: `=== 开始${beginner ? "入门阵容" : "小号推图准备"}: ${tokenName} ===`,
           type: "info",
         });
 
@@ -3555,7 +3561,7 @@ export function createTasksItem(deps) {
           roleInfo,
         );
         roleInfo = luBuResult.roleInfo;
-        if (!shouldStop.value && luBuResult.owned) {
+        if (!beginner && !shouldStop.value && luBuResult.owned) {
           try {
             const result = await upgradeLordAndLuBu(tokenId, tokenName, roleInfo);
             roleInfo = result.roleInfo;
@@ -3576,19 +3582,24 @@ export function createTasksItem(deps) {
           await new Promise((resolve) =>
             setTimeout(resolve, HERO_STAR_ACTION_DELAY_MS),
           );
-          await adjustMainLevelFormation(tokenId, tokenName, roleInfo);
+          if (beginner) {
+            await applyTargetFormation({ tokenId, tokenName, initialRoleInfo: roleInfo,
+              formationName: "入门阵容",
+              targetHeroes: [107, 116, 110, 202, 210].map((heroId, slot) => ({ heroId, slot })),
+            });
+          } else await adjustMainLevelFormation(tokenId, tokenName, roleInfo);
         }
         tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : cultivationFailed ? "failed" : "completed";
         if (cultivationFailed && !shouldStop.value) addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 推图准备部分完成：阵容已调整，部分培养未完成，请查看前面的失败或资源不足日志`,
+          message: `${tokenName} ${beginner ? "入门阵容" : "推图准备"}部分完成：阵容已调整，部分培养未完成，请查看前面的失败或资源不足日志`,
           type: "warning",
         });
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 小号推图准备失败: ${error.message || "未知错误"}`,
+          message: `${tokenName} ${beginner ? "入门阵容" : "小号推图准备"}失败: ${error.message || "未知错误"}`,
           type: "error",
         });
       } finally {
@@ -3600,7 +3611,7 @@ export function createTasksItem(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.info("小号推图默认阵容任务结束，请查看各账号结果");
+    message.info(`${beginner ? "入门阵容" : "小号推图默认阵容"}任务结束，请查看各账号结果`);
   };
 
   /**
@@ -7000,6 +7011,7 @@ export function createTasksItem(deps) {
     batchUpgradeLordTo6000,
     batchAdjustEarlyMainLevelFormation,
     batchAdjustMainLevelFormation,
+    batchAdjustBeginnerFormation,
     batchEmptyFormation,
     batchBookUpgrade,
     batchClaimStarRewards,
