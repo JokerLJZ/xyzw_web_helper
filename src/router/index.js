@@ -33,6 +33,27 @@ const my_routes = [
     })
   },
   {
+    path: '/game',
+    name: 'GamePlayer',
+    component: () => import('@/views/GamePlayer.vue'),
+    meta: {
+      title: '游戏',
+      requiresToken: true
+    },
+    props: route => ({
+      bin_id: route.query.bin_id
+    })
+  },
+  {
+    path: '/multi-game',
+    name: 'GameMultiPlayer',
+    component: () => import('@/views/GameMultiPlayer.vue'),
+    meta: {
+      title: '批量游戏',
+      requiresToken: true
+    }
+  },
+  {
     name: 'DefaultLayout',
     path: '/admin',
     component: () => import('@/layout/DefaultLayout.vue'),
@@ -97,7 +118,25 @@ const my_routes = [
         component: () => import('@/views/BatchDailyTasks.vue'),
         meta: {
           title: '批量日常',
+          requiresToken: false
+        }
+      },
+      {
+        path: 'PushingLevels',
+        name: 'PushingLevelsAdmin',
+        component: () => import('@/views/PushingLevels.vue'),
+        meta: {
+          title: '主线推关',
           requiresToken: true
+        }
+      },
+      {
+        path: 'data-backup',
+        name: 'DataBackup',
+        component: () => import('@/views/DataBackup.vue'),
+        meta: {
+          title: '数据备份',
+          requiresToken: false
         }
       },
       // 增加自动路由引用
@@ -168,12 +207,12 @@ router.beforeEach((to, from, next) => {
   // if (to.meta.requiresToken  && tokenStore.getWebSocketStatus(tokenStore.selectedToken.id)=="disconnected") {
     if (to.meta.requiresToken  && !tokenStore.hasTokens) {
     next('/tokens')
-  } else if (to.path === '/' && tokenStore.hasTokens) {
+  } else if (to.path === '/') {
     // 首页重定向逻辑
-    if (tokenStore.selectedToken) {
+    if (tokenStore.hasTokens && tokenStore.selectedToken) {
       next('/admin/dashboard')
     } else {
-      next('/tokens')
+      next('/admin/batch-daily-tasks')
     }
   } else {
     next()

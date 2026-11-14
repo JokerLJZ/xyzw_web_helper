@@ -1,0 +1,57 @@
+{
+  "source": "magic/api采集/宠物/扭蛋领奖.txt record #1",
+  "request": {
+    "stageId": 4
+  },
+  "response": {
+    "roleGacha": {
+      "claimedStageIdMap": {
+        "4": true
+      }
+    },
+    "role": {
+      "items": {
+        "3010": {
+          "quantity": 111
+        },
+        "15001": {
+          "quantity": 20500
+        },
+        "15002": {
+          "quantity": 3378
+        },
+        "37013": {
+          "itemId": 37013,
+          "quantity": 3,
+          "ext": null
+        }
+      }
+    },
+    "reward": [
+      {
+        "type": 3,
+        "itemId": 15001,
+        "value": 6000,
+        "ext": 0
+      },
+      {
+        "type": 3,
+        "itemId": 15002,
+        "value": 500,
+        "ext": 0
+      },
+      {
+        "type": 3,
+        "itemId": 3010,
+        "value": 15,
+        "ext": 0
+      },
+      {
+        "type": 3,
+        "itemId": 37013,
+        "value": 3,
+        "ext": 0
+      }
+    ]
+  }
+}

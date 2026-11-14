@@ -66,6 +66,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { useTokenStore } from "@/stores/tokenStore";
+import { getTowerActId } from "@/utils/towerActId.js";
 import { useMessage } from "naive-ui";
 import MyCard from "../Common/MyCard.vue";
 
@@ -162,12 +163,13 @@ const getInfo = async () => {
   if (tokenStore.getWebSocketStatus(tokenId) !== "connected") return;
 
   try {
-    const res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", {}, 5000);
+    const fallbackActId = getTowerActId();
+    const res = await tokenStore.sendMessageWithPromise(tokenId, "towers_getinfo", { actId: fallbackActId }, 5000);
     if (res) {
       // Handle nested data structure if necessary
-      const data = res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res);
+      const data = (res.actId ? res : (res.towerData && res.towerData.actId ? res.towerData : res)) || {};
       
-      actId.value = data.actId;
+      actId.value = data.actId || fallbackActId;
       levelRewardMap.value = data.levelRewardMap || {};
       
       console.log('SkinChallenge Info:', {
@@ -200,6 +202,7 @@ const challengeSingle = async (type) => {
   
   isFighting.value = true;
   const tokenId = tokenStore.selectedToken.id;
+  const challengeActId = actId.value || getTowerActId();
   
   try {
      message.info(`开始挑战 BOSS ${type}`);
@@ -210,10 +213,10 @@ const challengeSingle = async (type) => {
      
      while (loop) {
         if (needStart) {
-            await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { towerType: type }, 5000);
+            await tokenStore.sendMessageWithPromise(tokenId, "towers_start", { actId: challengeActId, towerType: type }, 5000);
         }
         
-        const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { towerType: type }, 5000);
+        const fightRes = await tokenStore.sendMessageWithPromise(tokenId, "towers_fight", { actId: challengeActId, towerType: type }, 5000);
         const battleData = fightRes?.battleData;
         const curHP = battleData?.result?.accept?.ext?.curHP;
         

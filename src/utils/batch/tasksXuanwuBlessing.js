@@ -1,0 +1,532 @@
+import { getBlessingLotteryItemId, getBlessingDrawTimes } from "@/utils/blessingLottery";
+import { extractRolePatch } from "@/utils/roleSnapshot";
+import { loadXuanwuActivityConfig, getClaimableXuanwuMissions } from "@/utils/xuanwuActivityConfig";
+/**
+ * 玄武赐福（通行证活动）批量任务
+ * 顺序执行：任务领取 -> 通行证奖励 -> 免费珍宝 -> 点卯 -> 抽奖 -> 累抽奖励 -> 抽奖后二次领取
+ * 抽奖会推进任务进度（如"抽奖X次"类任务），故抽奖后需重新拉取并再领一轮
+ */
+
+import { getXuanwuActBase } from "@/utils/towerActId";
+import { createLotteryCumulativeClaimer } from "@/utils/xuanwuLotteryRewards";
+import {
+  getXuanwuPetCookieExchangeIds,
+  getXuanwuPetCookieExchangeQuantity,
+} from "@/utils/xuanwuPetCookieExchange";
+
+// 活动ID后缀（前缀为当天日期 YYMMDD）
+const WAR_ORDER_SUFFIX = "1";
+const SIGN_SUFFIX = "5";
+const GOODS_SUFFIX = "41";
+
+// 防止异常响应导致无限抽奖；正常情况会在玄武灵契耗尽时由服务器终止。
+const MAX_DRAW_TIMES = 50;
+const MAX_RATE_LIMIT_RETRIES = 4;
+const RATE_LIMIT_RETRY_DELAY_MS = 6000;
+
+// 通行证奖励领取最大轮数
+const MAX_REWARD_ROUNDS = 10;
+
+// 点卯补领天数（patchDay 0-6）
+const SIGN_MAX_DAY = 6;
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const formatReward = (reward = []) =>
+  reward
+    .map((r) => {
+      if (r.type === 2) return `金砖x${r.value}`;
+      if (r.type === 3) return `道具${r.itemId}x${r.value}`;
+      return `类型${r.type}x${r.value}`;
+    })
+    .join(", ");
+
+/**
+ * 创建玄武赐福批量任务执行器
+ * @param {Object} deps - 依赖项
+ * @returns {Object} 任务函数集合
+ */
+export function createTasksXuanwuBlessing(deps) {
+  const {
+    selectedTokens,
+    tokens,
+    tokenStatus,
+    isRunning,
+    shouldStop,
+    ensureConnection,
+    releaseConnectionSlot,
+    tokenStore,
+    addLog,
+    message,
+    currentRunningTokenId,
+    delayConfig,
+  } = deps;
+
+  const commandDelay = delayConfig?.command || delayConfig?.action || 300;
+
+  const log = (msg, type = "info") =>
+    addLog({ time: new Date().toLocaleTimeString(), message: msg, type });
+
+  /** 拉取通行证活动信息 */
+  const fetchWarOrder = async (tokenId, actId) => {
+    try {
+      const res = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "activity_warorderget",
+        { actId },
+        8000,
+      );
+      return res?.activity?.warOrderActivityInfo?.[actId] || null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** 解析当前活动ID：先用日期推导，取不到再逐天回退探测 */
+  const resolveWarOrder = async (tokenId) => {
+    const candidates = [];
+    const now = new Date();
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      candidates.push(Number(getXuanwuActBase(date) + WAR_ORDER_SUFFIX));
+    }
+
+    for (const actId of candidates) {
+      const info = await fetchWarOrder(tokenId, actId);
+      if (info) return { actId, info };
+    }
+
+    return null;
+  };
+
+  /** 领取通行证任务（每日/每周/本期），返回领取/跳过数 */
+  const claimTasks = async (tokenId, actId, info, tokenName, config, reportIssue) => {
+    const claimedMap = info?.taskClaimed || {};
+    let claimed = 0;
+    let skipped = 0;
+
+    for (const mission of getClaimableXuanwuMissions(config, actId, info)) {
+      if (shouldStop.value) break;
+      const missionIdStr = String(mission.id);
+
+      try {
+        const res = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_warordertaskclaim",
+          { actId, missionId: Number(missionIdStr) },
+          8000,
+        );
+        const latest = res?.activity?.warOrderActivityInfo?.[actId]?.taskClaimed;
+        if (latest) Object.assign(claimedMap, latest);
+
+        if (res?.reward?.length) {
+          log(`${tokenName} 任务${missionIdStr}领取: ${formatReward(res.reward)}`, "success");
+          claimed++;
+        } else {
+          skipped++;
+        }
+      } catch (error) {
+        skipped++;
+        reportIssue(`任务${missionIdStr}领取失败: ${error?.message || "未知错误"}`);
+      }
+      await delay(commandDelay);
+    }
+
+    if (claimed > 0 || skipped > 0) {
+      log(
+        `${tokenName} 通行证任务: 领取 ${claimed}, 跳过 ${skipped}`,
+        claimed > 0 ? "success" : "info",
+      );
+    }
+    return { claimed, skipped };
+  };
+
+  /** 通行证奖励领取（可能产出抽奖券），返回领取轮数 */
+  const claimPassRewards = async (tokenId, actId, tokenName) => {
+    let rounds = 0;
+    for (let round = 0; round < MAX_REWARD_ROUNDS; round++) {
+      if (shouldStop.value) break;
+      try {
+        const res = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_warorderrewardclaim",
+          { actId },
+          8000,
+        );
+        if (!res?.reward?.length) break;
+        log(`${tokenName} 通行证奖励领取: ${formatReward(res.reward)}`, "success");
+        rounds++;
+      } catch {
+        // 已无可领取奖励
+        break;
+      }
+      await delay(commandDelay);
+    }
+    if (rounds > 0) {
+      log(`${tokenName} 通行证奖励: 领取 ${rounds} 次`, "success");
+    }
+    return rounds;
+  };
+
+  /** 免费珍宝购买（产出抽奖券） */
+  const buyFreeGoods = async (tokenId, goodsId, tokenName) => {
+    try {
+      const res = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "activity_commonbuygoods",
+        { goodsId },
+        8000,
+      );
+      log(
+        `${tokenName} 免费珍宝购买成功${res?.reward?.length ? `: ${formatReward(res.reward)}` : ""}`,
+        "success",
+      );
+      return true;
+    } catch {
+      log(`${tokenName} 免费珍宝今日已购买或不可购买`);
+      return false;
+    }
+  };
+
+  /** 抽奖（会推进抽奖类任务进度） */
+  const doLottery = async (
+    tokenId,
+    tokenName,
+    maxDrawTimes = MAX_DRAW_TIMES,
+    reportIssue,
+    drawState,
+    itemId,
+  ) => {
+    if (drawState.blocked) return 0;
+    try {
+      const lotteryInfo = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "activity_getlotteryinfo",
+        {},
+        8000,
+      );
+      log(`${tokenName} 抽奖信息: ${JSON.stringify(lotteryInfo?.lotteryInfo || {})}`);
+    } catch {
+      // 抽奖信息获取失败不影响抽奖
+    }
+
+    let count = 0;
+    while (count < maxDrawTimes) {
+      if (shouldStop.value) break;
+      let times;
+      try {
+        const role = extractRolePatch(await tokenStore.sendGetRoleInfo(tokenId));
+        times = getBlessingDrawTimes(role, itemId, maxDrawTimes - count);
+      } catch (error) {
+        drawState.blocked = true;
+        reportIssue(`抽奖库存查询失败，本次任务不再重试: ${error.message}`);
+        return count;
+      }
+      if (!times) {
+        log(`${tokenName} 当前活动道具${itemId}库存为0，本轮抽奖${count}次`);
+        return count;
+      }
+      let drawn = false;
+      for (
+        let attempt = 0;
+        attempt <= MAX_RATE_LIMIT_RETRIES;
+        attempt += 1
+      ) {
+        if (shouldStop.value) return count;
+        try {
+          const res = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "activity_lottery",
+            { times },
+            8000,
+          );
+          log(
+            `${tokenName} 本次${times}连抽，累计${count + times}次: ${formatReward(res?.reward || []) || "无奖励"}`,
+            "success",
+          );
+          count += times;
+          drawn = true;
+          break;
+        } catch (error) {
+          const errorMessage = error?.message || "未知错误";
+          const rateLimited =
+            errorMessage.includes("200400") ||
+            errorMessage.includes("操作太快");
+          if (rateLimited && attempt < MAX_RATE_LIMIT_RETRIES) {
+            log(
+              `${tokenName} 玄武抽奖触发200400，等待6秒后进行第${attempt + 1}次重试`,
+              "warning",
+            );
+            await delay(RATE_LIMIT_RETRY_DELAY_MS);
+            continue;
+          }
+          // 写请求结果不明确时不降级单抽或重发，避免重复消耗。
+          drawState.blocked = true;
+          reportIssue(`抽奖失败，本次任务不再重试: ${errorMessage}`);
+          return count;
+        }
+      }
+      if (!drawn) break;
+      await delay(commandDelay);
+    }
+    if (count >= maxDrawTimes) {
+      log(`${tokenName} 抽奖达到本次剩余安全额度${maxDrawTimes}次`, "warning");
+    }
+    return count;
+  };
+
+  /** 玄武点卯（patchDay 0-6 补领） */
+  const claimSign = async (tokenId, signActivityId, tokenName) => {
+    let claimed = 0;
+    let skipped = 0;
+    for (let patchDay = 0; patchDay <= SIGN_MAX_DAY; patchDay++) {
+      if (shouldStop.value) break;
+      try {
+        const res = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_claimsignreward",
+          { activityId: signActivityId, patchDay },
+          8000,
+        );
+        if (res?.reward?.length) {
+          log(
+            `${tokenName} 点卯第${patchDay + 1}天领取: ${formatReward(res.reward)}`,
+            "success",
+          );
+          claimed++;
+        } else {
+          skipped++;
+        }
+      } catch {
+        skipped++;
+      }
+      await delay(commandDelay);
+    }
+    log(
+      `${tokenName} 玄武点卯: 领取 ${claimed} 天, 跳过 ${skipped} 天`,
+      claimed > 0 ? "success" : "info",
+    );
+    return claimed;
+  };
+
+  /** 批量执行玄武赐福 */
+  const batchXuanwuBlessing = async () => {
+    if (selectedTokens.value.length === 0) return;
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((t) => t.id === tokenId);
+      try {
+        log(`=== 开始玄武赐福: ${token.name} ===`);
+        await ensureConnection(tokenId);
+        if (shouldStop.value) return;
+
+        const resolved = await resolveWarOrder(tokenId);
+        if (!resolved) {
+          throw new Error("未找到玄武赐福活动，请确认活动是否开启");
+        }
+        const { actId, info } = resolved;
+        const issues = [];
+        const reportIssue = text => { issues.push(text); log(`${token.name} ${text}`, "warning"); };
+        const config = await loadXuanwuActivityConfig((cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 8000));
+        const base = String(actId).slice(0, 6);
+        const lotteryItemId = getBlessingLotteryItemId(config, Number(base + "2"));
+        const signActivityId = Number(base + SIGN_SUFFIX);
+        const goodsId = Number(base + GOODS_SUFFIX);
+        const claimLotteryRewards = createLotteryCumulativeClaimer({
+          send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 8000),
+          actId: Number(base + "2"),
+          config,
+          wait: () => delay(commandDelay),
+          shouldStop: () => shouldStop.value,
+          onClaim: (id, reward) => log(`${token.name} 寻宝累抽奖励${id}已确认领取: ${formatReward(reward)}`, "success"),
+          onError: error => reportIssue(`寻宝累抽奖励领取失败，本次任务不再重试: ${error?.message || "未知错误"}`),
+        });
+
+        // 1. 先领一轮任务 + 通行证奖励，同时攒抽奖券
+        const first = await claimTasks(tokenId, actId, info, token.name, config, reportIssue);
+        let passRewards = await claimPassRewards(tokenId, actId, token.name);
+
+        // 2. 免费珍宝购买（产出抽奖券）
+        await buyFreeGoods(tokenId, goodsId, token.name);
+        await delay(commandDelay);
+
+        // 3. 点卯补领（同样可能推进任务进度）
+        const signCnt = await claimSign(tokenId, signActivityId, token.name);
+
+        // 4. 抽完全部玄武灵契；领奖若再次产出灵契，则继续抽取并再次领奖。
+        const drawState = { blocked: false };
+        let lotteryCnt = 0;
+        let lotteryRewards = 0;
+        let secondClaimed = 0;
+        for (let round = 0; round < MAX_REWARD_ROUNDS; round++) {
+          const remainingDrawTimes = MAX_DRAW_TIMES - lotteryCnt;
+          if (remainingDrawTimes <= 0) {
+            reportIssue(`本次抽奖已达到安全上限${MAX_DRAW_TIMES}次，剩余灵契未确认`);
+            break;
+          }
+          const drawn = await doLottery(
+            tokenId,
+            token.name,
+            remainingDrawTimes,
+            reportIssue,
+            drawState,
+            lotteryItemId,
+          );
+          lotteryCnt += drawn;
+          const claimedLotteryRewards = await claimLotteryRewards();
+          lotteryRewards += claimedLotteryRewards;
+          const latestInfo = await fetchWarOrder(tokenId, actId);
+          if (!latestInfo) { reportIssue("刷新通行证状态失败"); break; }
+          const second = await claimTasks(tokenId, actId, latestInfo, token.name, config, reportIssue);
+          secondClaimed += second.claimed;
+          const newPassRewards =
+            second.claimed > 0
+              ? await claimPassRewards(tokenId, actId, token.name)
+              : 0;
+          passRewards += newPassRewards;
+          if (
+            drawn === 0
+            && claimedLotteryRewards === 0
+            && second.claimed === 0
+            && newPassRewards === 0
+          ) break;
+        }
+
+        // 即使本轮没有抽奖，也补领此前已达到但遗漏的累抽奖励。
+        lotteryRewards += await claimLotteryRewards();
+
+        log(
+          `${token.name} 玄武赐福${shouldStop.value ? "已停止" : issues.length ? "部分完成" : "完成"}: 任务${first.claimed + secondClaimed}, 通行证奖励${passRewards}, 点卯${signCnt}, 抽奖${lotteryCnt}, 累抽奖励${lotteryRewards}档`,
+          shouldStop.value || issues.length ? "warning" : "success",
+        );
+
+        tokenStatus.value[tokenId] = shouldStop.value || issues.length ? "failed" : "completed";
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        log(`${token.name} 玄武赐福失败: ${error.message || "未知错误"}`, "error");
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        log(`${token.name} 连接已关闭`);
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量玄武赐福结束");
+  };
+
+  /** 小号任务：只查询一次库存，用全部可兑换道具换取宠物饼干。 */
+  const batchExchangeXuanwuPetCookies = async () => {
+    if (selectedTokens.value.length === 0) return;
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+
+      try {
+        log(`=== 开始玄武活动兑换宠物饼干: ${tokenName} ===`);
+        await ensureConnection(tokenId);
+        if (shouldStop.value) return;
+
+        const resolved = await resolveWarOrder(tokenId);
+        if (!resolved) {
+          throw new Error("未找到玄武赐福活动，请确认活动是否开启");
+        }
+
+        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
+        const exchange = getXuanwuPetCookieExchangeQuantity(roleInfo);
+        if (exchange.exchangeQuantity <= 0) {
+          log(
+            `${tokenName} 玄武活动道具${exchange.itemId}现有${exchange.itemQuantity}个，不足${exchange.unitCost}个，跳过兑换`,
+          );
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        const activityBase = String(resolved.actId).slice(0, 6);
+        const { activityId, goodsId } =
+          getXuanwuPetCookieExchangeIds(activityBase);
+
+        const exchangeWithRateLimitRetry = async (goodsId, quantity, name) => {
+          for (let attempt = 0; ; attempt++) {
+            try {
+              return await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "activity_exchange",
+                { activityId, goodsId, quantity },
+                8000,
+              );
+            } catch (error) {
+              const errorMessage = String(error?.message || error || "");
+              const rateLimited =
+                errorMessage.includes("200400") ||
+                errorMessage.includes("操作太快");
+              if (!rateLimited || attempt >= MAX_RATE_LIMIT_RETRIES) {
+                throw error;
+              }
+              log(
+                `${tokenName} 兑换${name}触发200400，等待6秒后进行第${attempt + 1}次重试`,
+                "warning",
+              );
+              await delay(RATE_LIMIT_RETRY_DELAY_MS);
+            }
+          }
+        };
+
+        log(
+          `${tokenName} 玄武活动道具${exchange.itemId}现有${exchange.itemQuantity}个，计划兑换宠物饼干${exchange.exchangeQuantity}份，预计剩余${exchange.itemQuantity - exchange.exchangeQuantity * exchange.unitCost}个`,
+        );
+        const cookieResult = await exchangeWithRateLimitRetry(
+          goodsId,
+          exchange.exchangeQuantity,
+          "宠物饼干",
+        );
+        log(
+          `${tokenName} 宠物饼干兑换${exchange.exchangeQuantity}份成功${cookieResult?.reward?.length ? `：${formatReward(cookieResult.reward)}` : ""}`,
+          "success",
+        );
+        tokenStatus.value[tokenId] = "completed";
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        log(
+          `${tokenName} 玄武活动兑换宠物饼干失败: ${error?.message || "未知错误"}`,
+          "error",
+        );
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        log(`${tokenName} 连接已关闭`);
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("玄武活动兑换宠物饼干任务结束");
+  };
+
+  return {
+    batchXuanwuBlessing,
+    batchExchangeXuanwuPetCookies,
+  };
+}

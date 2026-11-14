@@ -219,7 +219,6 @@ The `gameData` ref in tokenStore maintains:
   roleInfo: {},              // Character information (level, class, server, stats)
   legionInfo: {},            // Guild/legion information
   commonActivityInfo: {},    // Consumption activity progress
-  bossTowerInfo: {},         // Boss tower (treasury) data
   evoTowerInfo: {},          // Evolution tower (anomaly tower) data
   presetTeam: {},            // Pre-configured team compositions
   battleVersion: number,     // Battle system version number
@@ -245,7 +244,6 @@ src/
 │   ├── Daily/
 │   │   └── DailyTaskCard.vue     # Daily task visualization card
 │   ├── Club/                     # Guild/club related components
-│   │   └── ClubCarKing.vue       # Club racing king feature
 │   ├── Tower/                    # Tower climbing components
 │   ├── Team/                     # Team management components
 │   ├── Test/

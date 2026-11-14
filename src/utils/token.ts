@@ -111,6 +111,7 @@ export const transformToken = async (arrayBuffer: ArrayBuffer) => {
           referrerPolicy: "no-referrer",
         },
         responseType: "arraybuffer",
+        timeout: 15000,
       },
     );
     const msg = g_utils.parse(res.data);
