@@ -10,8 +10,8 @@ async function immediateTimers(run) {
   try { await run(); } finally { globalThis.setTimeout = originalTimer; Date.now = originalNow; }
 }
 function fixture(early, failQueries = 0, upgrade = false, failAfterApplied = false, poor = false) {
-  const ids = [223,202,204,110,104,106,116,112,312,210,217,107];
-  const role = { gold: 0, items: {}, lord: { level: 6000, order: 20 }, heroes: Object.fromEntries(ids.map(id => [id, { heroId: id, level: 900, order: 6, battleTeamSlot: -1 }])) };
+  const ids = [223,202,204,110,104,106,116,112,312,210,217,107,117,101];
+  const role = { lordWeaponId: 0, gold: 0, items: {}, lord: { level: 6000, order: 20 }, heroes: Object.fromEntries(ids.map(id => [id, { heroId: id, level: 900, order: 6, battleTeamSlot: -1 }])) };
   role.heroes[107].level = 6000; role.heroes[107].order = 20;
   const lineup = early ? [107, null, 223, 106] : [107,110,104,106,223];
   lineup.forEach((id, slot) => { if (id) role.heroes[id].battleTeamSlot = slot; });
@@ -32,7 +32,8 @@ function fixture(early, failQueries = 0, upgrade = false, failAfterApplied = fal
       },
       async sendMessageWithPromise(id, cmd, params) {
         commands.push({ cmd, params });
-        if (cmd === "hero_heroupgradelevel") role.heroes[params.heroId].level += params.upgradeNum;
+        if (cmd === "lordweapon_changedefaultweapon") role.lordWeaponId = params.weaponId;
+        else if (cmd === "hero_heroupgradelevel") role.heroes[params.heroId].level += params.upgradeNum;
         else if (cmd === "hero_heroupgradeorder") role.heroes[params.heroId].order++;
         else if (cmd === "hero_gobackbattle") {
           Object.values(role.heroes).find(hero => hero.battleTeamSlot === params.slot).battleTeamSlot = -1;
@@ -135,7 +136,39 @@ test("入门阵容固定站位，已达标时不升级主公或重生", async ()
   const f = fixture(false);
   f.role.heroes[210].level = 750;
   await createTasksItem(f.deps).batchAdjustBeginnerFormation();
-  assert.deepEqual([107,116,110,202,210].map(id => f.role.heroes[id].battleTeamSlot), [0,1,2,3,4]);
+  assert.deepEqual([107,117,110,202,101].map(id => f.role.heroes[id].battleTeamSlot), [0,1,2,3,4]);
   assert.ok(f.commands.every(({cmd}) => !cmd.includes("upgrade") && !cmd.includes("rebirth")));
+  assert.equal(f.deps.tokenStatus.value.a, "completed");
+}));
+
+test("入门阵容卸下玩具并确认角色状态", async () => immediateTimers(async () => {
+  const f = fixture(false); f.role.lordWeaponId = 2;
+  await createTasksItem(f.deps).batchAdjustBeginnerFormation();
+  assert.equal(f.role.lordWeaponId, 0);
+  assert.deepEqual(f.commands.filter(c => c.cmd === "lordweapon_changedefaultweapon").map(c => c.params), [{weaponId:0}]);
+  assert.equal(f.deps.tokenStatus.value.a, "completed");
+}));
+
+test("入门阵容玩具卸下响应丢失时不重发", async () => immediateTimers(async () => {
+  const f = fixture(false); f.role.lordWeaponId = 2;
+  const original = f.deps.tokenStore.sendMessageWithPromise;
+  f.deps.tokenStore.sendMessageWithPromise = async (...args) => {
+    const result = await original(...args);
+    if (args[1] === "lordweapon_changedefaultweapon") throw new Error("请求超时");
+    return result;
+  };
+  await createTasksItem(f.deps).batchAdjustBeginnerFormation();
+  assert.equal(f.commands.filter(c => c.cmd === "lordweapon_changedefaultweapon").length, 1);
+  assert.equal(f.deps.tokenStatus.value.a, "failed");
+}));
+
+test("入门阵容吕布只升至2400级，四名辅助只升至750级", async () => immediateTimers(async () => {
+  const f = fixture(false); f.role.gold = 1e12; f.role.items[1003] = {quantity:1e6};
+  for (const id of [107,117,110,202,101]) {
+    f.role.heroes[id].level = id === 107 ? 2399 : 749;
+    f.role.heroes[id].order = id === 107 ? 12 : 5;
+  }
+  await createTasksItem(f.deps).batchAdjustBeginnerFormation();
+  assert.deepEqual([107,117,110,202,101].map(id => f.role.heroes[id].level), [2400,750,750,750,750]);
   assert.equal(f.deps.tokenStatus.value.a, "completed");
 }));

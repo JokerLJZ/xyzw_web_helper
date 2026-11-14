@@ -694,7 +694,7 @@
             </n-tab-pane>
             <n-tab-pane name="formation" tab="阵容管理">
               <n-space>
-                <n-button size="small" @click="batchAdjustBeginnerFormation" :disabled="isRunning || selectedTokens.length === 0" title="1号吕布3000级，2号公孙瓒、3号黄月英、4号荀彧、5号貂蝉750级；超过目标不降级">入门阵容</n-button>
+                <n-button size="small" @click="batchAdjustBeginnerFormation" :disabled="isRunning || selectedTokens.length === 0" title="1号吕布2400级，2号典韦、3号黄月英、4号荀彧、5号司马懿750级，不带玩具；超过目标不降级">入门阵容</n-button>
                 <n-button size="small" @click="batchEmptyFormation" :disabled="isRunning || selectedTokens.length === 0" title="仅1号位放星级最低、同星级等级最低的紫将，并卸下玩具和宠物">无将阵容</n-button>
                 <n-button
                   size="small"
@@ -8404,7 +8404,6 @@ const getScheduledTaskFunction = (name) => {
     batchReleaseFeudatory,
     batchAdjustEarlyMainLevelFormation,
     batchAdjustMainLevelFormation,
-  batchAdjustBeginnerFormation,
     batchUpgradeHangUpAndClaimOrderRewards,
     batchXuanwuBlessing,
     batchClaimConsumptionRewards,

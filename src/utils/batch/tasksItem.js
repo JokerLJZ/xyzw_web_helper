@@ -3416,7 +3416,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : cultivationFailed ? "failed" : "completed";
         if (cultivationFailed && !shouldStop.value) addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} ${beginner ? "入门阵容" : "推图准备"}部分完成：阵容已调整，部分培养未完成，请查看前面的失败或资源不足日志`,
+          message: `${tokenName} 推图准备部分完成：阵容已调整，部分培养未完成，请查看前面的失败或资源不足日志`,
           type: "warning",
         });
       } catch (error) {
@@ -3486,8 +3486,8 @@ export function createTasksItem(deps) {
     if (selectedTokens.value.length === 0) return;
 
     const upgradeGroups = beginner ? [
-      { targetLevel: 3000, heroIds: [107] },
-      { targetLevel: 750, heroIds: [116, 110, 202, 210] },
+      { targetLevel: 2400, heroIds: [107] },
+      { targetLevel: 750, heroIds: [117, 110, 202, 101] },
     ] : [
       {
         targetLevel: 900,
@@ -3585,8 +3585,19 @@ export function createTasksItem(deps) {
           if (beginner) {
             await applyTargetFormation({ tokenId, tokenName, initialRoleInfo: roleInfo,
               formationName: "入门阵容",
-              targetHeroes: [107, 116, 110, 202, 210].map((heroId, slot) => ({ heroId, slot })),
+              targetHeroes: [107, 117, 110, 202, 101].map((heroId, slot) => ({ heroId, slot })),
             });
+            if (shouldStop.value) throw new Error("任务已停止");
+            let refreshed = await queryFormationRole(tokenId, tokenName);
+            if (refreshed.role.lordWeaponId == null) throw new Error("缺少玩具状态，无法确认卸下");
+            if (Number(refreshed.role.lordWeaponId) !== 0) {
+              await gateFormationRequest(tokenId, () => {
+                if (shouldStop.value) throw new Error("任务已停止");
+                return tokenStore.sendMessageWithPromise(tokenId, "lordweapon_changedefaultweapon", { weaponId: 0 }, HELPER_COMMAND_TIMEOUT_MS);
+              });
+              refreshed = await queryFormationRole(tokenId, tokenName);
+              if (Number(refreshed.role?.lordWeaponId) !== 0) throw new Error("玩具卸下未确认");
+            }
           } else await adjustMainLevelFormation(tokenId, tokenName, roleInfo);
         }
         tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : cultivationFailed ? "failed" : "completed";
