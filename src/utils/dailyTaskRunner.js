@@ -1,3 +1,4 @@
+import { runDailyMatchRoom } from "./dailyMatchRoom.js";
 import { cleanupMondayMail } from "./mondayMailCleanup.js";
 import { normalizeDailyRoleSnapshot, chinaDayStart, arenaAvailability, remainingFreeFishing, rewardProgressText, dailyConditionEnabled, classifyDailyStepResult } from "./dailyTaskPolicy.js";
 import { createApexDailySender, runApexDailyTask } from "./apexDailyTask.js";
@@ -1391,6 +1392,7 @@ export class DailyTaskRunner {
         whiteJadePurchase: false,
         mondayResourcePurchase: false,
         apexDailyEnable: false,
+        matchRoomEnable: true,
         freeGachaEnable: true,
         studyEnable: true,
         dreamEnable: true,
@@ -2009,6 +2011,19 @@ export class DailyTaskRunner {
       && isTodayAvailable(statistics["gacha:free"])
     ) {
       this.logDetail("免费扭蛋跳过：仅周二、周四、周六执行", "info");
+    }
+
+    if (settings.matchRoomEnable !== false) {
+      taskList.push({ name: "比赛房间关注及奖励", execute: async () => {
+        this.roleStateDirty = true;
+        const result = await runDailyMatchRoom({
+          send: (cmd, params) => this.sendRequest(tokenId, () =>
+            this.tokenStore.sendMessageWithPromise(tokenId, cmd, params, 15000), cmd),
+          now: () => this.serverNow(tokenId),
+        });
+        this.log(result.reason);
+        return result;
+      } });
     }
 
     // 5. 免费活动

@@ -34,6 +34,7 @@ const config = {
   ],
 };
 const settings = {
+  matchRoomEnable: false,
   arenaFormation: 1,
   bossFormation: 1,
   payRecruit: true,

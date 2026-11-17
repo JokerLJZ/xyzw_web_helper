@@ -149,6 +149,10 @@ export class CommandRegistry {
 export function registerDefaultCommands(reg) {
   const registry = reg
     .registerHeartbeat()
+    .register("pkroom_getfightroominfo", {})
+    .register("pkroom_getfightroomdetail", {})
+    .register("pkroom_appoint", {})
+    .register("pkroom_appointreward", {})
     // 角色/系统
     .register("war_enterbattlefield", {}, { hintField: "battlefieldId" })
     .register("war_getbattlefieldinfo", {}, { hintField: "battlefieldId" })

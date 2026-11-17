@@ -1128,6 +1128,10 @@
               <n-switch v-model:value="currentSettings.apexDailyEnable" />
             </div>
             <div class="switch-row">
+              <span class="switch-label">比赛房间关注及奖励</span>
+              <n-switch v-model:value="currentSettings.matchRoomEnable" />
+            </div>
+            <div class="switch-row">
               <span class="switch-label">付费招募</span
               ><n-switch v-model:value="currentSettings.payRecruit" />
             </div>
@@ -1271,6 +1275,10 @@
             <div class="switch-row">
               <span class="switch-label" title="周一将全部助威道具用于第一支可助威队伍并领奖，周日领奖；每天预测支持人数较多的队伍（默认关闭）">逐鹿盐山助威与竞猜</span>
               <n-switch v-model:value="currentTemplate.apexDailyEnable" />
+            </div>
+            <div class="switch-row">
+              <span class="switch-label">比赛房间关注及奖励</span>
+              <n-switch v-model:value="currentTemplate.matchRoomEnable" />
             </div>
             <div class="switch-row">
               <span class="switch-label">付费招募</span
@@ -4457,6 +4465,7 @@ const currentSettings = reactive({
   whiteJadePurchase: false,
   mondayResourcePurchase: false,
   apexDailyEnable: false,
+  matchRoomEnable: true,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -4494,6 +4503,7 @@ const currentTemplate = reactive({
   whiteJadePurchase: false,
   mondayResourcePurchase: false,
   apexDailyEnable: false,
+  matchRoomEnable: true,
   studyEnable: true,
   dreamEnable: true,
   genieSweepEnable: false,
@@ -7159,6 +7169,7 @@ const loadSettings = (tokenId) => {
       whiteJadePurchase: false,
       mondayResourcePurchase: false,
       apexDailyEnable: false,
+      matchRoomEnable: true,
       studyEnable: true,
       dreamEnable: true,
       genieSweepEnable: false,
@@ -7216,6 +7227,7 @@ const openTaskTemplateModal = () => {
     whiteJadePurchase: false,
     mondayResourcePurchase: false,
     apexDailyEnable: false,
+    matchRoomEnable: true,
     studyEnable: true,
     dreamEnable: true,
     genieSweepEnable: false,
@@ -7378,6 +7390,7 @@ const resetTemplateForm = () => {
     whiteJadePurchase: false,
     mondayResourcePurchase: false,
     apexDailyEnable: false,
+    matchRoomEnable: true,
     studyEnable: true,
     dreamEnable: true,
     genieSweepEnable: false,
