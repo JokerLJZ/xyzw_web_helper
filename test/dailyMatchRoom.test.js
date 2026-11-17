@@ -10,7 +10,7 @@ test('official match phase and signed booking status', () => {
   for (const value of [0, -123, 122]) assert.equal(matchRoomAction(info, {state:1}, role(value), 11000).command, undefined);
   assert.equal(matchRoomAction(info, {state:5}, role(123), 11000).command, undefined);
   assert.equal(matchRoomAction({...info,type:1}, {}, role(0), 0).command, undefined);
-  assert.throws(() => matchRoomAction(info, {}, role(123), 11000));
+  assert.throws(() => matchRoomAction(info, null, role(123), 11000));
 });
 test('account state confirms timeout without retry and repeat execution skips', async () => {
   let booked = 0, writes = 0;
@@ -48,4 +48,25 @@ test('reward requires server-confirmed negative booking statistic', async () => 
   assert.equal((await runDailyMatchRoom({send,now:()=>11000})).status,'success');
   assert.equal((await runDailyMatchRoom({send,now:()=>11000})).status,'skipped');
   assert.equal(writes,1);
+});
+
+test('raw protocol default fields: omitted type is official and omitted state is prepared', () => {
+  const {type, ...raw} = info;
+  assert.equal(matchRoomAction(raw, {}, role(0), 9000).command, 'pkroom_appoint');
+  assert.equal(matchRoomAction(raw, {}, role(123), 11000).command, 'pkroom_appointreward');
+  assert.match(matchRoomAction({...raw,type:1}, {}, role(0), 9000).reason, /非正式比赛/);
+  assert.match(matchRoomAction({roomId:''}).reason, /没有比赛房间/);
+  assert.throws(()=>matchRoomAction({...raw,type:null}, {}, role(0), 9000), /类型无效/);
+});
+test('omitted official type still queries detail and confirms appointment', async () => {
+  let booked=0;const calls=[];
+  const send=async cmd => {
+    calls.push(cmd);
+    if(cmd==='pkroom_getfightroominfo') return {roomId:'123',firstMatchTime:10};
+    if(cmd==='pkroom_getfightroomdetail')return {roomInfo:{}};
+    if(cmd==='role_getroleinfo')return {role:role(booked)};
+    assert.equal(cmd,'pkroom_appoint');booked=123;return {};
+  };
+  assert.equal((await runDailyMatchRoom({send,now:()=>9000})).status,'success');
+  assert.equal(calls.filter(c=>c==='pkroom_getfightroomdetail').length,2);
 });

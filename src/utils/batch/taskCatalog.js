@@ -33,6 +33,7 @@ export const TASK_GROUPS = [
     "label": "俱乐部与赛事",
     "tasks": [
       "batchclubsign",
+      "batchMatchRoom",
       "batchSaltSignup",
       "batchSaltBattle",
       "batchCampSignup",

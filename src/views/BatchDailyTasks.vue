@@ -505,6 +505,7 @@
                 >
                   逐鹿盐山竞猜
                 </n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchMatchRoom()">比赛房间关注及奖励</n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="shop" tab="商店与采购">
@@ -3940,6 +3941,7 @@ import {
   createTasksFeudatory,
   createTasksFootball,
   createTasksApex,
+  createTasksMatchRoom,
   createTasksXuanwuBlessing,
 } from "@/utils/batch";
 import { createTasksSignupCheer } from "@/utils/batch/tasksSignupCheer.js";
@@ -8330,6 +8332,8 @@ const { batchPushMainLevelInfo, pushMainLevelInfo } = tasksMainLevel;
 const tasksFootball = createTasksFootball(createTaskDeps());
 const { batchFootballBet } = tasksFootball;
 
+const { batchMatchRoom } = createTasksMatchRoom(createTaskDeps());
+
 const tasksApex = createTasksApex(createTaskDeps());
 const { batchApexGuess } = tasksApex;
 
@@ -8435,6 +8439,7 @@ const getScheduledTaskFunction = (name) => {
     batchBuyDreamItems,
     batchFootballBet,
     batchApexGuess,
+    batchMatchRoom,
     store_syncpurchaseconfig,
   };
   return Object.hasOwn(registry, name) ? registry[name] : undefined;

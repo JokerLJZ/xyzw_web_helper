@@ -1,7 +1,17 @@
 // Official RFHonorData / RoomFight hall flow, client 2.54.2.
-export function matchRoomAction(info, detail, role, now) {
+// Protocol model defaults must be applied to raw responses (the official
+// client constructs PKRoom_GetFightRoomInfoResp / GDPKRoom before setValue).
+export function normalizeMatchRoomInfo(info) {
   if (!info || typeof info.roomId !== "string") throw new Error("比赛房间响应不完整");
-  if (!info.roomId || info.type !== 0) return { reason: "当前没有正式比赛" };
+  const type = info.type === undefined ? 0 : info.type;
+  if (!Number.isInteger(type)) throw new Error("比赛房间类型无效");
+  return { firstMatchTime: 0, ...info, type };
+}
+
+export function matchRoomAction(info, detail, role, now) {
+  info = normalizeMatchRoomInfo(info);
+  if (!info.roomId) return { reason: "当前没有比赛房间" };
+  if (info.type !== 0) return { reason: `当前为非正式比赛（类型${info.type}），无预约关注入口` };
   const id = Number(info.roomId);
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error("比赛房间ID无效");
   const booked = Number(role?.statistics?.["pk:appoint:room:id"] ?? 0);
@@ -9,17 +19,17 @@ export function matchRoomAction(info, detail, role, now) {
   if (!(info.firstMatchTime > 0 && now > info.firstMatchTime * 1000)) {
     return Math.abs(booked) === id ? { reason: "本场比赛已关注，等待开赛" } : { command: "pkroom_appoint", id };
   }
-  if (!Number.isInteger(detail?.state)) throw new Error("比赛详情缺少房间状态");
-  if (detail.state === 5) return { reason: "比赛房间已关闭" };
+  const state = detail?.state === undefined ? 0 : detail.state;
+  if (!detail || !Number.isInteger(state)) throw new Error("比赛详情缺少房间状态");
+  if (state === 5) return { reason: "比赛房间已关闭" };
   if (booked === -id) return { reason: "本场关注奖励已领取" };
   return booked === id ? { command: "pkroom_appointreward", id } : { reason: "比赛已开始，本账号未提前关注" };
 }
 
 export async function runDailyMatchRoom({ send, now }) {
   const read = async () => {
-    const info = await send("pkroom_getfightroominfo", {});
-    if (!info || typeof info.roomId !== "string") throw new Error("比赛房间响应不完整");
-    if (!info.roomId || info.type !== 0) return { reason: "当前没有正式比赛", roomId: info.roomId };
+    const info = normalizeMatchRoomInfo(await send("pkroom_getfightroominfo", {}));
+    if (!info.roomId || info.type !== 0) return { ...matchRoomAction(info), roomId: info.roomId };
     const detail = info?.roomId && info.type === 0
       ? (await send("pkroom_getfightroomdetail", { roomId: info.roomId }))?.roomInfo : null;
     const response = await send("role_getroleinfo", {});

@@ -63,6 +63,7 @@ export const availableTasks = [
   { label: "批量钓鱼", value: "batchFish" },
   { label: "批量招募", value: "batchRecruit" },
   { label: "自动梦境", value: "batchmengjing" },
+  { label: "比赛房间关注及奖励", value: "batchMatchRoom" },
   { label: "一键俱乐部签到", value: "batchclubsign" },
   { label: "一键盐场报名（周六）", value: "batchSaltSignup" },
   { label: "自动盐场（一次攻击）", value: "batchSaltBattle" },

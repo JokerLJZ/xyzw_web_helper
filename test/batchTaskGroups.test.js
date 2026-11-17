@@ -6,7 +6,7 @@ import { availableTasks } from '../src/utils/batch/constants.js';
 test('全部已批准任务及兼容任务各归一组，定时可选任务无遗漏', () => {
   const defined = TASK_GROUPS.flatMap(group => group.tasks);
   assert.equal(TASK_GROUPS.length, 12);
-  assert.equal(defined.length, 98);
+  assert.equal(defined.length, 99);
   assert.equal(new Set(defined).size, defined.length);
   const grouped = groupTaskCatalog(availableTasks);
   assert.ok(!grouped.some(group => group.name === 'other'));
@@ -38,4 +38,9 @@ test('分组搜索仍可找到已移动任务，且不会重复展示', () => {
 test('未来新增未归类任务显示在其他，不能静默丢失', () => {
   const task = { value: 'futureBatchTask', label: '未来任务' };
   assert.deepEqual(groupTaskCatalog([...availableTasks, task]).find(group => group.name === 'other').tasks, [task]);
+});
+
+test('比赛关注独立任务归属俱乐部与赛事并可供定时选择', () => {
+  const group = groupTaskCatalog(availableTasks).find(group => group.name === 'club');
+  assert.ok(group.tasks.some(task => task.value === 'batchMatchRoom'));
 });

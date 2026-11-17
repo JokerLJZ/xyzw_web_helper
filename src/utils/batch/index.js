@@ -42,3 +42,5 @@ export { createTasksResourcePurchase } from './tasksResourcePurchase.js';
 export { createTasksFeudatory } from './tasksFeudatory.js';
 
 export { createTasksCollectionRewards } from './tasksCollectionRewards.js';
+
+export { createTasksMatchRoom } from "./tasksMatchRoom.js";
