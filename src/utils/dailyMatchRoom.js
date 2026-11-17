@@ -28,7 +28,11 @@ export function matchRoomAction(info, detail, role, now) {
 
 export async function runDailyMatchRoom({ send, now }) {
   const read = async () => {
-    const info = normalizeMatchRoomInfo(await send("pkroom_getfightroominfo", {}));
+    const rawInfo = await send("pkroom_getfightroominfo", {});
+    if (!rawInfo || typeof rawInfo.roomId !== "string") {
+      return { unavailable: true, reason: "比赛房间信息暂不可用，本次跳过" };
+    }
+    const info = normalizeMatchRoomInfo(rawInfo);
     if (!info.roomId || info.type !== 0) return { ...matchRoomAction(info), roomId: info.roomId };
     const detail = info?.roomId && info.type === 0
       ? (await send("pkroom_getfightroomdetail", { roomId: info.roomId }))?.roomInfo : null;
@@ -43,6 +47,9 @@ export async function runDailyMatchRoom({ send, now }) {
   try { await send(action.command, {}); } catch (error) { writeError = error; }
   // A write is never retried: refresh this account to confirm even after timeout.
   const confirmed = await read();
+  if (confirmed.unavailable) {
+    return { status: "skipped", reason: "操作后比赛房间信息暂不可用，本次跳过确认，未重发请求" };
+  }
   const expected = action.command === "pkroom_appoint" ? action.id : -action.id;
   if (confirmed.roomId !== String(action.id) || confirmed.booked !== expected) {
     throw writeError || new Error("比赛关注或奖励状态尚未确认，未重发请求");

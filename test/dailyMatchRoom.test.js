@@ -70,3 +70,27 @@ test('omitted official type still queries detail and confirms appointment', asyn
   assert.equal((await runDailyMatchRoom({send,now:()=>9000})).status,'success');
   assert.equal(calls.filter(c=>c==='pkroom_getfightroomdetail').length,2);
 });
+
+test('missing room response skips without writing or failing', async () => {
+  for (const response of [null, undefined, {}, {roomId:123}]) {
+    const calls=[];
+    const result=await runDailyMatchRoom({send:async cmd=>{calls.push(cmd);return response;},now:()=>9000});
+    assert.equal(result.status,'skipped');
+    assert.match(result.reason,/暂不可用/);
+    assert.deepEqual(calls,['pkroom_getfightroominfo']);
+  }
+});
+test('missing confirmation skips without claiming success or retrying', async () => {
+  let reads=0,writes=0;
+  const result=await runDailyMatchRoom({now:()=>9000,send:async cmd=>{
+    if(cmd==='pkroom_getfightroominfo')return ++reads===1?info:{};
+    if(cmd==='pkroom_getfightroomdetail')return {roomInfo:{}};
+    if(cmd==='role_getroleinfo')return {role:role(0)};
+    writes++;return {};
+  }});
+  assert.equal(result.status,'skipped');assert.equal(writes,1);
+  assert.match(result.reason,/未重发/);
+});
+test('transport errors still propagate', async()=>{
+  await assert.rejects(runDailyMatchRoom({send:async()=>{throw new Error('connection lost');},now:()=>0}),/connection lost/);
+});
