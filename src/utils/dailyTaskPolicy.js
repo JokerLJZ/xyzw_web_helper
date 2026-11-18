@@ -59,7 +59,7 @@ export function classifyDailyStepResult(result) {
   if (result?.pushError || result?.status === "failed") return { status: "failed", reason: result.pushError || result.reason || "步骤执行失败" };
   if (result?.status === "pending" || result === false) return { status: "pending", reason: result?.reason || "步骤结果尚未确认" };
   if (result?.status === "skipped" || result?.skipped === true) return { status: "skipped", reason: result.reason || "当前条件不具备" };
-  if (result?.status && !["completed", "stopped"].includes(result.status)) return { status: "pending", reason: result.reason || `未知步骤状态：${result.status}` };
+  if (result?.status && !["completed", "success", "stopped"].includes(result.status)) return { status: "pending", reason: result.reason || `未知步骤状态：${result.status}` };
   if (result?.status === "stopped" && !result.reason) return { status: "pending", reason: "步骤已停止但未说明原因" };
   return { status: "completed", reason: result?.reason };
 }

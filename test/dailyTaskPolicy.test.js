@@ -64,3 +64,10 @@ test("未识别的步骤状态不能默认为完成", () => {
   assert.equal(classifyDailyStepResult({ status: "unknown" }).status, "pending");
   assert.equal(classifyDailyStepResult({ status: "stopped" }).status, "pending");
 });
+
+test("比赛关注及奖励确认成功归入已完成，异常不会被成功状态掩盖", () => {
+  for (const reason of ["比赛房间关注已确认", "关注奖励领取已确认"]) {
+    assert.deepEqual(classifyDailyStepResult({ status: "success", reason }), { status: "completed", reason });
+  }
+  assert.equal(classifyDailyStepResult({ status: "success", pushError: "请求失败" }).status, "failed");
+});
