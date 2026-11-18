@@ -5383,7 +5383,24 @@ export function createTasksItem(deps) {
           type: "info",
         });
 
-        if (progress >= 100000) {
+        // 客户端按本期角色统计计算已领取轮数，消费进度本身不会在领奖后清零。
+        const roleResult = await tokenStore.sendMessageWithPromise(
+          tokenId, "role_getroleinfo", {}, HELPER_COMMAND_TIMEOUT_MS,
+        );
+        const role = roleResult?.role || roleResult?.data?.role || roleResult?.body?.role;
+        const activity = activityResult?.activity || activityResult?.data?.activity || activityResult?.body?.activity;
+        const window = activity?.activity?.find((item) => Number(item.id) === 11);
+        const key = "week:act:cr:cnt:12";
+        let claimed = Math.max(0, Number(role?.statistics?.[key]) || 0);
+        let stamp = Number(role?.statisticsTime?.[key]);
+        if (stamp > 1e12) stamp = Math.floor(stamp / 1000);
+        if (Number(window?.openTime) > 0 && Number(window?.endTime) >= Number(window.openTime) && stamp > 0 &&
+          (stamp < Math.floor(window.openTime / 1000) || stamp > Math.floor(window.endTime / 1000))) claimed = 0;
+        if (progress >= 100000 && !role?.statistics) {
+          addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} 缺少领奖统计，本次跳过领取`, type: "warning" });
+        } else if (progress >= 100000 && claimed >= 1) {
+          addLog({ time: new Date().toLocaleTimeString(), message: `${token.name} 金砖达标自选大奖已领取，本次跳过领取`, type: "info" });
+        } else if (progress >= 100000) {
           await tokenStore.sendMessageWithPromise(
             tokenId,
             "activity_claimweekactreward",

@@ -5,7 +5,7 @@ import { JIANGHU_BLACK_MARKET_GOODS, DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES } fr
 
 import { createTasksItem } from "../src/utils/batch/tasksItem.js";
 
-const createScenario = ({ progress = 0, activityWeek = "黑市周", purchases, taskConfig, failIndex } = {}) => {
+const createScenario = ({ progress = 0, activityWeek = "黑市周", purchases, taskConfig, failIndex, claimed = 0, claimError } = {}) => {
   const tokenId = "token-1";
   const token = { id: tokenId, name: "测试账号" };
   const commands = [];
@@ -15,6 +15,7 @@ const createScenario = ({ progress = 0, activityWeek = "黑市周", purchases, t
   const tokenStore = {
     async sendMessageWithPromise(_tokenId, cmd, params) {
       commands.push({ cmd, params });
+      if (cmd === "role_getroleinfo") return { role: { statistics: { "week:act:cr:cnt:12": claimed } } };
       if (cmd === "activity_get") {
         return {
           activity: {
@@ -26,6 +27,7 @@ const createScenario = ({ progress = 0, activityWeek = "黑市周", purchases, t
         if (params.goodsIndex === failIndex) throw new Error("商品已售罄");
         return { role: { diamond: 337487, items: { 1016: { quantity: 12295 } } }, reward: [{ type: 3, itemId: 1016, value: 2000 }] };
       }
+      if (cmd === "activity_claimweekactreward" && claimError) throw claimError;
       return {};
     },
     closeWebSocketConnection() {},
@@ -150,4 +152,17 @@ test("显示序号与API商品索引分别维护，默认清单对应用户指�
   assert.deepEqual(JIANGHU_BLACK_MARKET_GOODS.filter(({ goodsIndex }) => DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES[goodsIndex] > 0).map(({ displayIndex }) => displayIndex), [0, 1, 2, 5, 6, 7, 8]);
   assert.equal(JIANGHU_BLACK_MARKET_GOODS.find(({ displayIndex }) => displayIndex === 5).goodsIndex, 4);
   assert.equal(JIANGHU_BLACK_MARKET_GOODS.find(({ displayIndex }) => displayIndex === 9).goodsIndex, 8);
+});
+
+test("已领取大奖在发送领奖请求前跳过", async () => {
+  const s = createScenario({ progress: 112960, claimed: 1 });
+  await s.run();
+  assert.equal(s.tokenStatus.value["token-1"], "completed");
+  assert.equal(s.commands.filter(x => x.cmd === "activity_claimweekactreward").length, 0);
+  assert.ok(s.logs.some(x => x.message.includes("已领取")));
+});
+test("其他领奖异常仍报告失败", async () => {
+  const s = createScenario({ progress: 100000, claimError: new Error("请求超时") });
+  await s.run();
+  assert.equal(s.tokenStatus.value["token-1"], "failed");
 });
