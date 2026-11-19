@@ -14,7 +14,7 @@ export const getNextUnclaimedLotteryCumulativeId = (info = {}, tiers = []) =>
   tiers.find(t => Number(info.lotteryNum) >= t.cumulativeNum && !claimed(info, t.id))?.id ?? null;
 
 /** 每次账号任务独立创建；失败后本轮不重试，避免超时重复领取。 */
-export const createLotteryCumulativeClaimer = ({ send, actId, shouldStop, onClaim, onError, wait = async () => {}, fetchConfig = globalThis.fetch, config }) => {
+export const createLotteryCumulativeClaimer = ({ send, actId, shouldStop, onClaim, onError, onSkip = () => {}, wait = async () => {}, fetchConfig = globalThis.fetch, config }) => {
   let tiers;
   let blocked = false;
   const confirmed = new Set();
@@ -32,7 +32,22 @@ export const createLotteryCumulativeClaimer = ({ send, actId, shouldStop, onClai
       while (!shouldStop()) {
         const id = getNextUnclaimedLotteryCumulativeId(info, tiers.filter(t => !confirmed.has(t.id)));
         if (id === null) break;
-        const res = await send('activity_claimlotterycumulative', { id });
+        let res;
+        try {
+          res = await send('activity_claimlotterycumulative', { id });
+        } catch (error) {
+          // 写请求不重发；明确已领取也必须重新查询这个账号确认。
+          await wait();
+          const latest = (await send('activity_getlotteryinfo', {}))?.lotteryInfo;
+          if (!claimed(latest, id)) throw error;
+          confirmed.add(id);
+          info = { ...info, ...latest, lotteryNum: latest.lotteryNum ?? info.lotteryNum };
+          const alreadyClaimed = [error?.code, error?.body?.code, error?.data?.code].some(code => Number(code) === 200120) ||
+            /(?:^|\D)200120(?:\D|$)/.test(error?.message || "");
+          if (alreadyClaimed) onSkip(id);
+          else { count++; onClaim(id, []); }
+          continue;
+        }
         let updated = res?.lotteryInfo;
         if (!claimed(updated, id)) {
           await wait();

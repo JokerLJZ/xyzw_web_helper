@@ -44,3 +44,21 @@ test('领取增量有lotteryInfo但缺少标记时重新查询确认',async()=>{
  }});
  assert.equal(await claim(),1);assert.equal(queries,2);
 });
+
+test('已领取记录在请求前跳过，Map数字键和字符串键都兼容', () => {
+ for (const cumulativeClaimedMap of [{68:true},new Map([[68,true]]),new Map([['68',true]])])
+  assert.equal(getNextUnclaimedLotteryCumulativeId({lotteryNum:10,cumulativeClaimedMap},tiers),69);
+});
+for (const confirmed of [true,false]) test(`200120后刷新${confirmed?'确认后继续下一档':'未确认停止且不重发'}`,async()=>{
+ const calls=[],skips=[],errors=[];let reads=0;
+ const claim=createLotteryCumulativeClaimer({actId:2611132,config:{cumulativeDrawConf:rows},shouldStop:()=>false,
+ onClaim:()=>{},onSkip:id=>skips.push(id),onError:e=>errors.push(e),send:async(cmd,p)=>{
+ calls.push([cmd,p]);
+ if(cmd==='activity_getlotteryinfo')return {lotteryInfo:{lotteryNum:10,cumulativeClaimedMap:++reads>1&&confirmed?{68:true}: {}}};
+ if(p.id===68)throw Error('服务器错误: 200120 - 已经领取过奖励了');
+ return {lotteryInfo:{lotteryNum:10,cumulativeClaimedMap:{68:true,69:true}}};
+ }});
+ assert.equal(await claim(),confirmed?1:0);
+ assert.deepEqual(calls.filter(x=>x[0]==='activity_claimlotterycumulative').map(x=>x[1].id),confirmed?[68,69]:[68]);
+ assert.deepEqual(skips,confirmed?[68]:[]);assert.equal(errors.length,confirmed?0:1);
+});

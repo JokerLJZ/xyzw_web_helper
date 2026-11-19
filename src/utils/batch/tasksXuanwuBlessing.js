@@ -347,6 +347,7 @@ export function createTasksXuanwuBlessing(deps) {
           config,
           wait: () => delay(commandDelay),
           shouldStop: () => shouldStop.value,
+          onSkip: id => log(`${token.name} 寻宝累抽奖励${id}已领取，跳过`, "info"),
           onClaim: (id, reward) => log(`${token.name} 寻宝累抽奖励${id}已确认领取: ${formatReward(reward)}`, "success"),
           onError: error => reportIssue(`寻宝累抽奖励领取失败，本次任务不再重试: ${error?.message || "未知错误"}`),
         });
