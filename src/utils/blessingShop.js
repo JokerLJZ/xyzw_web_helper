@@ -7,8 +7,8 @@ export function findBlessingShops(config, now = Date.now()) {
   for (const root of roots) {
     const shops = rows.filter(row => row.actGroup === root.actGroup && row.start === root.start
       && [2,34].includes(Number(row.actType)) && row.start * 1000 <= now && now < row.end * 1000
-      && (Number(row.actType) !== 34 || now >= root.end * 1000)).sort((a,b) => a.id-b.id);
-    if (shops.length) return { code: root.id, name: activityText(config, root.name), shops };
+       ).sort((a,b) => a.id-b.id);
+    if (shops.length) return { root, code: root.id, name: activityText(config, root.name), shops };
   }
   return null;
 }
@@ -18,6 +18,9 @@ export async function loadBlessingShopCatalog(fetcher = globalThis.fetch, now = 
   const event = findBlessingShops(config, now);
   if (!event) throw new Error('当前没有开放的赐福活动商店');
   const shops = event.shops.map(shop => ({ eventName: event.name, activityId: shop.id, configVersion: config.version,
+    shopName: activityText(config, shop.name),
+    available: Number(shop.actType) !== 34 || now >= event.root.end * 1000,
+    opensAt: Number(shop.actType) === 34 ? event.root.end * 1000 : shop.start * 1000,
     itemName: rewardText(config, 3, shop.itemId),
     rows: mapEntries(config.ExchangeActConf).map(([,row])=>row).filter(row=>row.actId===shop.id)
       .sort((a,b)=>a.rank-b.rank).map(row=>({...row,name:rewardText(config,row.resourceType,row.rewardId)})),
@@ -28,7 +31,7 @@ export async function loadBlessingShopCatalog(fetcher = globalThis.fetch, now = 
 export async function queryBlessingShop(send, config, now, activityId) {
   const event = findBlessingShops(config, now);
   const shop = event?.shops.find(row => row.id === activityId);
-  if (!shop) throw new Error('赐福商店已结束、尚未开放或已切期，请重新打开商品清单');
+  if (!shop || (Number(shop.actType) === 34 && now < event.root.end * 1000)) throw new Error('赐福商店已结束、尚未开放或已切期，请重新打开商品清单');
   return queryActivityExchange(send, config, event, shop);
 }
 

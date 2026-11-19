@@ -22,7 +22,7 @@ function server({stock=100,used=0,timeout=false,confirm=true}={}){
 }
 const preview={shops:[{activityId:2611133},{activityId:2611136}]};
 test('按本期分组识别商店，第二商店仅抽奖结束后开放，截止时间后不可兑换',()=>{
- assert.deepEqual(findBlessingShops(config(),NOW).shops.map(s=>s.id),[2611133]);
+ assert.deepEqual(findBlessingShops(config(),NOW).shops.map(s=>s.id),[2611133,2611136]);
  assert.deepEqual(findBlessingShops(config(),1795103999000).shops.map(s=>s.id),[2611133,2611136]);
  assert.equal(findBlessingShops(config(),1795121400000),null);
 });
@@ -30,7 +30,7 @@ test('公共清单无需连接账号，保留真实商品ID与价格',async()=>{
  const c=config(),urls=[];
  const f=async(url)=>{urls.push(url);return {ok:true,json:async()=>url.includes('manifest')?{body:{dataBundleVer:'blessing-catalog-test'}}:url.endsWith('language.json')?{}:c};};
  const catalog=await loadBlessingShopCatalog(f,NOW);
- assert.equal(catalog.shops.length,1);assert.equal(catalog.rows[0].id,261113301);assert.equal(catalog.rows[0].consumeNum,5);
+ assert.equal(catalog.shops.length,2);assert.equal(catalog.shops[1].available,false);assert.equal(catalog.rows[0].id,261113301);assert.equal(catalog.rows[0].consumeNum,5);
  assert.ok(urls.every(url=>!url.includes('role_')));
 });
 test('每账号库存、限购与累计消耗解锁独立计算',async()=>{
@@ -58,4 +58,13 @@ test('拒绝混合商店、错误商品、非整数份数、未开放商店和�
  [{activityId:2611136,goodsId:261113601,quantity:1}]])await assert.rejects(exchangeBlessingItems({...ctx,selection}));
  await assert.rejects(exchangeBlessingItems({...ctx,now:()=>1795121400000,selection:[{activityId:2611133,goodsId:261113301,quantity:1}]}));
  assert.equal(s.calls.filter(x=>x[0]==='activity_exchange').length,0);
+});
+
+test('换期后按同组同期匹配秘藏和新币种，不沿用旧编号',async()=>{
+ const c=config();
+ for(const row of Object.values(c.ActFestivalConf)){row.id+=100000;row.start+=604800;row.end+=604800;if(row.itemId)row.itemId+=100;}
+ for(const row of Object.values(c.ExchangeActConf)){row.id+=10000000;row.actId+=100000;}
+ const event=findBlessingShops(c,NOW+604800000);
+ assert.deepEqual(event.shops.map(s=>s.id),[2711133,2711136]);
+ assert.equal(event.shops[1].itemId,5396);
 });

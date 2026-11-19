@@ -40,7 +40,7 @@ const props = defineProps({ show: Boolean, preset: Boolean, title: { type: Strin
 defineEmits(["update:show", "execute"]);
 const quantities = reactive({});
 const shopId = ref(null);
-const shopOptions = computed(() => (props.previews[0]?.shops || []).map(shop => ({ label: `${shop.itemName}商店`, value: shop.activityId })));
+const shopOptions = computed(() => (props.previews[0]?.shops || []).map(shop => ({ label: `${shop.shopName || `${shop.itemName}商店`}${shop.available === false ? "（抽奖结束后开放）" : ""}`, value: shop.activityId, disabled: shop.available === false })));
 watch(() => props.show, show => { if (show) { shopId.value = shopOptions.value[0]?.value ?? null; for (const key of Object.keys(quantities)) delete quantities[key]; } });
 watch(shopId, () => { for (const key of Object.keys(quantities)) delete quantities[key]; });
 const accounts = computed(() => props.previews.map(account => account.shops ? { ...account, ...account.shops.find(shop => shop.activityId === shopId.value), rows: account.shops.find(shop => shop.activityId === shopId.value)?.rows || [] } : account));
