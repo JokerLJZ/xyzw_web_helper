@@ -2,6 +2,15 @@
 
 本文基于 2026-10-11 对本仓库的检查。后续涉及游戏接口的功能，先从 `public/game/` 查询，不再默认先查询旧 GitHub API 采集库。该规则已写入仓库 `AGENTS.md`。
 
+
+## 2026-11-20：每日任务配置直链404的同版本备用来源
+
+- 本次清单参数 `platform=hortor&version=0.36.0-android`，COMMIT_ID `6f2973f5`，game `57a46`、launcher `3af4e`、config `2938b`、codeVersion `2.55.2`、dataBundleVer `152261a3c8`。这些值是分析快照，代码按本地入口及实时清单解析，不固定哈希。
+- 解密当前game与launcher后，确认版本模块使用 `SystemService.getDataBundleVer`，ResourceManager.loadWebConfig读取 `/data/<version>/config.json` 与 `config_ap.json`；本项目既有版本查询指令未修改。当前JSON与二进制直链实测404。
+- ResourceManager的配置bundle加载分支通过Cocos JsonAsset合并配置。当前 `/remote/config/config.<清单config哈希>.json` 可用，paths/types/uuids/versions.import给出实际资源路径。主配置COMMIT_ID与服务器dataBundleVer一致，包含10项每日任务；补充配置包含7组BOSS循环。
+- 每日任务补差与任务状态展示共用loadDailyTaskConfig；独立任务不一定依赖此加载器。新备用加载仅在直链失败后触发，先检查manifest版本，再验证主配置COMMIT_ID；补充配置若声明版本也须一致。任何不一致、格式错误仍停止，不退回旧配置。
+- 实际运行新加载函数成功读取上述同版本资源并通过现有配置校验。未使用账号发送任务或领奖请求；未取得新的游戏任务响应结构，本次不修改进度与领奖响应处理。
+
 ## 2026-10-17：根据0.36.0安装包更新资源入口
 
 用户提供的 `20260924172834-android_0.36.0_Release_1278ee41.apk` 中，`assets/jsb-adapter/game-defines.js` 声明 `GAME_VERSION=0.36.0-android`，`assets/main.js` 以该版本调用manifest。原本地入口固定使用0.32.0，只能获取2.48.2；新参数实际返回2.50.3，已包含闲来入镜模块。

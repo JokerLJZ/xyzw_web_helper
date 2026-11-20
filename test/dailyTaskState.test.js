@@ -149,7 +149,7 @@ test("failed config reads can be retried and unsafe versions are rejected", asyn
     /读取失败/,
   );
   await loadDailyTaskConfig(store, "a", fetchConfig);
-  assert.equal(attempt, 3);
+  assert.equal(attempt, 4);
   await assert.rejects(
     loadDailyTaskConfig(
       {
@@ -201,3 +201,56 @@ test("an evicted failed config request cannot remove a newer cached request for 
   await loadDailyTaskConfig(store, "cache-race-a", fetchConfig);
   assert.equal(readsA, 3);
 });
+
+test("404 falls back to current manifest assets and caches only validated matching versions", async () => {
+  const calls = [];
+  const version = "fallback-current";
+  const fetchConfig = async (url) => {
+    calls.push(url);
+    const result = (value) => ({ ok: true, json: async () => value });
+    if (url.includes("/data/")) return { ok: false, status: 404 };
+    if (url.endsWith("index.html")) return { ok: true, text: async () => '<script src="game-defines.current.js"></script>' };
+    if (url.endsWith(".js")) return { ok: true, text: async () => "gt.REMOTE_MANIFEST_VERSION = '0.36.0-android'" };
+    if (url.includes("/manifest?")) return result({ body: { dataBundleVer: version, bundleVers: JSON.stringify({ config: "current" }) } });
+    if (url.endsWith("config.current.json")) return result({
+      paths: { 0: ["config", 0], 1: ["config_ap", 0] }, types: ["cc.JsonAsset"],
+      uuids: ["26o/E4KtRL9qAK/uLSVEKB", "18WuPN/WlMS7LJskr2jYL0"],
+      versions: { import: [0, "main", 1, "extra"] },
+    });
+    const name = url.includes(".main.json") ? "config" : "config_ap";
+    return result([1, 0, 0, [["cc.JsonAsset"]], [], [[0, name,
+      name === "config" ? { ...officialConfig(), COMMIT_ID: version } : { BossLoopConfig: { 1: { id: 1 } } }]]]);
+  };
+  const store = { sendMessageWithPromise: async () => ({ dataBundleVer: version }) };
+  const config = await loadDailyTaskConfig(store, "a", fetchConfig);
+  assert.equal(config.tasks.length, 3);
+  assert.equal(config.bossLoop[1].id, 1);
+  assert.ok(calls.some((url) => url.includes("26a3f138-2ad4-4bf6-a00a-fee2d2544281.main.json")));
+  const count = calls.length;
+  await loadDailyTaskConfig(store, "b", fetchConfig);
+  assert.equal(calls.length, count);
+});
+
+for (const mismatch of ["manifest", "content", "extra", "shape"]) {
+  test(`fallback rejects ${mismatch} mismatch before accepting configuration`, async () => {
+    const { loadOfficialTaskConfigFallback } = await import("../src/utils/officialTaskConfigFallback.js");
+    let assets = 0;
+    const fetchConfig = async (url) => {
+      const result = (value) => ({ ok: true, json: async () => value });
+      if (url.endsWith("index.html")) return { ok: true, text: async () => '<script src="game-defines.current.js"></script>' };
+      if (url.endsWith(".js")) return { ok: true, text: async () => "REMOTE_MANIFEST_VERSION='0.36.0-android'" };
+      if (url.includes("/manifest?")) return result({ body: { dataBundleVer: mismatch === "manifest" ? "old" : "expected", bundleVers: { config: "current" } } });
+      if (url.endsWith("config.current.json")) return result({
+        paths: { 0: ["config", 0], 1: ["config_ap", 0] }, types: ["cc.JsonAsset"],
+        uuids: ["26o/E4KtRL9qAK/uLSVEKB", "18WuPN/WlMS7LJskr2jYL0"], versions: { import: [0, "main", 1, "extra"] },
+      });
+      assets++;
+      const name = assets === 1 ? "config" : "config_ap";
+      return result([1, 0, 0, [[mismatch === "shape" ? "unknown" : "cc.JsonAsset"]], [], [[0, name, {
+        COMMIT_ID: (mismatch === "content" && assets === 1) || (mismatch === "extra" && assets === 2) ? "old" : "expected",
+      }]]]);
+    };
+    await assert.rejects(loadOfficialTaskConfigFallback("expected", fetchConfig), /不一致|格式无效/);
+    if (mismatch === "manifest") assert.equal(assets, 0);
+  });
+}
