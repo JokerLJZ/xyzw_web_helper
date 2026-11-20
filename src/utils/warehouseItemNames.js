@@ -1,3 +1,5 @@
+import { loadOfficialTaskConfig } from "./officialTaskConfig.js";
+import { activityBody } from "./rechargeActivity.js";
 import { activityText, mapGet } from "./rechargeActivity.js";
 
 // Official language.json snapshot 0c3a7d906d; live names take priority.
@@ -12,4 +14,19 @@ export function formatWarehouseItem(itemId, config) {
   const translated = key && activityText(config, key);
   const name = translated && translated !== key ? translated : WAREHOUSE_ITEM_NAMES[itemId];
   return name ? `${name}（${itemId}）` : `未识别道具（${itemId}）`;
+}
+
+const configs = new Map();
+export async function loadWarehouseItemConfig(send, fetcher = globalThis.fetch) {
+  const version = activityBody(await send("system_getdatabundlever", { isAudit: false }))?.dataBundleVer;
+  if (typeof version !== "string" || !/^[\w-]+$/.test(version)) throw new Error("未取得仓库道具配置版本");
+  if (!configs.has(version)) {
+    const loading = loadOfficialTaskConfig(version, fetcher, { language: true }).then(config => {
+      if (!config.ItemConf || !config.LanguageConf) throw new Error("官方道具或语言配置缺失");
+      return { ...config, version };
+    });
+    configs.set(version, loading);
+    loading.catch(() => { if (configs.get(version) === loading) configs.delete(version); });
+  }
+  return configs.get(version);
 }

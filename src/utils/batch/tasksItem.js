@@ -3,7 +3,7 @@ import { loadGenieSweepConfig, readGenieRole, sweepAltAccountGenie } from "../al
 import { claimSkinBookRewards } from "../skinBookRewards.js";
 import { classifyWarehouseActivityItem } from "../warehouseActivityItems.js";
 import { loadRechargeConfig } from "../rechargeActivity.js";
-import { formatWarehouseItem } from "../warehouseItemNames.js";
+import { formatWarehouseItem, loadWarehouseItemConfig } from "../warehouseItemNames.js";
 import { createFormationRequestGate } from "./formationRequestGate.js";
 import { extractRolePatch, mergeRoleSnapshot } from "../roleSnapshot.js";
 import { createPetTasks } from "./tasksPet.js";
@@ -5834,12 +5834,12 @@ export function createTasksItem(deps) {
         await ensureConnection(tokenId);
         let roleInfo = await getRoleInfoWithRetry(tokenId, tokenName);
         try {
-          const config = await (deps.loadWarehouseItemConfig || loadRechargeConfig)(
+          const config = await (deps.loadWarehouseItemConfig || loadWarehouseItemConfig)(
             (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, HELPER_COMMAND_TIMEOUT_MS),
           );
           itemConfigs.set(tokenId, config);
-        } catch {
-          addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} 道具名称配置暂不可用，使用已知道具名称，未知道具保留编号`, type: "info" });
+        } catch (error) {
+          addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} 道具配置读取失败：${error.message}；使用已知道具名称，依赖配置的道具跳过`, type: "warning" });
         }
         const excluded = [...EXCLUDED_ACTIVITY_ITEM_IDS].filter(id => getQuantity(getItems(roleInfo), id) > 0);
         if (excluded.length) addLog({ time: new Date().toLocaleTimeString(),

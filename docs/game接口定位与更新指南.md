@@ -176,3 +176,9 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 ## 2026-11-20：每日任务与逐鹿盐山直接从清单加载
 
 每日任务loadDailyTaskConfig与逐鹿盐山loadApexDailyConfig现统一调用officialTaskConfig.js，直接解析本地启动入口、实时manifest和配置bundle，不再先访问/data配置直链。账号system_getdatabundlever仍是版本校验基准；manifest的dataBundleVer与主配置COMMIT_ID必须完全一致，补充配置若包含COMMIT_ID也必须一致，不修改版本字符串强行通过。当前真实资源验证仍为152261a3c8、config 2938b，读取10条每日任务与312条赛程成功。各业务保留自己的配置校验及按版本缓存，换版本重新加载。此改动范围为上述两个配置入口；其他独立功能的配置加载器尚未迁移。
+
+## 2026-11-20：仓库道具配置和名称
+
+仓库此前借用loadRechargeConfig读取/data配置与语言直链，读取失败后继续使用少量历史中文名；依赖ItemConf的活动道具因此跳过。仓库现有独立加载入口，复用officialTaskConfig，按同一当前config bundle的paths/types/uuids/versions.import读取config、config_ap和language三个JsonAsset。严格核对账号版本与主配置、清单版本，语言若声明COMMIT_ID也核对。失败日志显示具体原因，保留既有跳过规则和使用指令。
+
+当前清单仍为dataBundleVer 152261a3c8、config 2938b，launcher 3af4e的ResourceManager配置列表含language；真实读取确认3007随机红将碎片、3008精铁福袋、3009进阶石福袋、3010晶石福袋、5294玄鱼令、5296凤仪金徽、5297灼华赤羽。只验证配置和名称读取，未使用账号道具；活动保留期、自选包与使用方式的既有判断不变。其他充值活动加载入口此次不迁移。

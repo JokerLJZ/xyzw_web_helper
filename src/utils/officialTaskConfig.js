@@ -2,7 +2,7 @@ const CDN = "https://xxz-xyzw-res.hortorgames.com";
 const safeVersion = (value) => typeof value === "string" && /^[\w-]+$/.test(value);
 
 /** Resolve the current launcher resources without pinning a remote bundle hash. */
-export async function loadOfficialTaskConfig(version, fetchConfig) {
+export async function loadOfficialTaskConfig(version, fetchConfig, { language = false } = {}) {
   const request = async (url, options = {}) => {
     const response = await fetchConfig(url, {
       ...options,
@@ -54,5 +54,8 @@ export async function loadOfficialTaskConfig(version, fetchConfig) {
   const extra = await readAsset("config_ap");
   if (extra.COMMIT_ID !== undefined && extra.COMMIT_ID !== version)
     throw new Error("官方补充配置版本不一致");
-  return { ...extra, ...config };
+  const translations = language ? await readAsset("language") : {};
+  if (translations.COMMIT_ID !== undefined && translations.COMMIT_ID !== version)
+    throw new Error("官方语言配置版本不一致");
+  return { ...extra, ...config, ...translations };
 }
