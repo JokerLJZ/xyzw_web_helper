@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import test from 'node:test';
 import fs from 'node:fs';
 const config = JSON.parse(fs.readFileSync(new URL('./fixtures/genieSweepConfig.json', import.meta.url)));
@@ -65,11 +66,10 @@ test('按账号返回的配置版本加载奖励，下载失败不缓存', async
     assert.equal(cmd, 'system_getdatabundlever'); assert.deepEqual(params, { isAudit: false });
     return { body: { dataBundleVer: 'genie-test-version' } };
   };
-  await assert.rejects(loadGenieSweepConfig(send, async () => ({ ok: false })), /下载失败/);
-  const loaded = await loadGenieSweepConfig(send, async url => {
-    requests++; assert.match(url, /genie-test-version\/config_ap.json$/);
-    return { ok: true, json: async () => config };
+  await assert.rejects(loadGenieSweepConfig(send, async () => ({ ok: false })), /读取失败/);
+  const loaded = await loadGenieSweepConfig(send, async (...args) => {
+    requests++; return officialConfigFetch('genie-test-version', {}, config)(...args);
   });
-  assert.equal(loaded, config); assert.equal(requests, 1);
+  assert.deepEqual(loaded.genieConf, config.genieConf); assert.equal(requests, 6);
   await assert.rejects(loadGenieSweepConfig(async () => ({})), /配置版本/);
 });

@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadRechargeExchangeCatalog, findRechargeActivity, remainingBarbecue, queryRechargeExchange, exchangeRechargeItems, runRechargeStandard, rewardText } from "../src/utils/rechargeActivity.js";
@@ -166,16 +167,15 @@ test("公共预设清单按当前manifest配置生成中文物品、成本和顺
   const config = base(); const calls = [];
   const fetcher = async (url, options) => {
     calls.push([url, options]);
-    return { ok: true, json: async () => url.includes("/manifest?") ? { body: JSON.stringify({ dataBundleVer: "catalog-test-v1" }) }
-      : url.endsWith("config.json") ? config : { LanguageConf: { names: { 奖励: { chinese: "测试奖励" } } } } };
+    return officialConfigFetch('catalog-test-v1', config, {}, { LanguageConf: { names: { 奖励: { chinese: "测试奖励" } } } })(url, options);
   };
   const catalog = await loadRechargeExchangeCatalog(fetcher, NOW);
   assert.equal(catalog.rows[0].name, "测试奖励");
   assert.equal(catalog.rows[0].consumeNum, 2);
   assert.equal(catalog.activityId, 11);
   assert.equal(catalog.configVersion, "catalog-test-v1");
-  assert.equal(calls.length, 3);
-  assert.equal(calls[0][1].method, "POST");
+  assert.equal(calls.length, 7);
+  assert.equal(calls.find(([url])=>url.includes("manifest?"))[1].method, "POST");
   assert.equal(calls[0][1].cache, "no-store");
   assert.equal(catalog.stock, undefined);
 });

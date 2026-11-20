@@ -1,3 +1,4 @@
+import { loadOfficialTaskConfig } from "./officialTaskConfig.js";
 import { extractRolePatch } from './roleSnapshot.js';
 
 const rows = value => Object.values(value || {});
@@ -8,9 +9,7 @@ const object = value => value && typeof value === 'object' && !Array.isArray(val
 export async function loadCollectionRewardConfig(send, fetchConfig = globalThis.fetch) {
   const { dataBundleVer: version } = await send('system_getdatabundlever', {});
   if (typeof version !== 'string' || !/^[\w-]+$/.test(version)) throw new Error('缺少有效的藏品配置版本');
-  const response = await fetchConfig(`https://xxz-xyzw-res.hortorgames.com/data/${version}/config.json`, { signal: AbortSignal.timeout(30000) });
-  if (!response.ok) throw new Error('藏品与卡牌配置读取失败');
-  const config = await response.json();
+  const config = await loadOfficialTaskConfig(version, fetchConfig);
   for (const name of ['CollectionStageConf', 'CollectionSeriesConf', 'CollectionHeroSuitsConf', 'CardPackageConf', 'CardSeriesConf']) {
     if (!rows(config[name]).length) throw new Error(`奖励配置缺失：${name}`);
   }

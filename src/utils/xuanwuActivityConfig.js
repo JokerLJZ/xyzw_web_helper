@@ -1,3 +1,4 @@
+import { loadOfficialTaskConfig } from "./officialTaskConfig.js";
 // 只共享不可变配置；账号进度与领取记录不得放入此缓存。
 const caches = new WeakMap();
 export async function loadXuanwuActivityConfig(send, fetchConfig = globalThis.fetch) {
@@ -7,9 +8,7 @@ export async function loadXuanwuActivityConfig(send, fetchConfig = globalThis.fe
   if (!cache) caches.set(fetchConfig, cache = new Map());
   if (!cache.has(version)) {
     const loading = (async () => {
-      const response = await fetchConfig(`https://xxz-xyzw-res.hortorgames.com/data/${version}/config.json`, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok) throw new Error(`读取活动配置失败: ${response.status}`);
-      const config = await response.json();
+      const config = await loadOfficialTaskConfig(version, fetchConfig);
       return { cumulativeDrawConf: config.cumulativeDrawConf || config.CumulativeDrawConf,
         ActFestivalConf: config.ActFestivalConf,
         BattlePassMissionConf: config.BattlePassMissionConf };

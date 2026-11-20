@@ -1,3 +1,4 @@
+import { loadOfficialTaskConfig, loadOfficialManifest } from "./officialTaskConfig.js";
 import { extractRolePatch } from "./roleSnapshot.js";
 import { getSkinChallengeBudget, runSkinChallenge } from "./skinChallengeRunner.js";
 
@@ -17,11 +18,7 @@ export async function loadRechargeConfig(send, fetcher = globalThis.fetch) {
   const version = activityBody(await send("system_getdatabundlever", { isAudit: false }))?.dataBundleVer;
   if (typeof version !== "string" || !/^[\w-]+$/.test(version)) throw new Error("未取得活动配置版本");
   if (!configs.has(version)) {
-    const loading = Promise.all(["config", "language"].map(async file => {
-      const response = await fetcher(`https://xxz-xyzw-res.hortorgames.com/data/${version}/${file}.json`, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok) throw new Error("活动配置下载失败");
-      return response.json();
-    })).then(([config, language]) => ({ ...config, ...language, version }));
+    const loading = loadOfficialTaskConfig(version, fetcher, { language: true });
     configs.set(version, loading);
     loading.catch(() => configs.delete(version));
   }
@@ -30,14 +27,8 @@ export async function loadRechargeConfig(send, fetcher = globalThis.fetch) {
 
 /** 公共配置清单，不查询或连接任何账号。 */
 export async function loadPublicActivityConfig(fetcher = globalThis.fetch) {
-  const response = await fetcher("https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=0.36.0-android", {
-    method: "POST", headers: { "Content-Type": "application/json;charset=UTF-8", Accept: "application/json,text/plain,*/*" },
-    body: "", cache: "no-store", signal: AbortSignal.timeout(30000),
-  });
-  if (!response.ok) throw new Error("活动配置版本加载失败");
-  const manifest = await response.json();
-  const body = typeof manifest.body === "string" ? JSON.parse(manifest.body) : manifest.body;
-  return loadRechargeConfig(async () => ({ dataBundleVer: body?.dataBundleVer }), fetcher);
+  const manifest = await loadOfficialManifest(fetcher);
+  return loadOfficialTaskConfig(manifest.body.dataBundleVer, fetcher, { language: true, snapshot: manifest });
 }
 
 export async function loadRechargeExchangeCatalog(fetcher = globalThis.fetch, now = Date.now()) {

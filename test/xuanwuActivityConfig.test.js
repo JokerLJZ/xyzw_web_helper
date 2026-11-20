@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {loadXuanwuActivityConfig,getClaimableXuanwuMissions} from '../src/utils/xuanwuActivityConfig.js';
@@ -8,14 +9,14 @@ test('任务必须达到配置门槛，排除其他活动与已领任务',()=>{
  assert.throws(()=>getClaimableXuanwuMissions(config,7,{}),/未找到/);
 });
 test('同版本并发只下载一次，版本变化重新获取',async()=>{
- let downloads=0;const fetcher=async()=>{downloads++;return {ok:true,json:async()=>({BattlePassMissionConf:{}})};};
+ let downloads=0;let version='a';const fetcher=async(...args)=>{downloads++;return officialConfigFetch(version,{BattlePassMissionConf:{}})(...args);};
  const send=async()=>({dataBundleVer:'a'});
  await Promise.all([loadXuanwuActivityConfig(send,fetcher),loadXuanwuActivityConfig(send,fetcher)]);
- assert.equal(downloads,1);
- await loadXuanwuActivityConfig(async()=>({dataBundleVer:'b'}),fetcher);assert.equal(downloads,2);
+ assert.equal(downloads,6);
+ version='b';await loadXuanwuActivityConfig(async()=>({dataBundleVer:'b'}),fetcher);assert.equal(downloads,12);
 });
 test('配置下载失败不污染缓存',async()=>{
- let n=0;const f=async()=>{if(++n===1)throw Error('network');return {ok:true,json:async()=>({})};};
+ let n=0;const f=async(...args)=>{if(++n===1)throw Error('network');return officialConfigFetch('a',{})(...args);};
  const send=async()=>({dataBundleVer:'a'});
- await assert.rejects(loadXuanwuActivityConfig(send,f));await loadXuanwuActivityConfig(send,f);assert.equal(n,2);
+ await assert.rejects(loadXuanwuActivityConfig(send,f));await loadXuanwuActivityConfig(send,f);assert.equal(n,7);
 });

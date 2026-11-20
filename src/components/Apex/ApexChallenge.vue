@@ -69,11 +69,11 @@
       请先在 Token 管理中导入并连接游戏服务器。连接成功后会自动加载数据，也可手动点击"刷新数据"。
     </n-alert>
 
-    <!-- 赛季更新提示：配置快照未覆盖当前赛季 -->
+    <!-- 赛季更新提示：当前官方配置未覆盖当前赛季 -->
     <n-alert v-if="confStale" type="error" style="margin-bottom: 12px">
       <template #header>配置与当前赛季不匹配</template>
-      服务端赛季为第 {{ roleSeason }} 赛季，但本地配置快照未覆盖当前时间（不处于任何赛季窗口）。
-      请以服务端最新配置重新生成 <code>src/utils/apexStageMap.js</code>：
+      服务端赛季为第 {{ roleSeason }} 赛季，但当前官方配置未覆盖当前时间（不处于任何赛季窗口）。
+      请刷新以重新加载当前官方赛程配置：
       先拉取 <code>data/version.json</code> 取得版本号，再下载
       <code>data/&lt;版本号&gt;/config.json</code> 存为 <code>/tmp/xyzw_config.json</code>，
       然后重跑随附的生成脚本刷新快照。
@@ -472,12 +472,12 @@
  * 逐鹿盐山（APEX）面板
  *
  * 数据与判定全部走真实接口：
- *   · 静态配置：游戏远端 config.json 的 Apex 系列表（见 utils/apexStageMap.js）
+ *   · 赛程配置：当前官方清单的 Apex 系列表，经账号版本校验后使用
  *   · 动态数据：apex_getroleinfo / apex_getguesslist / apex_get64oppomap /
  *               apex_getvotelist / apex_guess / apex_vote
  *   · 开放判定：utils/apexRules.js（1:1 移植客户端 ApexScheduleData / ApexGuessDialog）
  *
- * 赛季更新后只需重新生成配置快照，本组件无需改动。
+ * 赛季配置随当前官方资源加载，规则格式变化时停止并提示。
  */
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import {
@@ -509,35 +509,33 @@ import {
   isApexRateLimited,
   runApexAction,
 } from "@/utils/apexRateLimit";
-import {
-  ApexRoundPhase,
-  ApexScheduleStatus,
-  ApexStageType,
-  apexConstantConf,
-  calibrateServerTime,
-  canGuessRow,
-  canGuessNow,
-  checkNowInSeason,
-  checkSupportInTime,
-  getAdvanceNum,
-  getAvailableRounds,
-  getCurrentRounds,
-  getCurrentSeason,
-  getDateZeroTime,
-  getGuessTabs,
-  getHistoryRounds,
-  getInitialRound,
-  getRoundEndTime,
-  getRoundPhase,
-  getRoundSchedules,
-  getScheduleConf,
-  getScheduleIdByStage,
-  getSeasonConf,
-  getStageInfoByRound,
-  getStageName,
-  getSupportGroupId,
-  getSupportLevel,
-} from "@/utils/apexRules";
+import { ApexRoundPhase, ApexScheduleStatus, ApexStageType } from "@/utils/apexRules";
+import { buildApexDailyRules, loadApexDailyConfig } from "@/utils/apexDailyTask";
+const liveRules = ref(null);
+const apexConstantConf = reactive({});
+const calibrateServerTime = (...args) => liveRules.value?.calibrateServerTime(...args);
+const canGuessRow = (...args) => liveRules.value?.canGuessRow(...args);
+const canGuessNow = (...args) => liveRules.value?.canGuessNow(...args);
+const checkNowInSeason = (...args) => liveRules.value?.checkNowInSeason(...args);
+const checkSupportInTime = (...args) => liveRules.value?.checkSupportInTime(...args);
+const getAdvanceNum = (...args) => liveRules.value?.getAdvanceNum(...args);
+const getAvailableRounds = (...args) => liveRules.value?.getAvailableRounds(...args) || [];
+const getCurrentRounds = (...args) => liveRules.value?.getCurrentRounds(...args) || [];
+const getCurrentSeason = (...args) => liveRules.value?.getCurrentSeason(...args);
+const getDateZeroTime = (...args) => liveRules.value?.getDateZeroTime(...args);
+const getGuessTabs = (...args) => liveRules.value?.getGuessTabs(...args) || [];
+const getHistoryRounds = (...args) => liveRules.value?.getHistoryRounds(...args) || [];
+const getInitialRound = (...args) => liveRules.value?.getInitialRound(...args);
+const getRoundEndTime = (...args) => liveRules.value?.getRoundEndTime(...args);
+const getRoundPhase = (...args) => liveRules.value?.getRoundPhase(...args);
+const getRoundSchedules = (...args) => liveRules.value?.getRoundSchedules(...args) || [];
+const getScheduleConf = (...args) => liveRules.value?.getScheduleConf(...args);
+const getScheduleIdByStage = (...args) => liveRules.value?.getScheduleIdByStage(...args);
+const getSeasonConf = (...args) => liveRules.value?.getSeasonConf(...args);
+const getStageInfoByRound = (...args) => liveRules.value?.getStageInfoByRound(...args);
+const getStageName = (...args) => liveRules.value?.getStageName(...args);
+const getSupportGroupId = (...args) => liveRules.value?.getSupportGroupId(...args);
+const getSupportLevel = (...args) => liveRules.value?.getSupportLevel(...args);
 
 const tokenStore = useTokenStore();
 const message = useMessage();
@@ -582,7 +580,7 @@ const BATTLE_WIN_2 = [2, "win2"];
 const BET_BTN_NAME_LEN = 6;
 
 /** 助威榜显示上限（真实配置 rankShowNum） */
-const VOTE_BOARD_MAX = apexConstantConf.rankShowNum || 200;
+const VOTE_BOARD_MAX = computed(() => apexConstantConf.rankShowNum || 200);
 
 // ==================== 服务端时间 ====================
 
@@ -642,7 +640,7 @@ const season = computed(() => {
 /** 赛季配置（起止 / 报名门槛） */
 const seasonConf = computed(() => getSeasonConf(season.value));
 
-/** 配置快照未覆盖当前赛季（赛季更新后需重新生成快照） */
+/** 当前官方配置未覆盖当前赛季（赛季更新后需重新生成快照） */
 const confStale = computed(
   () =>
     !!roleInfo.value.apexRoleInfo &&
@@ -1546,7 +1544,7 @@ const fetchVoteBoard = async () => {
       params: { groupId, round },
       listKey: "apexVoteList",
       timeout: TIMEOUT_READ,
-      maxRows: VOTE_BOARD_MAX,
+      maxRows: VOTE_BOARD_MAX.value,
     });
     // last=true 表示列表确实拉完；未拉完（含被限流截断）时保留已有结果，
     // 下一次轮询会继续补齐，避免界面停在半截数据上。
@@ -1718,7 +1716,12 @@ const fetchAllData = async () => {
     return;
   }
   loading.value = true;
+  liveRules.value = null;
   try {
+    const config = await loadApexDailyConfig((cmd, params) => tokenStore.sendMessageWithPromise(token.id, cmd, params));
+    if (tokenStore.selectedToken?.id !== token.id) return;
+    liveRules.value = buildApexDailyRules(config);
+    Object.assign(apexConstantConf, config.ApexConstantConf || {});
     const res = await fetchRoleInfo();
     if (!res?.apexRoleInfo) {
       message.error("逐鹿盐山数据为空，该角色可能未参加活动");
@@ -1869,6 +1872,7 @@ watch(
     selectedRound.value = null;
     pendingGuessTeamId.value = "";
     fetchingStages.clear();
+    liveRules.value = null;
     hasAutoLoaded.value = false;
     stopPolling();
     if (isConnected.value) {

@@ -1,3 +1,4 @@
+import { OFFICIAL_SNAPSHOT } from "../src/utils/officialTaskConfig.js";
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs/promises';
@@ -183,6 +184,8 @@ test('地图下载按本次manifest和Cocos UUID版本查找，不固定旧hash'
     return { ok: true, json: async () => payload };
   };
   const config = { LegionWarMapTypeMappingConf: { 1: { legionWarMapType: 1, mapId: 1 } } };
+  config.version = 'map-test';
+  config[OFFICIAL_SNAPSHOT] = { body: { dataBundleVer: 'map-test', bundleVers: { demoMap: 'newhash' } } };
   const map = await loadSaltMap({ legionWarMapType: 1 }, config, fetcher);
   assert.equal(map.version, 'demoMap/newhash/legionWarMap'); assert.ok(calls.some(url => url.includes('b0c268dd-6a70-4972-ab89-b06bba9ae317.newimport.json')));
 });
@@ -606,4 +609,9 @@ test('最快模式加速效果未确认则停止，再次运行不追加该次�
   await assert.rejects(s.run(), /加速效果待核实/);
   assert.equal(count(s, 'war_speedup'), 1);
   assert.ok(s.records['p1:bf1'].speedPending);
+});
+
+test('地图与任务配置版本不一致时拒绝加载地图',async()=>{
+  const config={version:'account-current',LegionWarMapTypeMappingConf:{1:{legionWarMapType:1,mapId:1}},[OFFICIAL_SNAPSHOT]:{body:{dataBundleVer:'other',bundleVers:{demoMap:'hash'}}}};
+  await assert.rejects(loadSaltMap({legionWarMapType:1},config,async()=>{throw Error('不应发起地图下载');}),/版本不一致/);
 });

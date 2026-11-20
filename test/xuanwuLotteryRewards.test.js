@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getLotteryCumulativeTiers, getNextUnclaimedLotteryCumulativeId, createLotteryCumulativeClaimer } from '../src/utils/xuanwuLotteryRewards.js';
@@ -11,7 +12,7 @@ test('按当期配置和次数选择真实ID，缺领取记录不绕过门槛', 
 const setup = (mode) => {
   const calls=[], errors=[], map={};
   const claim = createLotteryCumulativeClaimer({actId:2611132,shouldStop:()=>false,onClaim:()=>{},onError:e=>errors.push(e),
-    fetchConfig:async()=>({ok:true,json:async()=>({cumulativeDrawConf:rows})}),
+    fetchConfig:officialConfigFetch('current',{cumulativeDrawConf:rows}),
     send:async(cmd,p)=>{
       calls.push([cmd,p]);
       if(cmd==='system_getdatabundlever')return {dataBundleVer:'current'};

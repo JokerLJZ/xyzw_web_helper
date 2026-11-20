@@ -1,4 +1,4 @@
-import { bon } from "./bonProtocol.js";
+import { loadOfficialTaskConfig } from "./officialTaskConfig.js";
 import { extractRolePatch } from "./roleSnapshot.js";
 
 export const SHOE_ID = 2;
@@ -24,9 +24,7 @@ export async function loadShoeToyConfig(send, fetcher = globalThis.fetch) {
   if (typeof version !== "string" || !/^[\w-]+$/.test(version)) throw new Error("未取得玩具配置版本");
   if (!cache.has(version)) {
     const loading = (async () => {
-      const response = await fetcher(`https://xxz-xyzw-res.hortorgames.com/data/${version}/configc.bin`, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok) throw new Error("玩具配置下载失败");
-      return validateShoeToyConfig({ ...bon.decode(new Uint8Array(await response.arrayBuffer())), version });
+      return validateShoeToyConfig(await loadOfficialTaskConfig(version, fetcher, { binary: true }));
     })();
     cache.set(version, loading);
     loading.catch(() => cache.delete(version));

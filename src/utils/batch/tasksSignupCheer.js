@@ -1,3 +1,4 @@
+import { loadOfficialTaskConfig } from "../officialTaskConfig.js";
 import { isSignupDay } from "./signupSchedule.js";
 import { extractRolePatch } from "../roleSnapshot.js";
 const DAY = 86400000;
@@ -21,11 +22,7 @@ export async function loadSignupCheerConfig(send, fetchConfig = globalThis.fetch
   if (typeof version !== "string" || !/^[\w-]+$/.test(version)) throw new Error("未获取到有效游戏配置版本");
   if (!configs.has(version)) {
     const loading = (async () => {
-      const response = await fetchConfig(`https://xxz-xyzw-res.hortorgames.com/data/${version}/config.json`, {
-        signal: AbortSignal.timeout(30000)
-      });
-      if (!response.ok) throw new Error("游戏配置加载失败");
-      return response.json();
+      return loadOfficialTaskConfig(version, fetchConfig);
     })();
     configs.set(version, loading);
     loading.catch(() => configs.delete(version));

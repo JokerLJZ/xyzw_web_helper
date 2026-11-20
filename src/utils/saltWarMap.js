@@ -1,3 +1,4 @@
+import { getOfficialSnapshot, loadOfficialManifest } from "./officialTaskConfig.js";
 // Evidence: SourceMap.navPath / TMAStar2 / current Cocos bundle TiledMapAsset.
 export const SALT_HEX_DIR = [
   [[-1, -1], [0, -1], [1, -1], [1, 0], [0, 1], [-1, 0]],
@@ -63,11 +64,10 @@ const findXml = value => {
 export async function loadSaltMap(info, config, fetcher = globalThis.fetch) {
   const spec = saltMapSpec(info, config);
   const json = async url => { const r = await fetcher(url, { signal: AbortSignal.timeout(30000), cache: "no-cache" }); if (!r.ok) throw new Error(`盐场地图下载失败(${r.status})`); return r.json(); };
-  const response = await fetcher("https://xxz-xyzw.hortorgames.com/login/manifest?platform=hortor&version=0.36.0-android", { method: "POST", headers: { "Content-Type": "application/json;charset=UTF-8" }, body: "", signal: AbortSignal.timeout(15000), cache: "no-store" });
-  if (!response.ok) throw new Error("盐场资源清单下载失败");
-  let body = (await response.json()).body;
-  if (typeof body === "string") body = JSON.parse(body);
-  const versions = typeof body?.bundleVers === "string" ? JSON.parse(body.bundleVers) : body?.bundleVers;
+  const manifest = getOfficialSnapshot(config) || await loadOfficialManifest(fetcher);
+  const body = manifest.body;
+  if (!config.version || body.dataBundleVer !== config.version) throw new Error("盐场地图与任务配置版本不一致");
+  const versions = typeof body.bundleVers === "string" ? JSON.parse(body.bundleVers) : body.bundleVers;
   const hash = versions?.[spec.bundle];
   if (typeof hash !== "string" || !/^[\w-]+$/.test(hash)) throw new Error("盐场地图版本缺失");
   const key = `${spec.bundle}/${hash}/${spec.asset}`;

@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { findPhotoActivity, queryPhotoExchange, exchangePhotoItems, photoState, runPhotoStandard } from "../src/utils/photoActivity.js";
@@ -157,15 +158,13 @@ test("公共闲来入镜清单包含两种商店，不查询任何账号库存",
   const calls = [], c = config();
   const catalog = await loadPhotoExchangeCatalog(async (url, options) => {
     calls.push([url, options]);
-    return { ok: true, json: async () => url.includes("/login/manifest")
-      ? { body: { dataBundleVer: "photo-public-catalog-test" } }
-      : url.endsWith("config.json") ? c : {} };
+    return officialConfigFetch('photo-public-catalog-test', c)(url, options);
   }, NOW);
   assert.deepEqual(catalog.shops.map(shop => [shop.activityId, shop.rows[0].id]), [[100, 101], [110, 111]]);
   assert.equal(catalog.stock, undefined);
   assert.equal(catalog.shops[0].rows[0].max, undefined);
-  assert.equal(calls.length, 3);
-  assert.ok(calls.every(([url]) => url.startsWith("https://")));
+  assert.equal(calls.length, 7);
+  assert.ok(calls.every(([url]) => !url.includes("/data/")));
 });
 
 test("公共清单执行时库存不足跳过商品，仍继续处理后续选项", async () => {

@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -212,11 +213,11 @@ test("动态配置从当前版本BON读取，JSON缺玩具配置时不猜测旧�
     return { dataBundleVer: "shoe-test-version" };
   }, async url => {
     requests.push(url);
-    return { ok: true, arrayBuffer: async () => bon.encode(official).buffer };
+    return officialConfigFetch('shoe-test-version',official)(url);
   });
   assert.equal(config.version, "shoe-test-version");
-  assert.match(requests[0], /shoe-test-version\/configc.bin$/);
-  await assert.rejects(loadShoeToyConfig(async () => ({ dataBundleVer: "shoe-invalid" }), async () => ({ ok: true, arrayBuffer: async () => bon.encode({}).buffer })), /皮鞋被动配置不完整/);
+  assert.ok(requests.some(url=>url.endsWith(".binary.bin")));
+  await assert.rejects(loadShoeToyConfig(async () => ({ dataBundleVer: "shoe-invalid" }), officialConfigFetch('shoe-invalid',{})), /皮鞋被动配置不完整/);
 });
 
 

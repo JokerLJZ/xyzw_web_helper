@@ -1,3 +1,4 @@
+import { loadOfficialTaskConfig } from "./officialTaskConfig.js";
 import { extractRolePatch } from "./roleSnapshot.js";
 import { isGenieMainLevelUnlocked } from "./dailyFeatureEligibility.js";
 
@@ -10,9 +11,7 @@ export async function loadGenieSweepConfig(send, fetcher = globalThis.fetch) {
   if (typeof version !== "string" || !/^[\w-]+$/.test(version)) throw new Error("未取得灯神奖励配置版本");
   if (!configCache.has(version)) {
     const loading = (async () => {
-      const response = await fetcher(`https://xxz-xyzw-res.hortorgames.com/data/${version}/config_ap.json`, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok) throw new Error("灯神奖励配置下载失败");
-      const config = await response.json();
+      const config = await loadOfficialTaskConfig(version, fetcher);
       if (!config.genieConf || !config.genieLevelConf) throw new Error("灯神奖励配置缺失");
       return config;
     })();

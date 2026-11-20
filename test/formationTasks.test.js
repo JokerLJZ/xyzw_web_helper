@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTasksItem } from "../src/utils/batch/tasksItem.js";
@@ -123,7 +124,7 @@ test("皮鞋任务换高星阵容后停止仍恢复默认站位，且不触发�
     return response;
   };
   const fetcher = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, arrayBuffer: async () => bon.encode(config).buffer });
+  globalThis.fetch = officialConfigFetch('shoe-batch-test',config);
   try { await createTasksItem(f.deps).batchUpgradeShoeToy(); }
   finally { globalThis.fetch = fetcher; }
   assert.equal(f.deps.tokenStatus.value.a, "stopped");

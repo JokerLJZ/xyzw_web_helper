@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { collectionRewardActions, cardRewardActions, runCollectionRewards, loadCollectionRewardConfig } from '../src/utils/collectionRewards.js';
@@ -87,11 +88,8 @@ test('用户停止后不再查询', async () => {
   assert.equal(calls.length, 2);
 });
 test('配置来自该账号返回版本，失败不缓存', async () => {
-  let url;
-  assert.deepEqual(await loadCollectionRewardConfig(async () => ({ dataBundleVer: 'current-123' }), async input => {
-    url = input; return { ok: true, json: async () => config };
-  }), config);
-  assert.match(url, /data\/current-123\/config.json$/);
+  const loaded = await loadCollectionRewardConfig(async () => ({ dataBundleVer: 'current-123' }), officialConfigFetch('current-123', config));
+  assert.deepEqual(loaded.CollectionStageConf, config.CollectionStageConf);
   await assert.rejects(loadCollectionRewardConfig(async () => ({})), /版本/);
 });
 

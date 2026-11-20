@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {findBlessingShops,queryBlessingShop,exchangeBlessingItems,loadBlessingShopCatalog} from '../src/utils/blessingShop.js';
@@ -28,7 +29,7 @@ test('按本期分组识别商店，第二商店仅抽奖结束后开放，截�
 });
 test('公共清单无需连接账号，保留真实商品ID与价格',async()=>{
  const c=config(),urls=[];
- const f=async(url)=>{urls.push(url);return {ok:true,json:async()=>url.includes('manifest')?{body:{dataBundleVer:'blessing-catalog-test'}}:url.endsWith('language.json')?{}:c};};
+ const f=async(url,...args)=>{urls.push(url);return officialConfigFetch('blessing-catalog-test',c)(url,...args);};
  const catalog=await loadBlessingShopCatalog(f,NOW);
  assert.equal(catalog.shops.length,2);assert.equal(catalog.shops[1].available,false);assert.equal(catalog.rows[0].id,261113301);assert.equal(catalog.rows[0].consumeNum,5);
  assert.ok(urls.every(url=>!url.includes('role_')));

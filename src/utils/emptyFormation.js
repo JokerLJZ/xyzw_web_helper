@@ -1,4 +1,4 @@
-import { bon } from './bonProtocol.js';
+import { loadOfficialTaskConfig } from "./officialTaskConfig.js";
 import { activityBody, mapEntries, mapGet } from './rechargeActivity.js';
 const configs = new Map();
 export async function loadEmptyFormationConfig(send, fetcher = globalThis.fetch) {
@@ -6,9 +6,7 @@ export async function loadEmptyFormationConfig(send, fetcher = globalThis.fetch)
   if (typeof version !== 'string' || !/^[\w-]+$/.test(version)) throw new Error('未取得武将配置版本');
   if (!configs.has(version)) {
     const loading = (async()=>{
-      const res = await fetcher(`https://xxz-xyzw-res.hortorgames.com/data/${version}/configc.bin`, {signal:AbortSignal.timeout(30000)});
-      if (!res.ok) throw new Error('武将配置读取失败');
-      const config = bon.decode(new Uint8Array(await res.arrayBuffer()));
+      const config = await loadOfficialTaskConfig(version, fetcher, { binary: true });
       if (!config.HeroConf) throw new Error('缺少武将品质配置');
       return config;
     })();

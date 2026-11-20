@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -33,7 +34,7 @@ function fixture() {
 }
 async function withConfig(fn) {
   const previous = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, json: async () => config });
+  globalThis.fetch = officialConfigFetch('test', config);
   try { await fn(); } finally { globalThis.fetch = previous; }
 }
 test('资源批量逐账号领取和复查，完成后释放连接', () => withConfig(async () => {

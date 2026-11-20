@@ -182,3 +182,14 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 仓库此前借用loadRechargeConfig读取/data配置与语言直链，读取失败后继续使用少量历史中文名；依赖ItemConf的活动道具因此跳过。仓库现有独立加载入口，复用officialTaskConfig，按同一当前config bundle的paths/types/uuids/versions.import读取config、config_ap和language三个JsonAsset。严格核对账号版本与主配置、清单版本，语言若声明COMMIT_ID也核对。失败日志显示具体原因，保留既有跳过规则和使用指令。
 
 当前清单仍为dataBundleVer 152261a3c8、config 2938b，launcher 3af4e的ResourceManager配置列表含language；真实读取确认3007随机红将碎片、3008精铁福袋、3009进阶石福袋、3010晶石福袋、5294玄鱼令、5296凤仪金徽、5297灼华赤羽。只验证配置和名称读取，未使用账号道具；活动保留期、自选包与使用方式的既有判断不变。其他充值活动加载入口此次不迁移。
+
+## 2026-11-20：统一任务配置、地图清单及手动逐鹿赛程
+
+- 当前入口参数仍取public/game实际引用的game-defines中的REMOTE_MANIFEST_VERSION；清单实测dataBundleVer `152261a3c8`、game `57a46`、launcher `3af4e`、config `2938b`。不固定本次哈希；公共活动查询也通过相同入口解析客户端版本。
+- officialTaskConfig统一解析paths/types/uuids/versions.import与versions.native。JsonAsset按Cocos序列化结构读取；BufferAsset按清单native索引下载.bin后BON解码。沿当前launcher的ResourceManager.loadWebConfig与_binToJson核对这两类加载规则。
+- 充值活动、报名助威、玄武活动、藏品奖励、灯神扫荡、空阵容和皮鞋升级七类加载器均已迁移，连同既有每日任务、逐鹿及仓库入口，不再拼/data直链。业务各自的字段校验及写请求逻辑保留。
+- 统一层按fetch来源、账号配置版本、JSON/二进制及语言选项合并并发下载；全局缓存最多保留六种组合，失败移除。清单请求只合并正在进行的请求。配置附带不参与表枚举的清单快照，盐场地图优先复用该快照，并校验任务配置版本一致。
+- 手动逐鹿页面改用loadApexDailyConfig/buildApexDailyRules，不再使用历史赛程快照作运行判断；切账号或重新加载时清除当前规则，避免继续使用旧赛程。历史apexStageMap保留给规则测试/兼容默认导出，页面运行入口不依赖它。
+- 真实验证：当前JSON合并语言与补充表成功，包含1139项道具、312条逐鹿赛程、5组灯神配置和119条藏品阶段配置。当前二进制configc内COMMIT_ID为 `a5582ce672`，与账号和JSON版本 `152261a3c8` 不同；严格校验后拒绝，空阵容/皮鞋依赖的HeroConf/WeaponConf不能用当前JSON代替，也不擅自使用旧二进制。官方发布版本一致的资源后可自动恢复；若这是官方特殊版本语义，需继续以当前客户端证据确认后适配。
+- 宠物图片仍为展示用历史地址，原页面已有图片失败隐藏并保留文字的处理，不作为任务配置；本轮不把图片加载失败视为任务执行失败。答题answer.json及Token来源等独立资源不属于官方配置清单，不混入此加载器。
+- 新增配置直链和固定manifest版本的静态回归检查，覆盖统一层并发/重试、二进制版本拒绝和地图版本拒绝。未取得新的在线角色响应或执行任何账号写操作。

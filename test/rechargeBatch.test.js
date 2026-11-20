@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ref } from "vue";
@@ -5,7 +6,7 @@ import { createTasksRecharge } from "../src/utils/batch/tasksRecharge.js";
 
 test("定时标准任务允许已有运行状态并保留调度器会话", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ actConstantConf: {} }) });
+  globalThis.fetch = officialConfigFetch('batch-test-1', {actConstantConf:{}});
   const isRunning = ref(true), shouldStop = ref(false), status = ref({});
   let released = 0;
   const calls = [];
@@ -27,7 +28,7 @@ test("定时标准任务允许已有运行状态并保留调度器会话", async
 
 test("打开预设清单不连接、不查询账号，选择变化后执行当前账号", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
+  globalThis.fetch = officialConfigFetch('preset-batch-v1', {});
   const selected = ref(["a", "b"]), writes = [], calls = [], statuses = ref({});
   const tasks = createTasksRecharge({
     selectedTokens: selected, tokens: ref([]), tokenStatus: statuses, isRunning: ref(false), shouldStop: ref(false), currentRunningTokenId: ref(null),
