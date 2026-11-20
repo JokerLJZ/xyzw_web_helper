@@ -1,4 +1,4 @@
-import { loadOfficialTaskConfigFallback } from "./officialTaskConfigFallback.js";
+import { loadOfficialTaskConfig } from "./officialTaskConfig.js";
 import { createApexRules, ApexStageType } from "./apexRules.js";
 import { ApexAction, runApexAction } from "./apexRateLimit.js";
 
@@ -59,18 +59,7 @@ export async function loadApexDailyConfig(send, fetchConfig = globalThis.fetch) 
   if (typeof version !== "string" || !/^[\w-]+$/.test(version)) throw new Error("未取得逐鹿盐山配置版本");
   if (!CONFIGS.has(version)) {
     const loading = (async () => {
-      let config;
-      try {
-        const response = await fetchConfig(`https://xxz-xyzw-res.hortorgames.com/data/${version}/config.json`, { signal: AbortSignal.timeout(30000) });
-        if (!response.ok) throw new Error("逐鹿盐山配置读取失败");
-        config = await response.json();
-      } catch (primaryError) {
-        try {
-          config = await loadOfficialTaskConfigFallback(version, fetchConfig);
-        } catch (fallbackError) {
-          throw new Error(`${primaryError.message}；同版本配置包读取失败：${fallbackError.message}`);
-        }
-      }
+      const config = await loadOfficialTaskConfig(version, fetchConfig);
       buildApexDailyRules(config);
       return config;
     })();

@@ -1,4 +1,4 @@
-import { loadOfficialTaskConfigFallback } from "./officialTaskConfigFallback.js";
+import { loadOfficialTaskConfig } from "./officialTaskConfig.js";
 
 const configsByVersion = new Map();
 
@@ -26,23 +26,7 @@ export async function loadDailyTaskConfig(
     throw new Error("服务器未提供有效的任务配置版本");
   if (!configsByVersion.has(version)) {
     const loading = (async () => {
-      try {
-        const response = await fetchConfig(
-          `https://xxz-xyzw-res.hortorgames.com/data/${version}/config.json`,
-          { signal: AbortSignal.timeout(30000) },
-        );
-        if (!response.ok) throw new Error("官方任务配置读取失败");
-        const config = await response.json();
-        const extra = await fetchConfig(`https://xxz-xyzw-res.hortorgames.com/data/${version}/config_ap.json`, { signal: AbortSignal.timeout(30000) });
-        if (!extra.ok) throw new Error("官方日常BOSS配置读取失败");
-        return validateDailyTaskConfig({ ...config, ...await extra.json() });
-      } catch (primaryError) {
-        try {
-          return validateDailyTaskConfig(await loadOfficialTaskConfigFallback(version, fetchConfig));
-        } catch (fallbackError) {
-          throw new Error(`${primaryError.message}；同版本配置包读取失败：${fallbackError.message}`);
-        }
-      }
+      return validateDailyTaskConfig(await loadOfficialTaskConfig(version, fetchConfig));
     })();
     configsByVersion.set(version, loading);
     loading.catch(() => {

@@ -172,3 +172,7 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 复核当前manifest仍为game `57a46`、launcher `3af4e`、config `2938b`、dataBundleVer `152261a3c8`（入口参数同上）。当前客户端逐鹿盐山界面通过ApexScheduleConf定位赛程，任务模块通过ApexTaskConf读取任务类型和完成值；项目loadApexDailyConfig此前独立读取JSON直链，因此未受每日任务备用加载修复覆盖。现接入同一个严格核对版本的官方配置包加载器，继续使用buildApexDailyRules校验后才允许助威和竞猜。实际下载配置包含312条赛程、7条任务，通过规则校验。此次不改变游戏指令、助威顺序或领奖响应处理，未进行账号写操作。
 
 任务失败后切换回“初始阵容”来自DailyTaskRunner的finally清理分支，仅在本轮曾改变阵容且连接可用时执行，属于恢复动作，保留该行为。
+
+## 2026-11-20：每日任务与逐鹿盐山直接从清单加载
+
+每日任务loadDailyTaskConfig与逐鹿盐山loadApexDailyConfig现统一调用officialTaskConfig.js，直接解析本地启动入口、实时manifest和配置bundle，不再先访问/data配置直链。账号system_getdatabundlever仍是版本校验基准；manifest的dataBundleVer与主配置COMMIT_ID必须完全一致，补充配置若包含COMMIT_ID也必须一致，不修改版本字符串强行通过。当前真实资源验证仍为152261a3c8、config 2938b，读取10条每日任务与312条赛程成功。各业务保留自己的配置校验及按版本缓存，换版本重新加载。此改动范围为上述两个配置入口；其他独立功能的配置加载器尚未迁移。

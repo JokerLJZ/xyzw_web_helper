@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runApexGuessTask, runApexDailyTask, buildApexDailyRules, getApexChinaDate, createApexDailySender, getApexClaimableRounds } from "../src/utils/apexDailyTask.js";
@@ -449,15 +450,16 @@ test("初次角色查询200160正常跳过；其他错误不能隐藏", async ()
   }
 });
 
-test("逐鹿盐山直链404后读取同版本配置包，失败可重试且不缓存旧配置", async () => {
+test("逐鹿盐山直接读取同版本配置包，失败可重试且不缓存旧配置", async () => {
   const { loadApexDailyConfig } = await import("../src/utils/apexDailyTask.js");
   const version = "apex-fallback-test";
   let mismatch = true;
-  let directReads = 0;
+  let manifestReads = 0;
   const send = async () => ({ dataBundleVer: version });
   const fetchConfig = async (url) => {
     const json = value => ({ ok: true, json: async () => value });
-    if (url.includes("/data/")) { directReads++; return { ok: false, status: 404 }; }
+    assert.ok(!url.includes("/data/"));
+    if (url.includes("manifest?")) manifestReads++;
     if (url.endsWith("index.html")) return { ok: true, text: async () => '<script src="game-defines.current.js"></script>' };
     if (url.endsWith(".js")) return { ok: true, text: async () => "REMOTE_MANIFEST_VERSION='0.36.0-android'" };
     if (url.includes("manifest?")) return json({ body: { dataBundleVer: version, bundleVers: { config: "current" } } });
@@ -474,17 +476,11 @@ test("逐鹿盐山直链404后读取同版本配置包，失败可重试且不�
   const result = await loadApexDailyConfig(send, fetchConfig);
   assert.ok(result.ApexScheduleConf[1]);
   assert.equal(await loadApexDailyConfig(send, fetchConfig), result);
-  assert.equal(directReads, 2);
+  assert.equal(manifestReads, 2);
 });
 
-test("逐鹿盐山直链正常时不读取备用清单", async () => {
+test("逐鹿盐山直接清单加载不访问旧配置直链", async () => {
   const { loadApexDailyConfig } = await import("../src/utils/apexDailyTask.js");
-  let reads = 0;
-  const result = await loadApexDailyConfig(async () => ({ dataBundleVer: "apex-direct-test" }), async url => {
-    reads++;
-    assert.ok(url.endsWith("/apex-direct-test/config.json"));
-    return { ok: true, json: async () => config() };
-  });
+  const result = await loadApexDailyConfig(async () => ({ dataBundleVer: "apex-direct-test" }), officialConfigFetch("apex-direct-test", config()));
   assert.ok(result.ApexTaskConf);
-  assert.equal(reads, 1);
 });

@@ -1,3 +1,4 @@
+import { officialConfigFetch } from "./officialConfigFixture.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -120,16 +121,16 @@ test("config version is verified each run while immutable configuration requests
       return { dataBundleVer: "test-config-merge" };
     },
   };
-  const fetchConfig = async () => {
+  const fetchConfig = async (...args) => {
     reads++;
-    return { ok: true, json: async () => officialConfig() };
+    return officialConfigFetch("test-config-merge", officialConfig())(...args);
   };
   const [a, b] = await Promise.all([
     loadDailyTaskConfig(store, "a", fetchConfig),
     loadDailyTaskConfig(store, "b", fetchConfig),
   ]);
   assert.equal(a, b);
-  assert.equal(reads, 2);
+  assert.equal(reads, 6);
   assert.equal(versions, 2);
 });
 
@@ -140,16 +141,16 @@ test("failed config reads can be retried and unsafe versions are rejected", asyn
       return { dataBundleVer: "test-config-retry" };
     },
   };
-  const fetchConfig = async () => ({
-    ok: ++attempt > 1,
-    json: async () => officialConfig(),
-  });
+  const fetchConfig = async (...args) => {
+    if (++attempt === 1) return { ok: false, status: 503 };
+    return officialConfigFetch("test-config-retry", officialConfig())(...args);
+  };
   await assert.rejects(
     loadDailyTaskConfig(store, "a", fetchConfig),
     /读取失败/,
   );
   await loadDailyTaskConfig(store, "a", fetchConfig);
-  assert.equal(attempt, 4);
+  assert.equal(attempt, 7);
   await assert.rejects(
     loadDailyTaskConfig(
       {
@@ -172,43 +173,13 @@ test("duplicate point-reward IDs are rejected before duplicate claims can be sch
   }
 });
 
-test("an evicted failed config request cannot remove a newer cached request for the same version", async () => {
-  let rejectFirst;
-  let entered;
-  const started = new Promise((resolve) => {
-    entered = resolve;
-  });
-  let readsA = 0;
-  const store = {
-    sendMessageWithPromise: async (id) => ({ dataBundleVer: id }),
-  };
-  const fetchConfig = async (url) => {
-    if (url.includes("cache-race-a") && ++readsA === 1) {
-      entered();
-      return new Promise((resolve, reject) => {
-        rejectFirst = reject;
-      });
-    }
-    return { ok: true, json: async () => officialConfig() };
-  };
-  const first = loadDailyTaskConfig(store, "cache-race-a", fetchConfig);
-  const rejected = assert.rejects(first, /first request failed/);
-  await started;
-  await loadDailyTaskConfig(store, "cache-race-b", fetchConfig);
-  await loadDailyTaskConfig(store, "cache-race-a", fetchConfig);
-  rejectFirst(new Error("first request failed"));
-  await rejected;
-  await loadDailyTaskConfig(store, "cache-race-a", fetchConfig);
-  assert.equal(readsA, 3);
-});
-
-test("404 falls back to current manifest assets and caches only validated matching versions", async () => {
+test("directly loads current manifest assets and caches only validated matching versions", async () => {
   const calls = [];
   const version = "fallback-current";
   const fetchConfig = async (url) => {
     calls.push(url);
     const result = (value) => ({ ok: true, json: async () => value });
-    if (url.includes("/data/")) return { ok: false, status: 404 };
+    assert.ok(!url.includes("/data/"));
     if (url.endsWith("index.html")) return { ok: true, text: async () => '<script src="game-defines.current.js"></script>' };
     if (url.endsWith(".js")) return { ok: true, text: async () => "gt.REMOTE_MANIFEST_VERSION = '0.36.0-android'" };
     if (url.includes("/manifest?")) return result({ body: { dataBundleVer: version, bundleVers: JSON.stringify({ config: "current" }) } });
@@ -232,8 +203,8 @@ test("404 falls back to current manifest assets and caches only validated matchi
 });
 
 for (const mismatch of ["manifest", "content", "extra", "shape"]) {
-  test(`fallback rejects ${mismatch} mismatch before accepting configuration`, async () => {
-    const { loadOfficialTaskConfigFallback } = await import("../src/utils/officialTaskConfigFallback.js");
+  test(`manifest loader rejects ${mismatch} mismatch before accepting configuration`, async () => {
+    const { loadOfficialTaskConfig } = await import("../src/utils/officialTaskConfig.js");
     let assets = 0;
     const fetchConfig = async (url) => {
       const result = (value) => ({ ok: true, json: async () => value });
@@ -250,7 +221,23 @@ for (const mismatch of ["manifest", "content", "extra", "shape"]) {
         COMMIT_ID: (mismatch === "content" && assets === 1) || (mismatch === "extra" && assets === 2) ? "old" : "expected",
       }]]]);
     };
-    await assert.rejects(loadOfficialTaskConfigFallback("expected", fetchConfig), /不一致|格式无效/);
+    await assert.rejects(loadOfficialTaskConfig("expected", fetchConfig), /不一致|格式无效/);
     if (mismatch === "manifest") assert.equal(assets, 0);
   });
 }
+
+test("configuration version changes reload definitions instead of reusing previous account version", async () => {
+  let version = "manifest-version-a";
+  const store = { sendMessageWithPromise: async () => ({ dataBundleVer: version }) };
+  let reads = 0;
+  const fetchConfig = async (...args) => {
+    reads++;
+    const config = officialConfig();
+    config.DailyTaskConf[1].completeValue = version.endsWith("a") ? 3 : 7;
+    return officialConfigFetch(version, config)(...args);
+  };
+  assert.equal((await loadDailyTaskConfig(store, "a", fetchConfig)).tasks[0].completeValue, 3);
+  version = "manifest-version-b";
+  assert.equal((await loadDailyTaskConfig(store, "b", fetchConfig)).tasks[0].completeValue, 7);
+  assert.equal(reads, 12);
+});

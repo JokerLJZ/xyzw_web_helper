@@ -2,7 +2,7 @@ const CDN = "https://xxz-xyzw-res.hortorgames.com";
 const safeVersion = (value) => typeof value === "string" && /^[\w-]+$/.test(value);
 
 /** Resolve the current launcher resources without pinning a remote bundle hash. */
-export async function loadOfficialTaskConfigFallback(version, fetchConfig) {
+export async function loadOfficialTaskConfig(version, fetchConfig) {
   const request = async (url, options = {}) => {
     const response = await fetchConfig(url, {
       ...options,
