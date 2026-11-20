@@ -1,3 +1,4 @@
+import { loadOfficialTaskConfigFallback } from "./officialTaskConfigFallback.js";
 import { createApexRules, ApexStageType } from "./apexRules.js";
 import { ApexAction, runApexAction } from "./apexRateLimit.js";
 
@@ -58,14 +59,25 @@ export async function loadApexDailyConfig(send, fetchConfig = globalThis.fetch) 
   if (typeof version !== "string" || !/^[\w-]+$/.test(version)) throw new Error("未取得逐鹿盐山配置版本");
   if (!CONFIGS.has(version)) {
     const loading = (async () => {
-      const response = await fetchConfig(`https://xxz-xyzw-res.hortorgames.com/data/${version}/config.json`, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok) throw new Error("逐鹿盐山配置读取失败");
-      const config = await response.json();
+      let config;
+      try {
+        const response = await fetchConfig(`https://xxz-xyzw-res.hortorgames.com/data/${version}/config.json`, { signal: AbortSignal.timeout(30000) });
+        if (!response.ok) throw new Error("逐鹿盐山配置读取失败");
+        config = await response.json();
+      } catch (primaryError) {
+        try {
+          config = await loadOfficialTaskConfigFallback(version, fetchConfig);
+        } catch (fallbackError) {
+          throw new Error(`${primaryError.message}；同版本配置包读取失败：${fallbackError.message}`);
+        }
+      }
       buildApexDailyRules(config);
       return config;
     })();
     CONFIGS.set(version, loading);
-    loading.catch(() => CONFIGS.delete(version));
+    loading.catch(() => {
+      if (CONFIGS.get(version) === loading) CONFIGS.delete(version);
+    });
   }
   return CONFIGS.get(version);
 }

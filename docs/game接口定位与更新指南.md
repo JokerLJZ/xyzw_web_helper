@@ -166,3 +166,9 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 - 对应实现、测试和尚未完成的在线验证。
 
 旧抓包可以补充历史背景；当前客户端逻辑与当前实际服务端响应优先。
+
+## 2026-11-20：逐鹿盐山配置读取补充
+
+复核当前manifest仍为game `57a46`、launcher `3af4e`、config `2938b`、dataBundleVer `152261a3c8`（入口参数同上）。当前客户端逐鹿盐山界面通过ApexScheduleConf定位赛程，任务模块通过ApexTaskConf读取任务类型和完成值；项目loadApexDailyConfig此前独立读取JSON直链，因此未受每日任务备用加载修复覆盖。现接入同一个严格核对版本的官方配置包加载器，继续使用buildApexDailyRules校验后才允许助威和竞猜。实际下载配置包含312条赛程、7条任务，通过规则校验。此次不改变游戏指令、助威顺序或领奖响应处理，未进行账号写操作。
+
+任务失败后切换回“初始阵容”来自DailyTaskRunner的finally清理分支，仅在本轮曾改变阵容且连接可用时执行，属于恢复动作，保留该行为。
