@@ -1,3 +1,4 @@
+import { claimLegacyChargeReward } from "../legacyChargeReward.js";
 import { loadSignupCheerConfig } from "./tasksSignupCheer.js";
 
 /** 是否至少产出一份残卷；produceSpeed 与 hangUpBeginTime 均以毫秒计算。 */
@@ -405,37 +406,36 @@ export function createTasksLegacy(deps, { loadConfig = loadSignupCheerConfig } =
         });
         await ensureConnection(tokenId);
 
-        const resp = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "legacy_claimchargereward",
-          { id: 2 },
-          5000,
-        );
-        const reward = Array.isArray(resp?.reward) ? resp.reward[0] : null;
-        const rewardValue = reward?.value ?? 0;
+        const result = await claimLegacyChargeReward({
+          send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, 5000),
+          loadConfig,
+          serverTime: () => tokenStore.getWebSocketClient(tokenId)?.getServerTime?.(),
+          stopped: () => shouldStop.value,
+        });
+        if (result.status !== "completed") {
+          tokenStatus.value[tokenId] = result.status === "stopped" ? "stopped" : "completed";
+          skippedCount++;
+          addLog({ time: new Date().toLocaleTimeString(), message: `${tokenName} ${result.reason || "任务已停止"}，跳过领取`, type: "info" });
+          return;
+        }
+        const resp = result.response?._raw?.body || result.response?.body || result.response?.data || result.response;
+        const fragments = Array.isArray(resp?.reward)
+          ? resp.reward.filter(item => item?.itemId === 37007 && Number.isFinite(item.value) && item.value >= 0)
+          : [];
+        const rewardValue = fragments.length ? fragments.reduce((sum, item) => sum + item.value, 0) : undefined;
         const totalFragments = resp?.role?.items?.[37007]?.quantity;
         const totalText =
           totalFragments !== undefined ? `，当前共有${totalFragments}个` : "";
 
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${tokenName} 领取特权功法成功，获得功法残卷${rewardValue}个${totalText} ===`,
+          message: `=== ${tokenName} 领取特权功法成功，${rewardValue !== undefined ? `获得功法残卷${rewardValue}个` : "领取记录已确认"}${totalText} ===`,
           type: "success",
         });
         tokenStatus.value[tokenId] = "completed";
         successCount++;
       } catch (error) {
         console.error(error);
-        if (isAlreadyClaimedError(error)) {
-          tokenStatus.value[tokenId] = "completed";
-          skippedCount++;
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `=== ${tokenName} 特权功法已领取，跳过 ===`,
-            type: "warning",
-          });
-          return;
-        }
 
         tokenStatus.value[tokenId] = "failed";
         failedCount++;

@@ -193,3 +193,11 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 - 真实验证：当前JSON合并语言与补充表成功，包含1139项道具、312条逐鹿赛程、5组灯神配置和119条藏品阶段配置。当前二进制configc内COMMIT_ID为 `a5582ce672`，与账号和JSON版本 `152261a3c8` 不同；严格校验后拒绝，空阵容/皮鞋依赖的HeroConf/WeaponConf不能用当前JSON代替，也不擅自使用旧二进制。官方发布版本一致的资源后可自动恢复；若这是官方特殊版本语义，需继续以当前客户端证据确认后适配。
 - 宠物图片仍为展示用历史地址，原页面已有图片失败隐藏并保留文字的处理，不作为任务配置；本轮不把图片加载失败视为任务执行失败。答题answer.json及Token来源等独立资源不属于官方配置清单，不混入此加载器。
 - 新增配置直链和固定manifest版本的静态回归检查，覆盖统一层并发/重试、二进制版本拒绝和地图版本拒绝。未取得新的在线角色响应或执行任何账号写操作。
+
+## 2026-11-21：特权功法领取前查询
+
+- 当前manifest参数沿public/game入口为platform=hortor、version=0.36.0-android；清单COMMIT_ID 6f2973f5、game 57a46、launcher 3af4e、协议TEST_REMOTE_MODULE 757be、dataBundleVer 152261a3c8。业务资源按当前清单确认，协议资源本次重新下载并按本地loadJscAndDecode解密、仅执行字符串表初始化进行静态分析。
+- 官方LegacyPrivilegeDialog.refreshUI读取LegacyChargeReward档位、roleLegacy.chargeClaimedMap及LegacyModule.getLegacySeasonChargeAmount；满足vipSpend且未领取才绑定sendClaimChargeReward(id)。LegacyModule.sendGetInfo通过LegacyService.getInfo({})刷新roleLegacy。协议REQS明确映射Legacy_GetInfo→legacy_getinfo、Legacy_ClaimChargeReward→legacy_claimchargereward，领取参数为{id}。
+- 协议声明Legacy_GetInfoResp.roleLegacy为GDRoleLegacy，scheduleId默认0，chargeClaimedMap为空Map；LegacyCharge统计键为legacy:charge。客户端用ROLE.statistics和statisticsTime（秒）判断是否落在当前LegacyScheduleConf的开始（含）至结束（不含）区间，区间外充值数为0。白名单账号使用legacyWhiteListStart。scheduleId小于当前配置id或无开放赛季属于跨季。
+- 当前任务保留原来id=2的领取范围，不扩大到更高档位。档位门槛从当前统一配置读取，不硬编码3000。每个账号先查询legacy_getinfo和role_getroleinfo，核对服务器时间、赛季、领取记录及本季充值。查询不完整则失败；已领/不足/跨季正常跳过。领取成功或报错后再次查询legacy_getinfo，同赛季且明确布尔true才确认完成，不重发不确定写请求。200020仅为通用错误，不能单独推定已领取。
+- 此次没有使用真实账号查询或领取；当前在线返回体尚未获得，响应模型依据上述客户端协议声明，并对不完整快照拒绝执行。库存增量缺失不当作0，不靠奖励第一项推算领取成功。
