@@ -53,6 +53,7 @@
 </template>
 
 <script setup>
+import { startPayloadBattleFlow } from "@/utils/payloadBattleRunner";
 import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { useMessage } from "naive-ui";
@@ -90,6 +91,11 @@ const openGame = async () => {
   }
 
   persistGameBin(token, binData);
+  if (localStorage.getItem("payload_auto") !== "0") {
+    setTimeout(() => {
+      startPayloadBattleFlow(tokenStore, token.id).catch(error => console.warn("[蟠桃] 战场连接失败:", error?.message));
+    }, 20_000);
+  }
   router.push("/game");
 };
 

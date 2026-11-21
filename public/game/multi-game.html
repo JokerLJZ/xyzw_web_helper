@@ -6,6 +6,13 @@
     <meta name="viewport" content="width=device-width,user-scalable=no,initial-scale=1,minimum-scale=1,maximum-scale=1" />
     <link rel="stylesheet" type="text/css" href="style-mobile.1777a.css" />
     <link rel="icon" href="favicon.8de18.ico" />
+    <script>
+      if (new URLSearchParams(location.search).get("showTools") !== "1") {
+        const style = document.createElement("style");
+        style.textContent = "#binTool,#binToast,#script-tool-toggle,#script-tool-container{display:none!important}";
+        document.head.appendChild(style);
+      }
+    </script>
   </head>
   <body>
     <canvas id="GameCanvas" oncontextmenu="event.preventDefault()" tabindex="0"></canvas>

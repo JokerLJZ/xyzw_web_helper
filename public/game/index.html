@@ -60,6 +60,14 @@
     <script src="xh.js" charset="utf-8"></script>
     <script src="sh1.js" charset="utf-8"></script>
     <script src="diagnose_require.js" charset="utf-8"></script>
+    <script>
+      // Embedded helper panels obscure game controls; ?showTools=1 restores them.
+      if (new URLSearchParams(location.search).get("showTools") !== "1") {
+        const style = document.createElement("style");
+        style.textContent = "#binTool,#binToast,#script-tool-toggle,#script-tool-container{display:none!important}";
+        document.head.appendChild(style);
+      }
+    </script>
     <script type="text/javascript">
       (function () {
         window.HtmlIsLoaded = true;

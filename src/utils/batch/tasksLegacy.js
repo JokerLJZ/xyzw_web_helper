@@ -411,6 +411,11 @@ export function createTasksLegacy(deps, { loadConfig = loadSignupCheerConfig } =
           loadConfig,
           serverTime: () => tokenStore.getWebSocketClient(tokenId)?.getServerTime?.(),
           stopped: () => shouldStop.value,
+          onTier: tier => addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 特权功法${tier.name || `档位${tier.id}`}（ID ${tier.id}）：${tier.status === "completed" ? "领取记录已确认" : `${tier.reason}，跳过`}`,
+            type: tier.status === "completed" ? "success" : "info",
+          }),
         });
         if (result.status !== "completed") {
           tokenStatus.value[tokenId] = result.status === "stopped" ? "stopped" : "completed";
@@ -429,7 +434,7 @@ export function createTasksLegacy(deps, { loadConfig = loadSignupCheerConfig } =
 
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${tokenName} 领取特权功法成功，${rewardValue !== undefined ? `获得功法残卷${rewardValue}个` : "领取记录已确认"}${totalText} ===`,
+          message: `=== ${tokenName} 领取特权功法成功，本次确认${result.claimedIds.length}档，${rewardValue !== undefined ? `获得功法残卷${rewardValue}个` : "领取记录已确认"}${totalText} ===`,
           type: "success",
         });
         tokenStatus.value[tokenId] = "completed";

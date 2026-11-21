@@ -1,147 +1,163 @@
+import { g_utils } from "./bonProtocol.js";
 /**
  * XYZW WebSocket 客户端
  * 基于 readable-xyzw-ws.js 重构，适配本项目架构
  */
- import { bonProtocol, g_utils } from './bonProtocol.js'
- import { wsLogger, gameLogger } from './logger.js'
- 
- /** 为日志生成安全的 body 预览，避免控制台再次解析原始对象 */
- const formatBodyForLog = (body) => {
-   if (!body) return ''
- 
-   if (body instanceof Uint8Array) {
-     return `[BON:${body.length}b]`
-   }
- 
-   if (Array.isArray(body)) {
-     return `[Array:${body.length}]`
-   }
- 
-   if (typeof body === 'object') {
-     const isNumericObject = Object.keys(body).every((key) => !Number.isNaN(parseInt(key)))
-     if (isNumericObject) {
-       return `[BON:Object:${Object.keys(body).length}]`
-     }
-     try {
-       return JSON.stringify(body)
-     } catch {
-       return '[Object]'
-     }
-   }
- 
-   return String(body)
- }
- 
- /**
-  * 命令注册器：保存每个 cmd 的默认体，发送时与 params 合并
-  */
- export class CommandRegistry {
-   constructor(encoder, enc,hint) {
-     this.encoder = encoder
-     this.enc = enc
-     this.hint = hint
-     this.commands = new Map()
-   }
- 
-   /** 注册命令 */
-   register(cmd, defaultBody = {}) {
-     this.commands.set(cmd, (ack = 0, seq = 0, params = {}) => ({
-       cmd,
-       ack,
-       seq,
-       hint:this.hint,
-       time: Date.now(),
-       body: this.encoder?.bon?.encode
-         ? this.encoder.bon.encode({ ...defaultBody, ...params })
-         : { ...defaultBody, ...params },
-     }))
-     return this
-   }
- 
-   /** 特例：系统心跳的 ack 用的是 "war_ping" */
-   registerHeartbeat() {
-     this.commands.set("heart_beat", (ack, seq) => ({
-       cmd: "war_ping",
-       ack,
-       seq,
-       hint:this.hint,
-       time: Date.now(),
-       body: {battlefieldId:this.hint},
-     }))
-     return this
-   }
- 
-   /** 生成最终可发送的二进制 */
-   encodePacket(raw) {
-     if (this.encoder?.encode && this.enc) {
-       // 使用加密编码
-       return this.encoder.encode(raw, this.enc)
-     } else {
-       // 降级到JSON字符串
-       return JSON.stringify(raw)
-     }
-   }
- 
-   /** 构造报文 */
-   build(cmd, ack, seq, params) {
-     const fn = this.commands.get(cmd)
-     if (!fn) throw new Error(`Unknown cmd: ${cmd}`)
-     return fn(ack, seq, params)
-   }
- }
- 
- /** 预注册游戏命令 */
- export function registerDefaultCommands(reg) {
-   const registry = reg.registerHeartbeat()
-     //盐场-获取战场信息
-     .register("war_getbattlefieldinfo")
-     .register("war_enterbattlefield")
-   
-   return registry
- }
- 
- /**
-  * XYZW WebSocket 盐场客户端
-  */
- export class XyzwLegionWarWebSocketClient {
-   constructor({ url, utils,hint, heartbeatMs = 5000 }) {
-     this.url = url
-     this.utils = utils || g_utils
-     this.enc = this.utils?.getEnc ? this.utils.getEnc("auto") : undefined
- 
-     this.socket = null
-     this.ack = 0
-     this.seq = 0
-     this.wireSeq = 0;
-     this.heartbeatStartTimer = null;
-     this.reconnectTimer = null;
-     this.reconnectResetTimer = null;
-     this.dialogResetTimer = null;
-     this.hint=hint;
-     this.sendQueue = []
-     this.sendQueueTimer = null
-     this.heartbeatTimer = null
-     this.heartbeatInterval = heartbeatMs
- 
-     this.dialogStatus = false
-     this.messageListener = null
-     this.showMsg = false
-     this.connected = false
-     this.isReconnecting = false // 重连状态标志
- 
-     this.promises = Object.create(null)
-     this.registry = registerDefaultCommands(new CommandRegistry(this.utils, this.enc,this.hint))
- 
-     // WebSocket客户端初始化
- 
-     // 状态回调
-     this.onConnect = null
-     this.onDisconnect = null
-     this.onError = null
-   }
- 
-   /** 初始化连接 */
-   init() {
+import { sleep } from "./helperTaskRunner.js";
+import { gameLogger, wsLogger } from "./logger.js";
+
+/** 为日志生成安全的 body 预览，避免控制台再次解析原始对象 */
+const formatBodyForLog = (body) => {
+  if (!body) return "";
+
+  if (body instanceof Uint8Array) {
+    return `[BON:${body.length}b]`;
+  }
+
+  if (Array.isArray(body)) {
+    return `[Array:${body.length}]`;
+  }
+
+  if (typeof body === "object") {
+    const isNumericObject = Object.keys(body).every(
+      (key) => !Number.isNaN(Number.parseInt(key)),
+    );
+    if (isNumericObject) {
+      return `[BON:Object:${Object.keys(body).length}]`;
+    }
+    try {
+      return JSON.stringify(body);
+    } catch {
+      return "[Object]";
+    }
+  }
+
+  return String(body);
+};
+
+/**
+ * 命令注册器：保存每个 cmd 的默认体，发送时与 params 合并
+ */
+class CommandRegistry {
+  constructor(encoder, enc, hint) {
+    this.encoder = encoder;
+    this.enc = enc;
+    this.hint = hint;
+    this.commands = new Map();
+  }
+
+  /** 注册命令 */
+  register(cmd, defaultBody = {}) {
+    this.commands.set(cmd, (ack = 0, seq = 0, params = {}) => ({
+      cmd,
+      ack,
+      seq,
+      hint: this.hint,
+      time: Date.now(),
+      body: this.encoder?.bon?.encode
+        ? this.encoder.bon.encode({ ...defaultBody, ...params })
+        : { ...defaultBody, ...params },
+    }));
+    return this;
+  }
+
+  /** 特例：系统心跳的 ack 用的是 "war_ping" */
+  registerHeartbeat() {
+    this.commands.set("heart_beat", (ack, seq) => ({
+      cmd: "war_ping",
+      ack,
+      seq,
+      hint: this.hint,
+      time: Date.now(),
+      body: { battlefieldId: this.hint },
+    }));
+    return this;
+  }
+
+  /** 生成最终可发送的二进制 */
+  encodePacket(raw) {
+    if (this.encoder?.encode && this.enc) {
+      // 使用加密编码
+      return this.encoder.encode(raw, this.enc);
+    } else {
+      // 降级到JSON字符串
+      return JSON.stringify(raw);
+    }
+  }
+
+  /** 构造报文 */
+  build(cmd, ack, seq, params) {
+    const fn = this.commands.get(cmd);
+    if (!fn) throw new Error(`Unknown cmd: ${cmd}`);
+    return fn(ack, seq, params);
+  }
+}
+
+/** 预注册游戏命令 */
+function registerDefaultCommands(reg) {
+  const registry = reg
+    .registerHeartbeat()
+    // 盐场-核心通信与状态
+    .register("war_getbattlefieldinfo")
+    .register("war_enterbattlefield")
+    // 盐场-出征与战斗核心指令
+    .register("war_startbattle")
+    .register("war_startattackbuilding")
+    .register("war_startmarch")
+    .register("war_setbattleteam")
+    .register("war_suicide")
+    .register("war_speedup")
+    // 盐场-队伍与信息查询
+    .register("war_getteaminfo");
+
+  return registry;
+}
+
+/**
+ * XYZW WebSocket 盐场客户端
+ */
+export class XyzwLegionWarWebSocketClient {
+  constructor({ url, utils, hint, heartbeatMs = 5000 }) {
+    this.url = url;
+    this.utils = utils || g_utils;
+    this.enc = this.utils?.getEnc ? this.utils.getEnc("auto") : undefined;
+
+    this.socket = null;
+    this.ack = 0;
+    this.seq = 0;
+    this.wireSeq = 0;
+    this.hint = hint;
+    this.sendQueue = [];
+    this.sendQueueTimer = null;
+    this.heartbeatTimer = null;
+    this.heartbeatStartTimer = null;
+    this.reconnectTimer = null;
+    this.reconnectResetTimer = null;
+    this.dialogResetTimer = null;
+    this.heartbeatInterval = heartbeatMs;
+
+    this.dialogStatus = false;
+    this.messageListener = null;
+    this._pushWaiters = []; // 等待指定命令推送的私有等待队列（盐场阵容功能使用）
+    this.showMsg = false;
+    this.connected = false;
+    this.isReconnecting = false; // 重连状态标志
+
+    this.promises = Object.create(null);
+    this.registry = registerDefaultCommands(
+      new CommandRegistry(this.utils, this.enc, this.hint),
+    );
+
+    // WebSocket客户端初始化
+
+    // 状态回调
+    this.onConnect = null;
+    this.onDisconnect = null;
+    this.onError = null;
+  }
+
+  /** 初始化连接 */
+  init() {
     wsLogger.info(`连接: ${this.url.split("?")[0]}`);
 
     if (this.reconnectTimer !== null) {
@@ -241,6 +257,7 @@
                 }
 
                 // 回调处理
+                this._notifyPushWaiters(packet);
                 if (this.messageListener) {
                   this.messageListener(packet);
                 }
@@ -317,6 +334,7 @@
         }
 
         // 回调处理
+        this._notifyPushWaiters(packet);
         if (this.messageListener) {
           this.messageListener(packet);
         }
@@ -351,95 +369,100 @@
       if (this.onError) this.onError(error);
     };
   }
- 
-   /** 注册消息回调 */
-   setMessageListener(fn) {
-     this.messageListener = fn
-   }
- 
-   /** 控制台消息开关 */
-   setShowMsg(val) {
-     this.showMsg = !!val
-   }
- 
-   /** 判断是否需要解码body */
-   shouldDecodeBody(body) {
-     if (!body) return false
- 
-     // Uint8Array或Array格式
-     if (body instanceof Uint8Array || Array.isArray(body)) {
-       return true
-     }
- 
-     // 对象格式的数字数组（从图片中看到的格式）
-     if (typeof body === 'object' && body.constructor === Object) {
-       // 检查是否是数字键的对象（例如 {"0": 8, "1": 2, ...}）
-       const keys = Object.keys(body)
-       return keys.length > 0 && keys.every(key => !isNaN(parseInt(key)))
-     }
- 
-     return false
-   }
- 
-   /** 转换body为Uint8Array */
-   convertToUint8Array(body) {
-     if (!body) return null
- 
-     if (body instanceof Uint8Array) {
-       return body
-     }
- 
-     if (Array.isArray(body)) {
-       return new Uint8Array(body)
-     }
- 
-     // 对象格式的数字数组转换为Uint8Array
-     if (typeof body === 'object' && body.constructor === Object) {
-       const keys = Object.keys(body).map(k => parseInt(k)).sort((a, b) => a - b)
-       if (keys.length > 0) {
-         const maxIndex = Math.max(...keys)
-         const arr = new Array(maxIndex + 1).fill(0)
-         for (const [key, value] of Object.entries(body)) {
-           const index = parseInt(key)
-           if (!isNaN(index) && typeof value === 'number') {
-             arr[index] = value
-           }
-         }
-         gameLogger.debug('转换对象格式body为Uint8Array:', arr.length, 'bytes')
-         return new Uint8Array(arr)
-       }
-     }
- 
-     return null
-   }
- 
-   /** 尝试为日志解码BON体，成功返回对象 */
-   decodeBodyForLog(body) {
-     if (!body) return null
-     const decoder = this.utils?.bon?.decode
-     if (typeof decoder !== 'function') return null
- 
-     let bytes = null
-     if (body instanceof Uint8Array) {
-       bytes = body
-     } else if (Array.isArray(body)) {
-       bytes = new Uint8Array(body)
-     } else if (this.shouldDecodeBody(body)) {
-       bytes = this.convertToUint8Array(body)
-     }
- 
-     if (!bytes) return null
- 
-     try {
-       return decoder(bytes)
-     } catch (error) {
-       gameLogger.warn('日志解析BON失败:', error.message)
-       return null
-     }
-   }
- 
-   /** 重连（防重复连接版本） */
-   reconnect() {
+
+  /** 注册消息回调 */
+  setMessageListener(fn) {
+    this.messageListener = fn;
+  }
+
+  /** 控制台消息开关 */
+  setShowMsg(val) {
+    this.showMsg = !!val;
+  }
+
+  /** 判断是否需要解码body */
+  shouldDecodeBody(body) {
+    if (!body) return false;
+
+    // Uint8Array或Array格式
+    if (body instanceof Uint8Array || Array.isArray(body)) {
+      return true;
+    }
+
+    // 对象格式的数字数组（从图片中看到的格式）
+    if (typeof body === "object" && body.constructor === Object) {
+      // 检查是否是数字键的对象（例如 {"0": 8, "1": 2, ...}）
+      const keys = Object.keys(body);
+      return (
+        keys.length > 0 &&
+        keys.every((key) => !Number.isNaN(+Number.parseInt(key)))
+      );
+    }
+
+    return false;
+  }
+
+  /** 转换body为Uint8Array */
+  convertToUint8Array(body) {
+    if (!body) return null;
+
+    if (body instanceof Uint8Array) {
+      return body;
+    }
+
+    if (Array.isArray(body)) {
+      return new Uint8Array(body);
+    }
+
+    // 对象格式的数字数组转换为Uint8Array
+    if (typeof body === "object" && body.constructor === Object) {
+      const keys = Object.keys(body)
+        .map((k) => Number.parseInt(k))
+        .sort((a, b) => a - b);
+      if (keys.length > 0) {
+        const maxIndex = Math.max(...keys);
+        const arr = Array.from({ length: maxIndex + 1 }, () => 0);
+        for (const [key, value] of Object.entries(body)) {
+          const index = Number.parseInt(key);
+          if (!Number.isNaN(+index) && typeof value === "number") {
+            arr[index] = value;
+          }
+        }
+        gameLogger.debug("转换对象格式body为Uint8Array:", arr.length, "bytes");
+        return new Uint8Array(arr);
+      }
+    }
+
+    return null;
+  }
+
+  /** 尝试为日志解码BON体，成功返回对象 */
+  decodeBodyForLog(body) {
+    if (!body) return null;
+    const decoder = this.utils?.bon?.decode;
+    if (typeof decoder !== "function") return null;
+
+    let bytes = null;
+    if (body instanceof Uint8Array) {
+      bytes = body;
+    } else if (Array.isArray(body)) {
+      bytes = new Uint8Array(body);
+    } else if (this.shouldDecodeBody(body)) {
+      bytes = this.convertToUint8Array(body);
+    }
+
+    if (!bytes) return null;
+
+    try {
+      return decoder(bytes);
+    } catch (error) {
+      gameLogger.warn("日志解析BON失败:", error.message);
+      return null;
+    }
+  }
+
+  /** 重连（防重复连接版本） */
+  reconnect() {
     // 防止重复重连
     if (this.isReconnecting) {
       wsLogger.debug("重连已在进行中，跳过此次重连请求");
@@ -470,18 +493,61 @@
     }, 1000);
     this.reconnectTimer = reconnectTimer;
   }
- 
-   /** 断开连接 */
-   disconnect() {
+
+  /** 断开连接 */
+  disconnect() {
     const socket = this.socket;
     this.socket = null;
     this.connected = false;
     this._clearTimers();
     socket?.close();
   }
- 
-   /** 发送消息 */
-   send(cmd, params = {}, options = {}) {
+
+  /**
+   * 等待下一条指定命令的推送。
+   * 战场服务器的部分响应（如 war_getteaminforesp）以推送形式到达且不回显请求 seq，
+   * 无法用 sendWithPromise 匹配，需按命令名捕获下一条推送。
+   * @param {string} cmd 响应命令名（如 "war_getteaminforesp"）
+   * @param {number} timeoutMs 超时毫秒
+   * @returns {Promise<object>} 推送负载（rawData / decodedBody / body）
+   */
+  waitForPush(cmd, timeoutMs = 8000) {
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        cmd,
+        resolve: null,
+        timer: null,
+      };
+      waiter.resolve = (payload) => {
+        clearTimeout(waiter.timer);
+        resolve(payload);
+      };
+      waiter.timer = setTimeout(() => {
+        this._pushWaiters = this._pushWaiters.filter((w) => w !== waiter);
+        reject(new Error(`推送超时: ${cmd} (${timeoutMs}ms)`));
+      }, timeoutMs);
+      this._pushWaiters.push(waiter);
+    });
+  }
+
+  /** 将解析后的包分发给按命令名等待的私有等待者 */
+  _notifyPushWaiters(packet) {
+    const cmd = packet?.cmd;
+    if (!cmd || !this._pushWaiters?.length) return;
+    const hit = this._pushWaiters.find((w) => w.cmd === cmd);
+    if (!hit) return;
+    this._pushWaiters = this._pushWaiters.filter((w) => w !== hit);
+    const body =
+      packet.rawData !== undefined
+        ? packet.rawData
+        : packet.decodedBody !== undefined
+          ? packet.decodedBody
+          : packet.body;
+    hit.resolve(body ?? packet);
+  }
+
+  /** 发送消息 */
+  send(cmd, params = {}, options = {}) {
     if (!this.connected) {
       wsLogger.warn(`WebSocket 未连接，消息已入队: ${cmd}`);
       // 防止频繁重连
@@ -519,12 +585,18 @@
     this.sendQueue.push(task);
     return task;
   }
- 
-   /** Promise 版发送 */
-   sendWithPromise(cmd, params = {}, timeoutMs = 5000) {
+
+  /**
+   * Queue a command and wait for its sequence or legacy command response.
+   * @param {string} cmd Registered protocol command.
+   * @param {object} params Command body.
+   * @param {number} timeoutMs Timeout measured from queue admission, in milliseconds.
+   * @returns {Promise<unknown>} Response body; rejects on a server error or timeout.
+   */
+  sendWithPromise(cmd, params = {}, timeoutMs = 5000) {
     return new Promise((resolve, reject) => {
       if (!this.connected || this.socket?.readyState !== WebSocket.OPEN) {
-        return reject(new Error("WebSocket连接已断开，请重新执行任务"));
+        return reject(new Error("WebSocket 连接已关闭"));
       }
       // 为此请求生成唯一的seq值
       const requestSeq = ++this.seq;
@@ -549,17 +621,17 @@
       }
     });
   }
- 
-   /** 发送心跳 */
-   sendHeartbeat() {
-     wsLogger.verbose('发送心跳消息')
-     this.send("heart_beat", {}, { respKey: "war_ping" })
-   }
- 
-   /** =============== 内部方法 =============== */
- 
-   /** 设置心跳 */
-   _setupHeartbeat() {
+
+  /** 发送心跳 */
+  sendHeartbeat() {
+    wsLogger.verbose("发送心跳消息");
+    this.send("heart_beat", {}, { respKey: "war_ping" });
+  }
+
+  /** =============== 内部方法 =============== */
+
+  /** 设置心跳 */
+  _setupHeartbeat() {
     // 延迟3秒后开始发送第一个心跳，避免连接刚建立就发送
     const socket = this.socket;
     const heartbeatTimer = setTimeout(() => {
@@ -589,9 +661,9 @@
       }
     }, this.heartbeatInterval);
   }
- 
-   /** 队列处理循环 */
-   _processQueueLoop() {
+
+  /** 队列处理循环 */
+  _processQueueLoop() {
     if (this.sendQueueTimer) clearInterval(this.sendQueueTimer);
 
     const socket = this.socket;
@@ -691,130 +763,100 @@
       }
     }, 50);
   }
- 
-   /** 处理 Promise 响应 */
-   _handlePromiseResponse(packet) {
-    const responseId = packet.resp ?? packet?._raw?.resp;
-    const hasSequence = typeof responseId === "number" ||
+
+  /** 处理 Promise 响应 */
+  _handlePromiseResponse(packet) {
+    // 有编号的旧响应不能通过命令名匹配到另一笔请求，包括未关联的 resp=0。
+    const responseId = packet.resp;
+    const hasSequence =
+      typeof responseId === "number" ||
       (typeof responseId === "string" && /^\d+$/.test(responseId));
     if (hasSequence && !this.promises[responseId]) return;
 
-     // 优先使用resp字段进行响应匹配（新的正确方式）
-     if (responseId !== undefined && this.promises[responseId]) {
-       const promiseData = this.promises[responseId]
-       clearTimeout(promiseData.timer);
-       delete this.promises[responseId]
- 
-       // 获取响应数据，优先使用 rawData（ProtoMsg 自动解码），然后 decodedBody（手动解码），最后 body
-       const responseBody = packet.rawData !== undefined ? packet.rawData :
-         packet.decodedBody !== undefined ? packet.decodedBody :
-           packet.body
- 
-       if (packet.code === 0 || packet.code === undefined) {
-         promiseData.resolve(responseBody || packet)
-       } else {
-         promiseData.reject(new Error(`服务器错误: ${packet.code} - ${packet.hint || '未知错误'}`))
-       }
-       return
-     }
- 
-     // 兼容旧的基于cmd名称的匹配方式（保留为向后兼容）
-     const cmd = packet.cmd
-     if (!cmd) return
-     const respCmdKey = typeof cmd === 'string' ? cmd.toLowerCase() : cmd
- 
-     // 命令到响应的映射 - 处理响应命令与原始命令不匹配的情况
-     const responseToCommandMap = {
-       // 1:1 响应映射（优先级高）
-       'fight_startpvpresp': 'fight_startpvp',
-       'activity_getresp': 'activity_get',
-       'collection_goodslistresp': 'collection_goodslist',
-       'collection_claimfreerewardresp': 'collection_claimfreereward',
-       'legion_getarearankresp': 'legion_getarearank',
-       'legionwar_getgoldmonthwarrankresp': 'legionwar_getgoldmonthwarrank',
-       'nightmare_getroleinforesp': 'nightmare_getroleinfo',
-       'studyresp': 'study_startgame',
-       'role_getroleinforesp': 'role_getroleinfo',
-       'hero_recruitresp': 'hero_recruit',
-       'friend_batchresp': 'friend_batch',
-       'system_claimhanguprewardresp': 'system_claimhangupreward',
-       'item_openboxresp': ['item_openbox', 'item_batchclaimboxpointreward'],
-       'bottlehelper_claimresp': 'bottlehelper_claim',
-       'bottlehelper_startresp': 'bottlehelper_start',
-       'bottlehelper_stopresp': 'bottlehelper_stop',
-       'legion_signinresp': 'legion_signin',
-       'fight_startbossresp': 'fight_startboss',
-       'fight_startlegionbossresp': 'fight_startlegionboss',
-       'fight_startareaarenaresp': 'fight_startareaarena',
-       'arena_startarearesp': 'arena_startarea',
-       'arena_getareatargetresp': 'arena_getareatarget',
-       'arena_getarearankresp': 'arena_getarearank',
-       'presetteam_saveteamresp': 'presetteam_saveteam',
-       'presetteam_getinforesp': 'presetteam_getinfo',
-       'mail_claimallattachmentresp': 'mail_claimallattachment',
-       'store_buyresp': 'store_purchase',
-       'system_getdatabundleverresp': 'system_getdatabundlever',
-       'tower_claimrewardresp': 'tower_claimreward',
-       'fight_starttowerresp': 'fight_starttower',
-       'evotowerinforesp': 'evotower_getinfo',
-       'evotower_fightresp': 'evotower_fight',
-     'item_openpackresp': 'item_openpack',
-       'matchteam_getroleteaminforesp': 'matchteam_getroleteaminfo',
-       'discount_getdiscountinforesp': 'discount_getdiscountinfo',
-       // 升星相关响应映射
-       'hero_syntheticresp': 'hero_synthetic',
-       'hero_heroupgradestarresp': 'hero_heroupgradestar',
-       'book_upgraderesp': 'book_upgrade',
-       'book_claimpointrewardresp': 'book_claimpointreward',
-       // 军团信息
-       'legion_getinforesp': 'legion_getinfo',
-       'legion_getinforresp': 'legion_getinfo',
-       'role_gettargetteamresp': 'role_gettargetteam',
-       'activity_warorderclaimresp': 'activity_recyclewarorderrewardclaim',
-       'arena_getarearankresp': 'arena_getarearank',
-       // 特殊响应映射 - 有些命令有独立响应，有些用同步响应
-       'task_claimdailyrewardresp': 'task_claimdailyreward',
-       'task_claimweekrewardresp': 'task_claimweekreward',
- 
-       // 同步响应映射（优先级低）
-       'syncresp': ['system_mysharecallback', 'task_claimdailypoint', 'hero_synthetic'],
-       'syncrewardresp': ['system_buygold', 'discount_claimreward', 'card_claimreward',
-         'artifact_lottery', 'genie_sweep', 'genie_buysweep', 'system_signinreward', 'dungeon_selecthero']
-     }
- 
-     // 获取原始命令名（支持一对一和一对多映射）
-     // 使用小写进行映射匹配，兼容服务端大小写差异
-     let originalCmds = responseToCommandMap[respCmdKey]
-     if (!originalCmds) {
-       originalCmds = [respCmdKey] // 如果没有映射，使用响应命令本身（小写）
-     } else if (typeof originalCmds === 'string') {
-       originalCmds = [originalCmds] // 转换为数组
-     }
- 
-     // 查找对应的 Promise - 遍历所有等待中的 Promise（向后兼容）
-     for (const [requestId, promiseData] of Object.entries(this.promises)) {
-       // 检查 Promise 是否匹配当前响应的任一原始命令
-       if (originalCmds.includes(promiseData.originalCmd)) {
-         clearTimeout(promiseData.timer);
-         delete this.promises[requestId]
- 
-         // 获取响应数据，优先使用 rawData（ProtoMsg 自动解码），然后 decodedBody（手动解码），最后 body
-         const responseBody = packet.rawData !== undefined ? packet.rawData :
-           packet.decodedBody !== undefined ? packet.decodedBody :
-             packet.body
- 
-         if (packet.code === 0 || packet.code === undefined) {
-           promiseData.resolve(responseBody || packet)
-         } else {
-           promiseData.reject(new Error(`服务器错误: ${packet.code} - ${packet.hint || '未知错误'}`))
-         }
-         break
-       }
-     }
-   }
- 
-   /** 清理定时器 */
-   _clearTimers() {
+    // 优先使用resp字段进行响应匹配（新的正确方式）
+    if (packet.resp !== undefined && this.promises[packet.resp]) {
+      const promiseData = this.promises[packet.resp];
+      clearTimeout(promiseData.timer);
+      delete this.promises[packet.resp];
+
+      // 获取响应数据，优先使用 rawData（ProtoMsg 自动解码），然后 decodedBody（手动解码），最后 body
+      const responseBody =
+        packet.rawData !== undefined
+          ? packet.rawData
+          : packet.decodedBody !== undefined
+            ? packet.decodedBody
+            : packet.body;
+
+      if (packet.code === 0 || packet.code === undefined) {
+        promiseData.resolve(responseBody || packet);
+      } else {
+        promiseData.reject(
+          new Error(
+            `服务器错误: ${packet.code} - ${packet.hint || "未知错误"}`,
+          ),
+        );
+      }
+      return;
+    }
+
+    // 基于 cmd 名称的匹配方式
+    const cmd =
+      packet.cmd || (typeof responseId === "string" ? responseId : undefined);
+    if (!cmd) return;
+    const respCmdKey =
+      typeof cmd === "string" ? cmd.toLowerCase() : String(cmd);
+    const strippedCmdKey = respCmdKey.endsWith("resp")
+      ? respCmdKey.slice(0, -4)
+      : respCmdKey;
+
+    // 查找对应的 Promise - 遍历等待中的 Promise
+    for (const [requestId, promiseData] of Object.entries(this.promises)) {
+      const origCmd = promiseData.originalCmd?.toLowerCase();
+      if (
+        origCmd === respCmdKey ||
+        origCmd === strippedCmdKey ||
+        `${origCmd}resp` === respCmdKey
+      ) {
+        clearTimeout(promiseData.timer);
+        delete this.promises[requestId];
+
+        const responseBody =
+          packet.rawData !== undefined
+            ? packet.rawData
+            : packet.decodedBody !== undefined
+              ? packet.decodedBody
+              : packet.body;
+
+        if (packet.code === 0 || packet.code === undefined) {
+          promiseData.resolve(responseBody || packet);
+        } else {
+          promiseData.reject(
+            new Error(
+              `服务器错误: ${packet.code} - ${packet.hint || "未知错误"}`,
+            ),
+          );
+        }
+        break;
+      }
+    }
+  }
+
+  /**
+   * Cancel an outstanding request and remove its unsent queue entry.
+   * @param {number} requestSeq Current request key, remapped to the wire sequence on send.
+   * @param {Error} error Failure delivered to the caller; sent packets cannot be recalled.
+   */
+  _rejectRequest(requestSeq, error) {
+    const request = this.promises[requestSeq];
+    if (!request) return;
+    clearTimeout(request.timer);
+    delete this.promises[requestSeq];
+    this.sendQueue = this.sendQueue.filter((task) => task.seq !== requestSeq);
+    request.reject(error);
+  }
+
+  /** Cancel the connection's requests, unsent commands and scheduled callbacks. */
+  _clearTimers() {
     this.sendQueue.length = 0;
     for (const field of [
       "heartbeatStartTimer",
@@ -830,7 +872,7 @@
     for (const [id, request] of Object.entries(this.promises)) {
       clearTimeout(request.timer);
       delete this.promises[id];
-      request.reject(new Error("WebSocket连接已断开，请重新执行任务"));
+      request.reject(new Error("WebSocket 连接已关闭"));
     }
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
@@ -841,16 +883,7 @@
       this.sendQueueTimer = null;
     }
   }
-
-  _rejectRequest(requestSeq, error) {
-    const request = this.promises[requestSeq];
-    if (!request) return;
-    clearTimeout(request.timer);
-    delete this.promises[requestSeq];
-    this.sendQueue = this.sendQueue.filter((task) => task.request !== request);
-    request.reject(error);
-  }
 }
- 
- /** 默认导出 */
-export default XyzwLegionWarWebSocketClient
+
+/** 默认导出 */
+export default XyzwLegionWarWebSocketClient;

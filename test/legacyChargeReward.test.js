@@ -56,3 +56,31 @@ test('批量入口统计跳过并释放连接，保持定时传入账号范围',
   assert.equal(released,1);assert.deepEqual(closed,['a']);
   assert.ok(logs.some(log=>log.message.includes('跳过 1 个')));
 });
+
+test('三档奖励逐一判断，前两档已领仍领取第三档，跳过基础档',async()=>{
+ for(const preclaimed of [[2,3],[],[2,3,4]]) {
+  const c={...config,LegacyChargeReward:{1:{id:1,vipSpend:0},2:{id:2,vipSpend:3000},3:{id:3,vipSpend:8800},4:{id:4,vipSpend:15800}}};
+  const map=Object.fromEntries(preclaimed.map(id=>[id,true]));const writes=[];
+  const send=async(cmd,p)=>{
+   if(cmd==='legacy_getinfo')return {roleLegacy:{scheduleId:1,chargeClaimedMap:{...map}}};
+   if(cmd==='role_getroleinfo')return {role:{...role(),statistics:{'legacy:charge':15800}}};
+   writes.push(p.id);map[p.id]=true;return {reward:[{itemId:37007,value:p.id}]};
+  };
+  const result=await claimLegacyChargeReward({send,loadConfig:async()=>c,serverTime:()=>now});
+  assert.deepEqual(writes,[2,3,4].filter(id=>!preclaimed.includes(id)));
+  assert.deepEqual(result.claimedIds,writes);
+  assert.equal(result.status,writes.length?'completed':'skipped');
+ }
+});
+
+test('达标第二档只领取第二档，后续档不满足条件不请求',async()=>{
+ const c={...config,LegacyChargeReward:{2:{id:2,vipSpend:3000},3:{id:3,vipSpend:8800},4:{id:4,vipSpend:15800}}};
+ const claimed={2:true},writes=[];
+ const send=async(cmd,p)=>{
+  if(cmd==='legacy_getinfo')return {roleLegacy:{scheduleId:1,chargeClaimedMap:{...claimed}}};
+  if(cmd==='role_getroleinfo')return {role:{...role(),statistics:{'legacy:charge':8800}}};
+  writes.push(p.id);claimed[p.id]=true;return {};
+ };
+ await claimLegacyChargeReward({send,loadConfig:async()=>c,serverTime:()=>now});
+ assert.deepEqual(writes,[3]);
+});

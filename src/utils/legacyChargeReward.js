@@ -26,21 +26,41 @@ export function legacyChargeEligibility(config, role, legacy, now, id = 2) {
   return current >= definition.vipSpend ? {canClaim:true} : {canClaim:false,reason:`本季充值进度未达到特权档位（${current}/${definition.vipSpend}）`};
 }
 
-export async function claimLegacyChargeReward({send,loadConfig,serverTime,stopped=()=>false}) {
+export async function claimLegacyChargeReward({send,loadConfig,serverTime,stopped=()=>false,onTier=()=>{}}) {
   const config = await loadConfig(send);
-  const legacy = body(await send('legacy_getinfo',{}))?.roleLegacy;
+  let legacy = body(await send('legacy_getinfo',{}))?.roleLegacy;
   const role = body(await send('role_getroleinfo',{}))?.role;
-  const eligibility = legacyChargeEligibility(config,role,legacy,serverTime());
-  if (!eligibility.canClaim) return {status:'skipped',reason:eligibility.reason};
-  if (stopped()) return {status:'stopped'};
-  let response, failure;
-  try { response = await send('legacy_claimchargereward',{id:2}); } catch(error) {failure=error;}
-  // The client refreshes roleLegacy after updates. Never resend an uncertain write.
-  const after = body(await send('legacy_getinfo',{}))?.roleLegacy;
-  if (!after || after.scheduleId !== legacy.scheduleId) throw new Error('领取后功法赛季状态无法确认');
-  if (get(after.chargeClaimedMap,2) !== true) {
-    if (failure) throw failure;
-    throw new Error('领取后记录未确认，请稍后查询');
+  // Official privilege UI skips the zero-spend base entry and exposes each reward tier.
+  const tiers = Object.values(config?.LegacyChargeReward || {})
+    .filter(row => row.privilegeReward || row.vipSpend > 0)
+    .sort((a,b)=>a.id-b.id);
+  if (!tiers.length || tiers.some(row=>!Number.isInteger(row.id) || row.id<=0) ||
+      new Set(tiers.map(row=>row.id)).size!==tiers.length) throw new Error('特权功法档位配置无效');
+  const claimedIds = [], responses = [], reasons = [];
+  let confirmedAfterError = false;
+  for (const tier of tiers) {
+    if (stopped()) return {status:'stopped',claimedIds};
+    const eligibility = legacyChargeEligibility(config,role,legacy,serverTime(),tier.id);
+    if (!eligibility.canClaim) {
+      reasons.push(`${tier.name || `档位${tier.id}`}：${eligibility.reason}`);
+      onTier({id:tier.id,name:tier.name,status:'skipped',reason:eligibility.reason});
+      continue;
+    }
+    let response, failure;
+    try { response = await send('legacy_claimchargereward',{id:tier.id}); } catch(error) {failure=error;}
+    const after = body(await send('legacy_getinfo',{}))?.roleLegacy;
+    if (!after || after.scheduleId !== legacy.scheduleId) throw new Error(`档位${tier.id}领取后功法赛季状态无法确认`);
+    if (get(after.chargeClaimedMap,tier.id) !== true) {
+      if (failure) throw new Error(`档位${tier.id}领取未确认：${failure.message}`);
+      throw new Error(`档位${tier.id}领取后记录未确认，请稍后查询`);
+    }
+    legacy = after;
+    claimedIds.push(tier.id);
+    if (response) responses.push(body(response));
+    confirmedAfterError ||= !!failure;
+    onTier({id:tier.id,name:tier.name,status:'completed'});
   }
-  return {status:'completed',response,confirmedAfterError:!!failure};
+  if (!claimedIds.length) return {status:'skipped',reason:reasons.join('；'),claimedIds};
+  const reward = responses.flatMap(response=>Array.isArray(response?.reward)?response.reward:[]);
+  return {status:'completed',claimedIds,confirmedAfterError,response:{reward,role:responses.at(-1)?.role}};
 }

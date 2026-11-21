@@ -76,6 +76,19 @@
               </n-button>
               <n-button
                 size="small"
+                type="default"
+                @click="resetViewport"
+                style="margin-right: 8px"
+              >
+                <template #icon>
+                  <n-icon>
+                    <LocateOutline />
+                  </n-icon>
+                </template>
+                聚焦中心
+              </n-button>
+              <n-button
+                size="small"
                 type="info"
                 :loading="exporting"
                 @click="exportImage"
@@ -92,19 +105,19 @@
           </div>
         </div>
 
-        <div class="no-export" style="padding: 12px 16px">
-          <p>手动选择盟友后确认生成：蓝色为盟友，红色为敌对；未选择的俱乐部均视为敌对。</p>
-          <n-select v-model:value="draftAllyIds" multiple filterable
-            :options="sortedLegions.map(legion => ({ label: `[${legion.serverId}]${legion.name}`, value: String(legion.id) }))"
-            placeholder="请选择盟友俱乐部" :disabled="!validData" />
-          <n-button style="margin-top: 8px" type="primary" :disabled="!validData" @click="confirmAllies">确认敌我并重新生成</n-button>
-        </div>
         <!-- 主要内容区：地图 + 侧边栏 -->
         <div class="main-content-layout">
           <!-- 地图区域 -->
           <div class="map-container-wrapper">
             <div class="map-container">
-              <canvas ref="legionWarMapDom" class="mapCanvas"></canvas>
+              <canvas
+                ref="legionWarMapDom"
+                class="mapCanvas"
+                @mousedown="handleMouseDown"
+                @mousemove="handleMouseMove"
+                @mouseup="handleMouseUp"
+                @mouseleave="handleMouseUp"
+              ></canvas>
             </div>
 
             <div v-if="!validData" class="empty-state-overlay">
@@ -143,7 +156,7 @@
                     <span class="group-count">({{ group.length }})</span>
                   </div>
                   <div
-                    v-for="(legion, index) in group"
+                    v-for="legion in group"
                     :key="legion.id"
                     class="legion-item"
                     :style="{ borderLeftColor: legion.color }"
@@ -172,25 +185,33 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
-import { useMessage } from "naive-ui";
-import { useTokenStore } from "@/stores/tokenStore";
-import { useLegionWarStore } from "@/stores/legionWarStore";
-import { extractValidData, HexGraph, roadPointList } from "@/utils/legionWar";
-import { getCurrentTimeByFormat } from "@/utils/DateTimeUtils";
 import {
+  ImageOutline,
+  LocateOutline,
   LogInOutline,
   MapOutline,
   RefreshOutline,
-  ImageOutline,
 } from "@vicons/ionicons5";
-import { allianceincludes } from "@/utils/clubWarrankUtils";
-import { isLegionWarAccessible } from "@/utils/clubBattleUtils";
-import { storeToRefs } from "pinia";
 import html2canvas from "html2canvas";
+import { useMessage } from "naive-ui";
+import { storeToRefs } from "pinia";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { useLegionWarStore } from "@/stores/legionWarStore";
+import { useTokenStore } from "@/stores/tokenStore";
+import { isLegionWarAccessible } from "@/utils/clubBattleUtils";
+import { allianceincludes } from "@/utils/clubWarrankUtils";
+import {
+  BuildingType,
+  CORE_PAN_CENTER,
+  CORE_SURROUNDING_POINTS,
+  HexGraph,
+  roadPointList,
+  typeBg,
+  typeLabel,
+} from "@/utils/legionWar";
 
 const message = useMessage();
-const tokenStore = useTokenStore();
+useTokenStore();
 const legionWarStore = useLegionWarStore();
 
 const isAccessible = ref(isLegionWarAccessible());
@@ -210,22 +231,52 @@ const legionWarMapDom = ref(null);
 let ctx = null;
 let resizeHandler = null;
 
-const isJoined = isEntireBattlefield; // alias for compatibility if needed, but we use isEntireBattlefield in template
+// 视口平移与缩放状态
+const panOffset = ref({ x: 0, y: 0 });
+const zoomScale = ref(1);
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+
+/**
+ * 视角复位至中央核心战场
+ */
+const resetViewport = () => {
+  panOffset.value = { x: 0, y: 0 };
+  zoomScale.value = 1;
+  drawCanvasContent();
+};
+
+const handleMouseDown = (e) => {
+  if (e.button !== 0) return; // 仅左键拖拽
+  isDragging = true;
+  dragStartX = e.clientX - panOffset.value.x;
+  dragStartY = e.clientY - panOffset.value.y;
+};
+
+const handleMouseMove = (e) => {
+  if (!isDragging) return;
+  panOffset.value = {
+    x: e.clientX - dragStartX,
+    y: e.clientY - dragStartY,
+  };
+  drawCanvasContent();
+};
+
+const handleMouseUp = () => {
+  isDragging = false;
+};
+
+const handleWheel = (e) => {
+  e.preventDefault();
+  const delta = e.deltaY < 0 ? 1.1 : 0.9;
+  const newScale = Math.min(Math.max(0.5, zoomScale.value * delta), 3.0);
+  zoomScale.value = Number(newScale.toFixed(2));
+  drawCanvasContent();
+};
+
 
 const exporting = ref(false);
-const draftAllyIds = ref([]);
-const confirmedAllyIds = ref(null);
-const factionColor = (id) => confirmedAllyIds.value === null ? null
-  : confirmedAllyIds.value.includes(String(id)) ? "#2080f0" : "#d03050";
-const confirmAllies = () => {
-  confirmedAllyIds.value = [...draftAllyIds.value];
-  resizeAndRedraw();
-  message.success("已按确认的敌我关系重新生成地图");
-};
-watch(battlefieldId, () => {
-  draftAllyIds.value = [];
-  confirmedAllyIds.value = null;
-});
 
 const exportImage = async () => {
   const element = document.querySelector(
@@ -279,9 +330,8 @@ const sortedLegions = computed(() => {
     return {
       ...legion,
       announcement: detail.announcement || "",
-      alliance: confirmedAllyIds.value === null ? alliance : (factionColor(legion.id) === "#2080f0" ? "盟友（蓝色）" : "敌对（红色）"),
-      color: factionColor(legion.id) || allianceColors[alliance],
-      redCount: redCount,
+      alliance,
+      redCount,
     };
   });
 
@@ -295,7 +345,7 @@ const sortedLegions = computed(() => {
       return b.power - a.power;
     }
     // 3. ID 升序
-    return parseInt(a.id) - parseInt(b.id);
+    return Number.parseInt(a.id) - Number.parseInt(b.id);
   });
 });
 
@@ -353,9 +403,7 @@ const allianceGroups = computed(() => {
   // 分配俱乐部到对应分组
   sortedLegions.value.forEach((legion) => {
     const alliance = legion.alliance;
-    if (confirmedAllyIds.value !== null) {
-      (groups[alliance] ||= []).push(legion);
-    } else if (groups[alliance]) {
+    if (groups[alliance]) {
       groups[alliance].push(legion);
     } else {
       // 如果有其他未定义的类型，归入未知
@@ -375,52 +423,10 @@ let hexHeight = Math.sqrt(3) * hexSize;
 const arr = Array.from({ length: 41 }, () =>
   Array.from({ length: 41 }, () => 0),
 );
-let leftMaxPoint = [0, 0];
-
-// 颜色映射
-const typeBg = (type) => {
-  switch (type) {
-    case 1:
-      return "#4477CE"; // 30分 - 小 - 蓝色
-    case 2:
-      return "#D835D8"; // 50分 - 中 - 粉紫色
-    case 3:
-      return "#F9B500"; // 80分 - 大 - 金色
-    case 4:
-      return "#D21E1E"; // 大本营 - 本 - 红色
-    case 5:
-      return "#2B2B2B"; // 100分 - 城 - 深灰色
-    case 6:
-      return "#000000"; // 核心 - 黑
-    case 9:
-      return "#4477CE"; // 道路 - 蓝色
-    default:
-      return "#cccccc";
-  }
-};
-
-// 标签映射
-const typeLabel = (type) => {
-  switch (type) {
-    case 1:
-      return "小";
-    case 2:
-      return "中";
-    case 3:
-      return "大";
-    case 4:
-      return "本";
-    case 5:
-      return "城";
-    case 6:
-      return "核";
-    default:
-      return "";
-  }
-};
+const leftMaxPoint = [0, 0];
 
 // 绘制六边形
-const drawHexagon = (x, y, color, type) => {
+const drawHexagon = (x, y, color) => {
   ctx.beginPath();
   for (let i = 0; i < 6; i++) {
     const angle = ((2 * Math.PI) / 6) * i;
@@ -466,58 +472,20 @@ const drawText = (x, y, text, color = "#fff", fontSize = 10) => {
 const drawCanvasContent = () => {
   if (!ctx) return;
 
+  const canvasWidth = ctx.canvas.width / dpr;
+  const canvasHeight = ctx.canvas.height / dpr;
+
   // 清空画布
-  ctx.clearRect(0, 0, ctx.canvas.width / dpr, ctx.canvas.height / dpr);
+  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
   // 重置 arr 数组
   arr.forEach((row) => row.fill(0));
 
   // 获取图结构实例
-  let graph = HexGraph.getInstance();
+  const graph = HexGraph.getInstance();
   graph.removeAllNode();
 
-  // 计算需要绘制的行列数以铺满画布
-  const canvasWidth = ctx.canvas.width / dpr;
-  const canvasHeight = ctx.canvas.height / dpr;
-  const horizontalStep = hexWidth * 0.75 + gap;
-  const verticalStep = hexHeight + gap;
-
-  const maxCols = Math.ceil(canvasWidth / horizontalStep) + 2;
-  const maxRows = Math.ceil(canvasHeight / verticalStep) + 2;
-
-  // 绘制背景网格
-  ctx.strokeStyle = "#e0e0e0"; // 浅灰色边框
-  ctx.lineWidth = 1;
-
-  for (let row = 0; row < maxRows; row++) {
-    for (let col = 0; col < maxCols; col++) {
-      // 背景网格从第0行开始绘制，铺满全屏
-      const x = col * (hexWidth * 0.75) + hexSize + gap * col;
-      const y =
-        row * hexHeight + (col % 2 === 1 ? hexHeight / 2 : 0) + gap * row;
-
-      ctx.beginPath();
-      for (let i = 0; i < 6; i++) {
-        const angle = ((2 * Math.PI) / 6) * i;
-        const px = x + hexSize * Math.cos(angle);
-        const py = y + hexSize * Math.sin(angle);
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-      ctx.stroke();
-
-      // 绘制坐标
-      //drawText(x, y, `${col},${row}`, "#e0e0e0", 8);
-    }
-  }
-
-  // 平移画布以居中显示有效区域
-  // 假设有效区域左上角偏移约为 (-2, -3) 个六边形
-  ctx.save();
-  ctx.translate(2 * (hexWidth * 0.75 + gap), -1 * (hexHeight + gap));
-
   // 使用静态数据作为基础，结合 validData 处理颜色和状态
-  // 1. 准备数据
   // 注意：即使 validData 为 null，也应该填充 graph，以显示基础地图
   graph.addNodeList(
     roadPointList.map((item) => {
@@ -528,8 +496,8 @@ const drawCanvasContent = () => {
 
       return {
         id: item.id,
-        type: type,
-        belongsLegionId: belongsLegionId,
+        type,
+        belongsLegionId,
         hP: realTimeNode ? realTimeNode.hP : 0,
         maxHP: realTimeNode ? realTimeNode.maxHP : 0,
         point: realTimeNode ? realTimeNode.point : 0,
@@ -538,117 +506,159 @@ const drawCanvasContent = () => {
     }),
   );
 
-  // 2. 绘制所有网格节点
-  // 使用 graph.getAllNodes() 获取 graph 中的节点，如果为空则使用 roadPointList
-  const graphNodes = graph.getAllNodes();
-  const nodesToDraw =
-    graphNodes.length > 0
-      ? graphNodes
-      : roadPointList.map((item) => {
-          // 确保静态数据也有正确的属性结构
-          return {
-            ...item,
-            // 如果是静态数据，确保这些字段存在
-            type: item.type,
-            belongsLegionId: -1,
-          };
-        });
+  // 计算核心 20_17 中心坐标，保证中间作战区自适应居中于画布
+  const coreCol = 20;
+  const coreRow = 17;
+  const coreX = coreCol * (hexWidth * 0.75) + hexSize + gap * coreCol;
+  const coreY =
+    coreRow * hexHeight + (coreCol % 2 === 1 ? hexHeight / 2 : 0) + gap * coreRow;
 
-  nodesToDraw.forEach((node) => {
-    const [colStr, rowStr] = node.id.split("_");
-    const col = parseInt(colStr);
-    const row = parseInt(rowStr);
+  const baseOffsetX = canvasWidth / 2 - coreX;
+  const baseOffsetY = canvasHeight / 2 - coreY;
 
-    if (!isNaN(col) && !isNaN(row)) {
-      const x = col * (hexWidth * 0.75) + hexSize + gap * col;
-      const y =
-        row * hexHeight + (col % 2 === 1 ? hexHeight / 2 : 0) + gap * row;
+  // 使用 save / restore 确保变换矩阵不泄露，彻底杜绝数据漂移
+  ctx.save();
+  try {
+    const totalOffsetX = baseOffsetX + panOffset.value.x;
+    const totalOffsetY = baseOffsetY + panOffset.value.y;
+    ctx.translate(totalOffsetX, totalOffsetY);
 
-      // 决定背景色：始终使用类型颜色，不依赖归属情况
-      let bgColor = typeBg(node.type);
+    if (zoomScale.value !== 1) {
+      ctx.translate(coreX, coreY);
+      ctx.scale(zoomScale.value, zoomScale.value);
+      ctx.translate(-coreX, -coreY);
+    }
 
-      // 核心周围特殊处理
-      const coreSurroundingPoints = [
-        "19_16",
-        "19_17",
-        "20_16",
-        "20_18",
-        "21_16",
-        "21_17",
-      ];
-      if (coreSurroundingPoints.includes(node.id)) {
-        bgColor = "#cccccc";
-      }
+    // 1. 绘制背景网格
+    ctx.strokeStyle = "#ebebeb";
+    ctx.lineWidth = 1;
 
-      // 核心始终显示黑色 (根据类型6判断，不依赖归属)
-      if (node.type === 6) {
-        bgColor = "#000000";
-      }
+    const minCol = -3;
+    const maxCol = 43;
+    const minRow = -3;
+    const maxRow = 35;
 
-      if (validData.value?.legionInfo?.[node.belongsLegionId]) {
-        bgColor = factionColor(node.belongsLegionId) || bgColor;
-      }
-      drawHexagon(x, y, bgColor, node.type);
+    for (let row = minRow; row <= maxRow; row++) {
+      for (let col = minCol; col <= maxCol; col++) {
+        const x = col * (hexWidth * 0.75) + hexSize + gap * col;
+        const y =
+          row * hexHeight + (col % 2 === 1 ? hexHeight / 2 : 0) + gap * row;
 
-      // 绘制标签
-      if (node.type !== 9) {
-        const label = typeLabel(node.type);
-        drawText(x, y, label, "#fff", 12);
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = ((2 * Math.PI) / 6) * i;
+          const px = x + hexSize * Math.cos(angle);
+          const py = y + hexSize * Math.sin(angle);
+          i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.stroke();
       }
     }
-  });
 
-  // 绘制俱乐部名称 (独立逻辑)
-  if (validData.value && validData.value.legionInfo) {
-    Object.values(validData.value.legionInfo).forEach((legion) => {
-      // 必须有大本营坐标
-      if (legion.strongholdId) {
-        const [colStr, rowStr] = legion.strongholdId.split("_");
-        const col = parseInt(colStr);
-        const row = parseInt(rowStr);
+    // 2. 绘制所有网格节点
+    const graphNodes = graph.getAllNodes();
+    const nodesToDraw =
+      graphNodes.length > 0
+        ? graphNodes
+        : roadPointList.map((item) => ({
+            ...item,
+            type: item.type,
+            belongsLegionId: -1,
+          }));
 
-        if (!isNaN(col) && !isNaN(row)) {
-          const x = col * (hexWidth * 0.75) + hexSize + gap * col;
-          const y =
-            row * hexHeight + (col % 2 === 1 ? hexHeight / 2 : 0) + gap * row;
+    nodesToDraw.forEach((node) => {
+      const [colStr, rowStr] = node.id.split("_");
+      const col = Number.parseInt(colStr);
+      const row = Number.parseInt(rowStr);
 
-          // 格式：【区服】名称，使用 legionInfo 中的 legionID
-          const sidStr = `【${legion.serverId}】`;
-          const nameStr = `${sidStr}${legion.name}`;
+      if (!Number.isNaN(+col) && !Number.isNaN(+row)) {
+        const x = col * (hexWidth * 0.75) + hexSize + gap * col;
+        const y =
+          row * hexHeight + (col % 2 === 1 ? hexHeight / 2 : 0) + gap * row;
 
-          // 获取联盟信息
-          const detail = legionDetails.value[legion.id] || {};
-          const alliance = detail.announcement
-            ? allianceincludes(detail.announcement)
-            : "未知联盟";
-          const allianceColor =
-            factionColor(legion.id) || allianceColors[alliance] || allianceColors["未知联盟"];
+        // 优先使用占领俱乐部的颜色，中立状态使用类型颜色
+        let bgColor = node.belongsLegionInfo?.color || typeBg(node.type);
 
-          // 绘制背景和文字
-          ctx.font = "bold 12px Microsoft Yahei";
-          const textWidth = ctx.measureText(nameStr).width;
-          const padding = 10;
-          const height = 24;
-          const bgX = x - textWidth / 2 - padding / 2;
-          const bgY = y - 32;
-          const bgWidth = textWidth + padding;
+        // 核心周围特殊处理：如果核心已被占领，核心周围跟随核心归属颜色；否则保持浅灰
+        if (CORE_SURROUNDING_POINTS.includes(node.id)) {
+          const coreNode = graph.getNodeByCoords(CORE_PAN_CENTER);
+          if (coreNode?.belongsLegionInfo?.color) {
+            bgColor = coreNode.belongsLegionInfo.color;
+          } else {
+            bgColor = "#cccccc";
+          }
+        }
 
-          ctx.fillStyle = allianceColor;
+        // 核心：已被占领显示公会色，未占领显示核心固有色
+        if (node.type === BuildingType.SaltPan) {
+          bgColor = node.belongsLegionInfo?.color || typeBg(BuildingType.SaltPan);
+        }
 
-          const r = 4;
-          ctx.beginPath();
-          ctx.moveTo(bgX + r, bgY);
-          ctx.arcTo(bgX + bgWidth, bgY, bgX + bgWidth, bgY + height, r);
-          ctx.arcTo(bgX + bgWidth, bgY + height, bgX, bgY + height, r);
-          ctx.arcTo(bgX, bgY + height, bgX, bgY, r);
-          ctx.arcTo(bgX, bgY, bgX + bgWidth, bgY, r);
-          ctx.closePath();
-          ctx.fill();
+        drawHexagon(x, y, bgColor, node.type);
 
-          drawText(x, bgY + height / 2, nameStr, "#fff", 12);
+        // 绘制标签
+        if (node.type !== BuildingType.Road) {
+          const label = typeLabel(node.type);
+          drawText(x, y, label, "#fff", 12);
         }
       }
     });
+
+    // 3. 绘制俱乐部名称 (独立逻辑)
+    if (validData.value && validData.value.legionInfo) {
+      Object.values(validData.value.legionInfo).forEach((legion) => {
+        // 必须有大本营坐标
+        if (legion.strongholdId) {
+          const [colStr, rowStr] = legion.strongholdId.split("_");
+          const col = Number.parseInt(colStr);
+          const row = Number.parseInt(rowStr);
+
+          if (!Number.isNaN(+col) && !Number.isNaN(+row)) {
+            const x = col * (hexWidth * 0.75) + hexSize + gap * col;
+            const y =
+              row * hexHeight + (col % 2 === 1 ? hexHeight / 2 : 0) + gap * row;
+
+            // 格式：【区服】名称，使用 legionInfo 中的 legionID
+            const sidStr = `【${legion.serverId}】`;
+            const nameStr = `${sidStr}${legion.name}`;
+
+            // 获取联盟信息
+            const detail = legionDetails.value[legion.id] || {};
+            const alliance = detail.announcement
+              ? allianceincludes(detail.announcement)
+              : "未知联盟";
+            const allianceColor =
+              allianceColors[alliance] || allianceColors["未知联盟"];
+
+            // 绘制背景和文字
+            ctx.font = "bold 12px Microsoft Yahei";
+            const textWidth = ctx.measureText(nameStr).width;
+            const padding = 10;
+            const height = 24;
+            const bgX = x - textWidth / 2 - padding / 2;
+            const bgY = y - 32;
+            const bgWidth = textWidth + padding;
+
+            ctx.fillStyle = allianceColor;
+
+            const r = 4;
+            ctx.beginPath();
+            ctx.moveTo(bgX + r, bgY);
+            ctx.arcTo(bgX + bgWidth, bgY, bgX + bgWidth, bgY + height, r);
+            ctx.arcTo(bgX + bgWidth, bgY + height, bgX, bgY + height, r);
+            ctx.arcTo(bgX, bgY + height, bgX, bgY, r);
+            ctx.arcTo(bgX, bgY, bgX + bgWidth, bgY, r);
+            ctx.closePath();
+            ctx.fill();
+
+            drawText(x, bgY + height / 2, nameStr, "#fff", 12);
+          }
+        }
+      });
+    }
+  } finally {
+    ctx.restore();
   }
 };
 const resizeAndRedraw = () => {
@@ -736,6 +746,11 @@ const initializeCanvas = async () => {
     window.addEventListener("resize", resizeHandler);
   }
 
+  if (!canvas.getAttribute("data-wheel-bound")) {
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    canvas.setAttribute("data-wheel-bound", "true");
+  }
+
   resizeAndRedraw();
   return true;
 };
@@ -758,6 +773,11 @@ watch(isAccessible, async (accessible) => {
 });
 
 onUnmounted(() => {
+  const canvas = legionWarMapDom.value;
+  if (canvas) {
+    canvas.removeEventListener("wheel", handleWheel);
+    canvas.removeAttribute("data-wheel-bound");
+  }
   if (resizeHandler) {
     window.removeEventListener("resize", resizeHandler);
     resizeHandler = null;
@@ -869,6 +889,11 @@ onUnmounted(() => {
             width: 100%;
             height: 100%;
             display: block;
+            cursor: grab;
+
+            &:active {
+              cursor: grabbing;
+            }
           }
         }
 

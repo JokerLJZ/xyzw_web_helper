@@ -469,6 +469,20 @@ export function registerDefaultCommands(reg) {
     .register("gacha_getinfo")
     .register("gacha_claimstagereward")
 
+    // 蟠桃战场：当前官方协议REQS中的独立战场指令
+    .register("payload_enterbf")
+    .register("payload_ping")
+    .register("payload_startbattle")
+    .register("payload_startmarch")
+    .register("payload_cancelmarch")
+    .register("payload_startchangecarpath")
+    .register("payload_startpickitem")
+    .register("payload_updateflag")
+    .register("payload_useitem")
+    .register("payload_useskill")
+    .register("payload_setbattleteam")
+    .register("payload_getteaminfo")
+
     // 功法
     .register("legacy_getinfo")
     .register("legacy_claimhangup")

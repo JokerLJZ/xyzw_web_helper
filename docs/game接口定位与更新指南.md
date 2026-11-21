@@ -201,3 +201,9 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 - 协议声明Legacy_GetInfoResp.roleLegacy为GDRoleLegacy，scheduleId默认0，chargeClaimedMap为空Map；LegacyCharge统计键为legacy:charge。客户端用ROLE.statistics和statisticsTime（秒）判断是否落在当前LegacyScheduleConf的开始（含）至结束（不含）区间，区间外充值数为0。白名单账号使用legacyWhiteListStart。scheduleId小于当前配置id或无开放赛季属于跨季。
 - 当前任务保留原来id=2的领取范围，不扩大到更高档位。档位门槛从当前统一配置读取，不硬编码3000。每个账号先查询legacy_getinfo和role_getroleinfo，核对服务器时间、赛季、领取记录及本季充值。查询不完整则失败；已领/不足/跨季正常跳过。领取成功或报错后再次查询legacy_getinfo，同赛季且明确布尔true才确认完成，不重发不确定写请求。200020仅为通用错误，不能单独推定已领取。
 - 此次没有使用真实账号查询或领取；当前在线返回体尚未获得，响应模型依据上述客户端协议声明，并对不完整快照拒绝执行。库存增量缺失不当作0，不靠奖励第一项推算领取成功。
+
+## 2026-11-21：特权功法改为覆盖全部三个奖励档位
+
+本次重新查询manifest仍为dataBundleVer 152261a3c8、game 57a46、协议757be。当前LegacyChargeReward包含基础档id=1（无奖励），三个奖励档id=2/3/4，门槛分别为3000/8800/15800，名称凝神香·一/二/三。官方LegacyPrivilegeDialog按LegacyChargeReward.list从索引1开始逐页展示，分别检查chargeClaimedMap[id]并调用sendClaimChargeReward(id)，不能把id=2的已领状态当作所有档位已领。
+
+本次修正此前固定id=2的范围限制：从当前配置枚举奖励档位，按id顺序逐档判断；基础档不发送请求，已领档跳过，未达门槛档跳过，达标且未领的档位单次领取后重新查询同赛季记录确认。某档异常未确认则停止，不继续后续档、不盲目重发。日志逐档显示名称/ID与原因，整轮汇总显示本次确认档数并累加实际返回的残卷奖励。实际账号响应仍未在线查询或领取，沿用已核对的客户端协议模型。
