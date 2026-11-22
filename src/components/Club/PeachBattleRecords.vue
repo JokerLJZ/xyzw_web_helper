@@ -1262,7 +1262,7 @@
 
       <!-- 空状态 -->
       <div v-else class="empty-state">
-        <n-empty description="暂无战绩数据" size="large">
+        <n-empty :description="loadError || '暂无战绩数据，请选择有对战记录的日期后刷新'" size="large">
           <template #icon>
             <n-icon>
               <DocumentText />
@@ -1275,7 +1275,7 @@
 </template>
 
 <script setup>
-import { normalizePeachLegionId } from "@/utils/peachBattleRecord.js";
+import { normalizePeachLegionId, peachRecordStyle } from "@/utils/peachBattleRecord.js";
 import { Copy, DocumentText, Refresh } from "@vicons/ionicons5";
 
 import html2canvas from "html2canvas";
@@ -1318,9 +1318,8 @@ const getLastSunday = () => {
   return `${targetYear}/${targetMonth}/${targetDay}`;
 };
 
-const currentStyle = ref(
-  localStorage.getItem("peach_battle_records_style") || "default",
-);
+const savedStyle = localStorage.getItem("peach_battle_records_style");
+const currentStyle = ref(peachRecordStyle(savedStyle));
 
 watch(currentStyle, (newStyle) => {
   localStorage.setItem("peach_battle_records_style", newStyle);
@@ -1333,6 +1332,7 @@ const tokenStore = useTokenStore();
 
 const loading = ref(false);
 const battleRecords = ref(null);
+const loadError = ref("");
 
 const queryDate = ref(getLastSunday());
 
@@ -1373,6 +1373,7 @@ const fetchBattleRecords = async () => {
   }
   loading.value = true;
   battleRecords.value = null;
+  loadError.value = "";
   let requestStage = "读取角色俱乐部";
   try {
     const payloadTaskRes = await tokenStore.sendMessageWithPromise(
@@ -1587,7 +1588,8 @@ const fetchBattleRecords = async () => {
     message.success("战绩加载成功");
   } catch (error) {
     console.error("查询战绩失败:", error);
-    message.error(`${requestStage}失败: ${error.message}`);
+    loadError.value = `${requestStage}失败: ${error.message}`;
+    message.error(loadError.value);
     battleRecords.value = null;
   } finally {
     loading.value = false;
@@ -1676,6 +1678,10 @@ onMounted(() => {
   queryDate.value = getLastSunday();
   fetchBattleRecords();
 });
+watch(() => tokenStore.selectedToken?.id, () => {
+  battleRecords.value = null;
+  fetchBattleRecords();
+});
 </script>
 
 <style scoped lang="scss">
@@ -1685,7 +1691,8 @@ onMounted(() => {
   background: var(--bg-primary);
   border-radius: 0;
   box-shadow: none;
-  overflow: hidden;
+  overflow: auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -1819,7 +1826,8 @@ onMounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: var(--spacing-md);
-  min-height: 200px;
+  min-height: 0;
+  flex-shrink: 1;
 }
 
 .loading-state,

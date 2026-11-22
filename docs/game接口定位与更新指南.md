@@ -225,3 +225,14 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 官方LPRecordDetailDialog的requestKey取PayLoadScheduleConf.key；refreshData调用recordData.sendGetKillRecordList(requestKey)，再按ROLE.legionId区分recordsMap双方。记录模块通过LegionService.getPayloadRecord({})读取enemyLegionMap，通过getPayloadKillRecord({date:i})读取recordsMap。协议REQS注册Legion_GetPayloadKillRecord，其字符串表对应legion_getpayloadkillrecord。LegionModule.sendShowLegionInfo先Math.abs(e)，再getInfoById({legionId:e})。任务模块firstLegionId属于本期报名状态，不能代替当前ROLE.legionId。
 
 页面改为role_getroleinfo读取role.legionId，详情ID取绝对值并校验，保留历史记录和击杀查询；请求阶段写入失败提示。不把200020直接认定为没有战报或已结束。2项测试通过，临时目录生产构建通过；未取得真实报错请求和服务端返回体，因此该改动修正已观察到的客户端差异，尚不能声称已确认200020唯一根因。后续更新仍需重新取manifest，对照上述UI、记录模块、协议和赛程key，不固定本次哈希。
+
+
+### 2026-11-22：蟠桃信息紧凑显示补充
+
+本轮复用上节同日下载的57a46客户端分析文件与manifest；未更改线上协议或发送参数。客户端英雄battleTeamSlot为零起始，负数表示未上阵；页面已有HeroFillInfo保留站位并排序。阵容显示按0/1前排、2/3/4后排分行；缺失站位保留在后排避免丢失展示。缩小固定列宽及卡片留白。战绩页对无效历史样式值回退默认，切账号重查并在空状态保留请求失败原因。无新的真实服务端响应，不能断言200020或空白已在线复现修复。
+
+## 2026-11-22：战报空列表协议默认值
+
+本次manifest再次确认dataBundleVer 152261a3c8、game 57a46、协议757be。当前Mail_GetListResp构造器初始化list=[]、left=0，BattleReportModule._getMailList调用getBattlefieldReportList后读取getData().list；助手直接解BON未经过协议模型默认值填充，因此不能要求原始响应总显式含list。
+
+新增normalizeLordReportList用于查询与删除后确认：无list时只接受空结构、非负left=0及正确_originalCmd等已核对字段；非空剩余数量、未知结构、null、非数组list和错误码不视作空。日志提示的真实返回体尚未抓取，空字段省略是依据协议模型采取的兼容处理，不能宣称已经用账号响应证实。连接失败/Token自动刷新属于连接层，本次未改。

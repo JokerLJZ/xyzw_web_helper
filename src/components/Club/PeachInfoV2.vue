@@ -128,7 +128,7 @@
         </n-tag>
       </div>
       <n-data-table :columns="columns" :data="opponentMembers" :bordered="false" size="small" striped
-        :scroll-x="1400"
+        :scroll-x="1100"
         class="members-data-table"
       />
     </div>
@@ -454,6 +454,7 @@
 </template>
 
 <script setup>
+import { peachLineupRow } from "@/utils/peachBattleRecord.js";
 import { ref, onMounted, computed, h, reactive, watch } from "vue";
 import {
   useMessage,
@@ -1331,14 +1332,14 @@ const columns = [
   {
     title: "序号",
     key: "index",
-    width: 60,
+    width: 42,
     align: "center",
     render: (_, index) => index + 1,
   },
   {
     title: "头像",
     key: "headImg",
-    width: 60,
+    width: 42,
     align: "center",
     render: (row) => {
       if (row.headImg) {
@@ -1360,14 +1361,14 @@ const columns = [
   {
     title: "ID",
     key: "id",
-    width: 110,
+    width: 82,
     align: "center",
     render: (row) => h("span", { class: "member-id-cell" }, row.id),
   },
   {
     title: "角色名称",
     key: "name",
-    width: 150,
+    width: 105,
     align: "center",
     render: (row) => {
       return h(
@@ -1387,21 +1388,21 @@ const columns = [
   {
     title: "战力",
     key: "power",
-    width: 100,
+    width: 78,
     align: "center",
     render: (row) => formatPower(row.power),
   },
   {
     title: "红淬",
     key: "redQuench",
-    width: 80,
+    width: 58,
     align: "center",
     render: (row) => h("span", { style: { color: "#ff4d4f" } }, row.redQuench),
   },
   {
     title: "珍卡",
     key: "legacy",
-    width: 92,
+    width: 68,
     align: "center",
     render: (row) => {
       // 与切磋界面「游戏名」后面那个标签同源：roleInfo.legacy.color 查 legacycolor
@@ -1423,7 +1424,7 @@ const columns = [
   {
     title: "玩具",
     key: "toy",
-    width: 120,
+    width: 90,
     align: "center",
     render: (row) => {
       const toyName = row.toyName;
@@ -1436,7 +1437,7 @@ const columns = [
   {
     title: "宠物",
     key: "pet",
-    width: 110,
+    width: 82,
     align: "center",
     render: (row) => {
       const pet = row.pet;
@@ -1471,7 +1472,7 @@ const columns = [
   {
     title: "阵容(红数)[四圣等级]",
     key: "lineup",
-    width: null,
+    width: 340,
     align: "left",
     render: (row) => {
       const heroes = row.heroList || [];
@@ -1507,13 +1508,16 @@ const columns = [
         ]);
       });
 
-      return h("div", { class: "lineup-card-list" }, cards);
+      return h("div", { class: "lineup-rows" }, [
+        h("div", { class: "lineup-card-list" }, [h("span", { class: "lineup-row-label" }, "前排"), ...cards.filter((_, i) => peachLineupRow(heroes[i].battleTeamSlot) === "front")]),
+        h("div", { class: "lineup-card-list" }, [h("span", { class: "lineup-row-label" }, "后排"), ...cards.filter((_, i) => peachLineupRow(heroes[i].battleTeamSlot) === "back")]),
+      ]);
     },
   },
   {
     title: "阵容类型",
     key: "lineupType",
-    width: 96,
+    width: 72,
     align: "center",
     render: (row) => {
       const type = row.lineupType;
@@ -1534,7 +1538,7 @@ const columns = [
   {
     title: "战斗模拟5次",
     key: "battleSim",
-    width: 140,
+    width: 100,
     align: "center",
     titleAlign: "center",
     render: (row) => {
@@ -3221,4 +3225,13 @@ watch(selectedTokenId, (newTokenId, oldTokenId) => {
   color: var(--text-secondary, #666);
   font-size: var(--font-size-sm, 14px);
 }
+/* 表格紧凑显示，阵容按实际站位分为前二后三。 */
+:deep(.members-data-table .n-data-table-td),
+:deep(.members-data-table .n-data-table-th) { padding: 5px 4px; font-size: 12px; }
+:deep(.lineup-rows) { display: flex; flex-direction: column; gap: 3px; }
+:deep(.lineup-card-list) { display: flex; flex-wrap: nowrap; gap: 3px; }
+:deep(.lineup-row-label) { flex: 0 0 24px; align-self: center; color: #888; font-size: 11px; }
+:deep(.lineup-hero-card) { padding: 2px 3px; }
+:deep(.lineup-card-row-name) { font-size: 11px; }
+:deep(.lineup-card-row-pearl) { font-size: 10px; }
 </style>

@@ -42,3 +42,20 @@ test('批量逐账号隔离错误，释放自建连接并保留已有连接',asy
  assert.deepEqual(status,{a:'failed',b:'completed'});assert.deepEqual(closed,['a']);assert.equal(released,1);
  assert.equal(deps.isRunning.value,false);assert.equal(deps.currentRunningTokenId.value,null);
 });
+
+test('BON省略空列表时空战报正常结束，删除最后一封后空响应可确认',async()=>{
+ for(const response of [{},{left:0},{_originalCmd:'mail_getbattlefieldreportlist'},{body:{}},{_raw:{body:{}}}]) {
+  assert.deepEqual(await deleteLordReports({send:async()=>response}),{deleted:0,protectedCount:0});
+ }
+ let deleted=false;
+ const result=await deleteLordReports({send:async(cmd)=>{
+  if(cmd==='mail_changestate'){deleted=true;return {};}
+  return deleted?{}:{list:[{id:12,category:1,state:1}]};
+ }});
+ assert.equal(result.deleted,1);
+});
+
+test('缺失列表仅接受协议默认空结构，错误或未知响应不能当作清空成功',async()=>{
+ for(const response of [undefined,null,{list:null},{list:{}},{left:-1},{left:2},{role:{}},{code:200020},{_originalCmd:'role_getroleinfo'}])
+  await assert.rejects(deleteLordReports({send:async()=>response}));
+});

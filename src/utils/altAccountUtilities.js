@@ -30,13 +30,27 @@ export async function unlockStudySkins({send,config,stopped=()=>false,log=()=>{}
  }
  return {unlocked};
 }
+/** Mail_GetListResp initializes list=[] and left=0; BON can omit these defaults. */
+export function normalizeLordReportList(response) {
+ const value=body(response);
+ if(!value || typeof value!=="object" || Array.isArray(value) || value instanceof Uint8Array)
+  throw Error('咸主战报列表格式无效');
+ if(value.code)throw Error(`战报查询失败：服务器错误 ${value.code}`);
+ if(value._originalCmd && value._originalCmd!=="mail_getbattlefieldreportlist")
+  throw Error('战报查询响应指令不匹配');
+ if(value.list!==undefined && !Array.isArray(value.list))throw Error('咸主战报列表格式无效');
+ if(value.list===undefined && Object.keys(value).some(key=>!["left","_originalCmd"].includes(key)))
+  throw Error('战报响应缺少列表且包含未知字段');
+ if(value.left!==undefined && (!Number.isInteger(value.left)||value.left<0))throw Error('战报剩余数量无效');
+ if(value.list===undefined && value.left>0)throw Error("战报响应仍有剩余数量但缺少列表");
+ return {...value,list:value.list??[],left:value.left??0};
+}
 export async function deleteLordReports({send,stopped=()=>false,log=()=>{}}) {
  let deleted=0,protectedCount=0,lastId=0;
  const seen=new Set();
  for(let page=0;page<100;page++) {
   if(stopped())return {deleted,protectedCount};
-  const snapshot=body(await send('mail_getbattlefieldreportlist',{category:1,lastId,size:60}));
-  if(!Array.isArray(snapshot?.list))throw Error('咸主战报列表格式无效');
+  const snapshot=normalizeLordReportList(await send('mail_getbattlefieldreportlist',{category:1,lastId,size:60}));
   if(!snapshot.list.length)return {deleted,protectedCount};
   for(const mail of snapshot.list) {
    if(stopped())return {deleted,protectedCount};
@@ -46,8 +60,7 @@ export async function deleteLordReports({send,stopped=()=>false,log=()=>{}}) {
    if((mail.attachments?.length||mail.haveAttachments)&&Number(mail.state??0)<3) {protectedCount++;continue;}
    let failure, result;
    try {result=body(await send('mail_changestate',{mailId:mail.id,state:9}));}catch(error){failure=error;}
-   const check=body(await send('mail_getbattlefieldreportlist',{category:1,lastId,size:60}));
-   if(!Array.isArray(check?.list))throw Error('删除后战报列表无法确认');
+   const check=normalizeLordReportList(await send('mail_getbattlefieldreportlist',{category:1,lastId,size:60}));
    // Confirm from the deleted-mail response, or absence in an untruncated queried segment.
    const remaining=check.list.find(item=>String(item.id)===String(mail.id));
    if(!(String(result?.mail?.id)===String(mail.id)&&result?.mail?.state===9) && ((remaining&&remaining.state!==9)||(!remaining&&check.list.length>=60)))throw failure||Error(`战报${mail.id}删除未确认`);
