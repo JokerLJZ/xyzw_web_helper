@@ -216,3 +216,12 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 - 咸主战报为EMMailCategory.categoryReportLordMail=1，瓶子战报为2。BattleReportModule._getMailList调用MailService.getBattlefieldReportList({lastId:0,category:1,size:60})，读取list。deleteMailInfo调用MailService.changeState({mailId,state:OMailState.deleted})，deleted=9。协议REQS明确映射mail_getbattlefieldreportlist与mail_changestate。逐封删除并重新查询确认，分页有界限、防重复ID，不调用全邮箱删除。MailInfo.haveAttachments和attachments用于保留state<attachmentGot(3)的未领附件战报。
 - 两项功能接入小号分组、任务目录与定时执行器，逐账号读取状态；复用的已有或定时会话不关闭，自建连接释放。加载统一官方配置，不固定皮肤门槛。
 - 响应字段依据当前客户端声明和处理代码；尚未查询真实账号或删除真实战报，不能声称已在线验证。分页和操作失败会显示错误，未确认不计成功。
+
+
+## 2026-11-22：蟠桃园战报200020排查
+
+从本地index、game-defines、main的manifest及XXTEA解码链重新下载当前资源。参数platform=hortor、version=0.36.0-android；COMMIT_ID 6f2973f5、game 57a46、launcher 3af4e、协议757be、config 2938b、dataBundleVer 152261a3c8。分析文件位于/tmp/peach-game.js和/tmp/peach-TEST_REMOTE_MODULE.js。
+
+官方LPRecordDetailDialog的requestKey取PayLoadScheduleConf.key；refreshData调用recordData.sendGetKillRecordList(requestKey)，再按ROLE.legionId区分recordsMap双方。记录模块通过LegionService.getPayloadRecord({})读取enemyLegionMap，通过getPayloadKillRecord({date:i})读取recordsMap。协议REQS注册Legion_GetPayloadKillRecord，其字符串表对应legion_getpayloadkillrecord。LegionModule.sendShowLegionInfo先Math.abs(e)，再getInfoById({legionId:e})。任务模块firstLegionId属于本期报名状态，不能代替当前ROLE.legionId。
+
+页面改为role_getroleinfo读取role.legionId，详情ID取绝对值并校验，保留历史记录和击杀查询；请求阶段写入失败提示。不把200020直接认定为没有战报或已结束。2项测试通过，临时目录生产构建通过；未取得真实报错请求和服务端返回体，因此该改动修正已观察到的客户端差异，尚不能声称已确认200020唯一根因。后续更新仍需重新取manifest，对照上述UI、记录模块、协议和赛程key，不固定本次哈希。

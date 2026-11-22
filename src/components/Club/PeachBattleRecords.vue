@@ -1275,6 +1275,7 @@
 </template>
 
 <script setup>
+import { normalizePeachLegionId } from "@/utils/peachBattleRecord.js";
 import { Copy, DocumentText, Refresh } from "@vicons/ionicons5";
 
 import html2canvas from "html2canvas";
@@ -1371,10 +1372,12 @@ const fetchBattleRecords = async () => {
     return;
   }
   loading.value = true;
+  battleRecords.value = null;
+  let requestStage = "读取角色俱乐部";
   try {
     const payloadTaskRes = await tokenStore.sendMessageWithPromise(
       tokenId,
-      "legion_getpayloadtask",
+      "role_getroleinfo",
       {},
       10000,
     );
@@ -1382,7 +1385,8 @@ const fetchBattleRecords = async () => {
       message.error("未获取到对战俱乐部");
       return;
     }
-    const firstLegionId = payloadTaskRes.firstLegionId;
+    const firstLegionId = normalizePeachLegionId(payloadTaskRes.role?.legionId);
+    requestStage = "读取历史对手";
     const payloadrecord = await tokenStore.sendMessageWithPromise(
       tokenId,
       "legion_getpayloadrecord",
@@ -1402,24 +1406,27 @@ const fetchBattleRecords = async () => {
       battleRecords.value = null;
       return;
     }
-    const secondLegionId = payloadrecord.enemyLegionMap[shortDate].id;
+    const secondLegionId = normalizePeachLegionId(payloadrecord.enemyLegionMap[shortDate].id);
     if (!firstLegionId || !secondLegionId) {
       message.error("未获取到对战俱乐部ID");
       return;
     }
     // 获取俱乐部的详细信息
+    requestStage = "读取我方俱乐部详情";
     const firstLegionIdInfo = await tokenStore.sendMessageWithPromise(
       tokenId,
       "legion_getinfobyid",
       { legionId: firstLegionId },
       10000,
     );
+    requestStage = "读取敌方俱乐部详情";
     const secondLegionIdInfo = await tokenStore.sendMessageWithPromise(
       tokenId,
       "legion_getinfobyid",
       { legionId: secondLegionId },
       10000,
     );
+    requestStage = "读取击杀战报";
     const result = await tokenStore.sendMessageWithPromise(
       tokenId,
       "legion_getpayloadkillrecord",
@@ -1580,7 +1587,7 @@ const fetchBattleRecords = async () => {
     message.success("战绩加载成功");
   } catch (error) {
     console.error("查询战绩失败:", error);
-    message.error(`查询失败: ${error.message}`);
+    message.error(`${requestStage}失败: ${error.message}`);
     battleRecords.value = null;
   } finally {
     loading.value = false;
