@@ -141,6 +141,8 @@ export const TASK_GROUPS = [
     "label": "小号任务",
     "tasks": [
       "batchAltMergeAndEquipPets",
+      "batchUnlockStudySkins",
+      "batchDeleteLordReports",
       "batchPhotoWhiteJade",
       "batchUpgradeHangUpAndClaimOrderRewards",
       "batchJoinLegion",

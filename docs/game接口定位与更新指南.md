@@ -207,3 +207,12 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 本次重新查询manifest仍为dataBundleVer 152261a3c8、game 57a46、协议757be。当前LegacyChargeReward包含基础档id=1（无奖励），三个奖励档id=2/3/4，门槛分别为3000/8800/15800，名称凝神香·一/二/三。官方LegacyPrivilegeDialog按LegacyChargeReward.list从索引1开始逐页展示，分别检查chargeClaimedMap[id]并调用sendClaimChargeReward(id)，不能把id=2的已领状态当作所有档位已领。
 
 本次修正此前固定id=2的范围限制：从当前配置枚举奖励档位，按id顺序逐档判断；基础档不发送请求，已领档跳过，未达门槛档跳过，达标且未领的档位单次领取后重新查询同赛季记录确认。某档异常未确认则停止，不继续后续档、不盲目重发。日志逐档显示名称/ID与原因，整轮汇总显示本次确认档数并累加实际返回的残卷奖励。实际账号响应仍未在线查询或领取，沿用已核对的客户端协议模型。
+
+## 2026-11-22：小号大冲关皮肤与咸主战报
+
+当前manifest重新确认dataBundleVer 152261a3c8、game 57a46、launcher 3af4e、协议757be，入口参数仍由本地public/game/game-defines.a175e.js的0.36.0-android决定。业务代码沿当前QuizSkinData/QuizModule、BattleReportModule及MailInfo追踪，不使用旧采集库。
+
+- QuizSkinData只展示StudyClothesConf.open=1项，10000默认已领；10150通过custom.quizSkin的UNLOCK(2)→CLAIM(3)处理，真实指令system_custom({key:"quizSkin",value:3})。普通皮肤按StudyClothesType：ANSWER=1检查study.totRightNum，TASK=2检查totCplTaskNum，MOVIE_TASK=3检查对应studyActId的actTotCplTaskMap；达到配置totRightNum且unlockedSkin无该ID时调用StudyService.unlockSkin({id})，协议REQS明确映射study_unlockskin。本功能不开始答题、不消费知识币、不切换study_setskin。执行后重新查询role_getroleinfo确认各皮肤已解锁；不确定写请求先查后停，不自动重发。
+- 咸主战报为EMMailCategory.categoryReportLordMail=1，瓶子战报为2。BattleReportModule._getMailList调用MailService.getBattlefieldReportList({lastId:0,category:1,size:60})，读取list。deleteMailInfo调用MailService.changeState({mailId,state:OMailState.deleted})，deleted=9。协议REQS明确映射mail_getbattlefieldreportlist与mail_changestate。逐封删除并重新查询确认，分页有界限、防重复ID，不调用全邮箱删除。MailInfo.haveAttachments和attachments用于保留state<attachmentGot(3)的未领附件战报。
+- 两项功能接入小号分组、任务目录与定时执行器，逐账号读取状态；复用的已有或定时会话不关闭，自建连接释放。加载统一官方配置，不固定皮肤门槛。
+- 响应字段依据当前客户端声明和处理代码；尚未查询真实账号或删除真实战报，不能声称已在线验证。分页和操作失败会显示错误，未确认不计成功。

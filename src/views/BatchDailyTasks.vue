@@ -769,6 +769,10 @@
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
+              <n-space style="margin-bottom: 12px">
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchUnlockStudySkins" title="按当前条件解锁已达标的大冲关皮肤，不切换装扮">一键解锁大冲关皮肤</n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchDeleteLordReports" title="只删除咸主战报，保留未领取附件">一键删除咸主战报</n-button>
+              </n-space>
               <n-space>
                 <n-button size="small" @click="batchAltMergeAndEquipPets" :disabled="isRunning || selectedTokens.length === 0" title="按合成最高品质设置开蛋合成，可配对的未锁定佩戴宠物会卸下参与；随后图鉴激活领奖并佩戴优先宠物">自动合成并佩戴宠物(小号专用)</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchPhotoWhiteJade" title="先将勿忘我换为满天星，优先兑换白玉，剩余满天星再尽量兑换灵贝">闲来入镜兑换白玉</n-button>
@@ -3840,6 +3844,7 @@
 </template>
 
 <script setup>
+import { createTasksAltUtilities } from "@/utils/batch/tasksAltUtilities.js";
 import SaltBattleSettings from "@/components/SaltBattleSettings.vue";
 import { createTasksSaltBattle } from "@/utils/batch/tasksSaltBattle.js";
 import { DEFAULT_SALT_BATTLE_SETTINGS } from "@/utils/saltWarRunner.js";
@@ -8128,6 +8133,7 @@ const createTaskDeps = () => ({
 });
 
 // 初始化任务模块
+const { batchUnlockStudySkins, batchDeleteLordReports } = createTasksAltUtilities({ ...createTaskDeps(), isScheduledSession: isScheduledTokenSession });
 const tasksHangUp = createTasksHangUp(createTaskDeps());
 const {
   claimHangUpRewards,
@@ -8422,6 +8428,8 @@ const getScheduledTaskFunction = (name) => {
     batchAdjustEarlyMainLevelFormation,
     batchAdjustMainLevelFormation,
     batchUpgradeHangUpAndClaimOrderRewards,
+    batchUnlockStudySkins,
+    batchDeleteLordReports,
     batchXuanwuBlessing,
     batchClaimConsumptionRewards,
     batchRechargeStandard,

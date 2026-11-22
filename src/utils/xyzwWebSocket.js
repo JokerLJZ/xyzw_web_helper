@@ -483,6 +483,9 @@ export function registerDefaultCommands(reg) {
     .register("payload_setbattleteam")
     .register("payload_getteaminfo")
 
+    .register("study_unlockskin")
+    .register("mail_getbattlefieldreportlist")
+
     // 功法
     .register("legacy_getinfo")
     .register("legacy_claimhangup")

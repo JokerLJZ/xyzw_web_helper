@@ -1957,10 +1957,11 @@ watch(selectedTokenId, (newTokenId, oldTokenId) => {
   padding: 16px;
   min-height: 400px;
   height: 100%;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-x: hidden;
   /* flex 子项默认 min-width:auto，会被 1400px 的表格内容撑宽，这里显式压回去 */
   min-width: 0;
   max-width: 100%;
@@ -2343,8 +2344,8 @@ watch(selectedTokenId, (newTokenId, oldTokenId) => {
 
 .members-table {
   margin-top: 20px;
-  flex: 1;
-  overflow: hidden;
+  flex: 0 0 auto;
+  overflow: visible;
   /* Use NDataTable's scroll or auto here */
   display: flex;
   flex-direction: column;
@@ -2505,7 +2506,7 @@ watch(selectedTokenId, (newTokenId, oldTokenId) => {
 
 :deep(.lineup-cell) {
   display: inline-flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 0;
   font-size: 12px;
