@@ -1275,7 +1275,7 @@
 </template>
 
 <script setup>
-import { normalizePeachLegionId, peachRecordStyle } from "@/utils/peachBattleRecord.js";
+import { normalizePeachLegionId, peachRecordStyle, formatPower, getMaxKills, getPercent } from "@/utils/peachBattleRecord.js";
 import { Copy, DocumentText, Refresh } from "@vicons/ionicons5";
 
 import html2canvas from "html2canvas";
