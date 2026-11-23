@@ -98,3 +98,12 @@ test("周一全天与周三均不执行，仅周二保持原领取删除流程",
     assert.equal(f.calls.length, 0);
   }
 });
+
+test("小号手动入口不限星期，仍先领取确认再删除系统邮件", async () => {
+  const f = fixture([{ id: 1, category: 0, haveAttachments: true, state: 1 }]);
+  f.options.now = () => tuesday - 86400000;
+  f.options.tuesdayOnly = false;
+  const result = await cleanupMondayMail(f.options);
+  assert.equal(result.claimed, 1); assert.equal(result.deleted, 1);
+  assert.deepEqual(f.calls.filter(c => c.cmd !== "mail_getlist").map(c => c.cmd), ["mail_claimattachment", "mail_changestate"]);
+});

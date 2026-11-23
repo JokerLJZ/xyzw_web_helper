@@ -6,7 +6,7 @@ import { availableTasks } from '../src/utils/batch/constants.js';
 test('全部已批准任务及兼容任务各归一组，定时可选任务无遗漏', () => {
   const defined = TASK_GROUPS.flatMap(group => group.tasks);
   assert.equal(TASK_GROUPS.length, 12);
-  assert.equal(defined.length, 102);
+  assert.equal(defined.length, 103);
   assert.ok(TASK_GROUPS.find(group => group.name === 'dungeon').tasks.includes('batchNightmareStarOnce'));
   assert.equal(new Set(defined).size, defined.length);
   const grouped = groupTaskCatalog(availableTasks);
@@ -14,9 +14,9 @@ test('全部已批准任务及兼容任务各归一组，定时可选任务无�
   assert.deepEqual(grouped.flatMap(group => group.tasks.map(task => task.value)).sort(), availableTasks.map(task => task.value).sort());
 });
 
-test('小号31项只归小号组，藏品及卡牌领奖归武将与图鉴', () => {
+test('小号32项只归小号组，藏品及卡牌领奖归武将与图鉴', () => {
   const small = TASK_GROUPS.find(group => group.name === 'small-account');
-  assert.equal(small.tasks.length, 31);
+  assert.equal(small.tasks.length, 32);
   assert.ok(small.tasks.includes('batchAltGenieSweep'));
   assert.ok(small.tasks.includes('batchUnlockStudySkins'));
   assert.ok(small.tasks.includes('batchDeleteLordReports'));

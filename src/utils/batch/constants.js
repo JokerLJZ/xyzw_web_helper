@@ -111,6 +111,7 @@ export const availableTasks = [
   { label: "自动挑战魏蜀吴灯神", value: "batchChallengeThreeKingdomsGenie" },
   { label: "主线关卡信息获取", value: "batchPushMainLevelInfo" },
   { label: "一键解锁大冲关皮肤", value: "batchUnlockStudySkins" },
+  { label: "领取并删除系统邮件与公告", value: "batchCleanupSystemMail" },
   { label: "一键删除咸主战报", value: "batchDeleteLordReports" },
   { label: "一键释放咸臣", value: "batchReleaseFeudatory" },
   { label: "自动寻找咸臣", value: "batchAutoFeudatory" },

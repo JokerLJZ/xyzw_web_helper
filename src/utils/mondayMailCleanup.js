@@ -19,11 +19,11 @@ export function normalizeMailListResponse(response) {
 
 /** Claim before delete, scoped to system mail and announcements; never blindly retry writes. */
 // Keep the legacy function/settings names so saved preferences remain compatible.
-export async function cleanupMondayMail({ send, now = Date.now, stopped = () => false }) {
-  if (!isMailCleanupTuesday(now())) return { status: "skipped", reason: "非周二，跳过系统邮件与公告清理" };
+export async function cleanupMondayMail({ send, now = Date.now, stopped = () => false, tuesdayOnly = true }) {
+  if (tuesdayOnly && !isMailCleanupTuesday(now())) return { status: "skipped", reason: "非周二，跳过系统邮件与公告清理" };
   const guard = () => {
     if (stopped()) throw Object.assign(new Error("邮件清理已停止"), { interrupted: true });
-    if (!isMailCleanupTuesday(now())) throw new Error("邮件清理已跨出周二，停止继续操作");
+    if (tuesdayOnly && !isMailCleanupTuesday(now())) throw new Error("邮件清理已跨出周二，停止继续操作");
   };
   const read = async () => {
     guard();

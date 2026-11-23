@@ -144,6 +144,7 @@ export const TASK_GROUPS = [
       "batchAltMergeAndEquipPets",
       "batchUnlockStudySkins",
       "batchDeleteLordReports",
+      "batchCleanupSystemMail",
       "batchPhotoWhiteJade",
       "batchUpgradeHangUpAndClaimOrderRewards",
       "batchJoinLegion",
