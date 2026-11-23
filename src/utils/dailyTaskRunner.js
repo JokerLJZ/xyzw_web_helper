@@ -1,3 +1,4 @@
+import { claimMailRewards } from "./claimMailRewards.js";
 import { runMondayFreeJade } from "./mondayFreeJade.js";
 import { runDailyMatchRoom } from "./dailyMatchRoom.js";
 import { cleanupMondayMail } from "./mondayMailCleanup.js";
@@ -1921,13 +1922,6 @@ export class DailyTaskRunner {
       });
     }
 
-    if (settings.claimEmail) {
-      fixedRewards.push({
-        name: "领取邮件奖励",
-        cmd: "mail_claimallattachment",
-      });
-    }
-
     fixedRewards.forEach((reward) => {
       taskList.push({
         name: reward.name,
@@ -1946,6 +1940,17 @@ export class DailyTaskRunner {
       getRole: () => this.getLatestRole(tokenId, "检查十殿精选礼包"),
       claim: (id) => this.executeGameCommand(tokenId, "activity_claimrolluppack", { id }, "领取十殿精选免费100白玉"),
     }) });
+
+    if (settings.claimEmail) {
+      taskList.push({
+        name: "领取邮件奖励",
+        execute: () => claimMailRewards({
+          send: (cmd, params) => this.executeGameCommand(tokenId, cmd, params, "", 15000),
+          stopped: () => this.callbacks?.shouldStop?.() === true,
+          log: (text, type = "info") => this.logDetail(text, type),
+        }),
+      });
+    }
 
     taskList.push({ name: "领取每日礼包", execute: () => this.claimDailyDiscountIfAvailable(tokenId) });
 

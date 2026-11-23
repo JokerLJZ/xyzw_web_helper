@@ -1,3 +1,4 @@
+import { claimMailRewards } from "../claimMailRewards.js";
 import { loadEmptyFormationConfig, runEmptyFormation } from "../emptyFormation.js";
 import { loadGenieSweepConfig, readGenieRole, sweepAltAccountGenie } from "../altAccountGenieSweep.js";
 import { claimSkinBookRewards } from "../skinBookRewards.js";
@@ -199,6 +200,14 @@ export function createTasksItem(deps) {
     activityWeek,
   } = deps;
 
+  const claimPreparedMail = tokenId => claimMailRewards({
+    send: (cmd, params) => tokenStore.sendMessageWithPromise(tokenId, cmd, params, HELPER_COMMAND_TIMEOUT_MS),
+    stopped: () => shouldStop.value,
+    wait: () => new Promise(resolve => setTimeout(resolve, delayConfig.action ?? 500)),
+    log: (text, type = "info") => addLog({ time: new Date().toLocaleTimeString(),
+      message: `${tokens.value.find(token => token.id === tokenId)?.name || tokenId} ${text}`, type }),
+  });
+
   const boxNames = {
     2001: "木质宝箱",
     2002: "青铜宝箱",
@@ -208,6 +217,7 @@ export function createTasksItem(deps) {
 
   const fishNames = { 1: "普通鱼竿", 2: "黄金鱼竿" };
   const isNoClaimableMailError = (error) => {
+    if (error.mailStage && error.mailStage !== "附件领取") return false;
     const errorMessage = getErrorMessage(error);
     return (
       errorMessage.includes("3500020") ||
@@ -236,12 +246,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = "running";
         await ensureConnection(tokenId);
 
-        const result = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "mail_claimallattachment",
-          { category: 0 },
-          HELPER_COMMAND_TIMEOUT_MS,
-        );
+        const result = await claimPreparedMail(tokenId);
         const rewardCount = Array.isArray(result?.reward)
           ? result.reward.length
           : 0;
@@ -5205,12 +5210,7 @@ export function createTasksItem(deps) {
               message: `${token.name} 招募周第${roundIndex}轮已达到${progressAfterFirstStage}进度，开始领取邮件附件`,
               type: "info",
             });
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "mail_claimallattachment",
-              { category: 0 },
-              HELPER_COMMAND_TIMEOUT_MS,
-            );
+            await claimPreparedMail(tokenId);
             await new Promise((resolve) =>
               setTimeout(resolve, delayConfig.action),
             );
@@ -5247,12 +5247,7 @@ export function createTasksItem(deps) {
             message: `${token.name} 招募周第${roundIndex}/${roundCount}轮自选大奖领取成功`,
             type: "success",
           });
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "mail_claimallattachment",
-            { category: 0 },
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
+          await claimPreparedMail(tokenId);
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 招募周第${roundIndex}/${roundCount}轮完成后邮件附件领取成功`,
@@ -6300,12 +6295,7 @@ export function createTasksItem(deps) {
       await waitForSmartBoxAction();
       try {
         await runSmartBoxOperation(token.name, "领取邮件附件", () =>
-          tokenStore.sendMessageWithPromise(
-            tokenId,
-            "mail_claimallattachment",
-            { category: 0 },
-            HELPER_COMMAND_TIMEOUT_MS,
-          ),
+          claimPreparedMail(tokenId),
         );
       } catch (mailError) {
         if (!isNoClaimableMailError(mailError)) throw mailError;
@@ -6346,12 +6336,7 @@ export function createTasksItem(deps) {
           token.name,
           "领取宝箱周完成邮件",
           () =>
-            tokenStore.sendMessageWithPromise(
-              tokenId,
-              "mail_claimallattachment",
-              { category: 0 },
-              HELPER_COMMAND_TIMEOUT_MS,
-            ),
+            claimPreparedMail(tokenId),
         );
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -6966,12 +6951,7 @@ export function createTasksItem(deps) {
           setTimeout(resolve, delayConfig.action),
         );
         try {
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "mail_claimallattachment",
-            { category: 0 },
-            HELPER_COMMAND_TIMEOUT_MS,
-          );
+          await claimPreparedMail(tokenId);
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 邮件附件领取成功`,

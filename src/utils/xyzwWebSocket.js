@@ -493,6 +493,7 @@ export function registerDefaultCommands(reg) {
     .register("legacy_beginhangup")
     .register("legacy_claimchargereward", { id: 2 })
     .register("role_backclaimreward")
+    .register("nmext_getinfo")
     // 功法残卷赠送
     .register("legacy_gift_getlist")
     .register("legacy_gift_send", { recipientId: 0, itemId: 0, quantity: 0 })
@@ -1382,6 +1383,7 @@ export class XyzwWebSocketClient {
       presetteam_getinforesp: "presetteam_getinfo",
       mail_claimallattachmentresp: "mail_claimallattachment",
       mail_getlistresp: "mail_getlist",
+      nmext_getinforesp: "nmext_getinfo",
       mail_claimattachmentresp: "mail_claimattachment",
       mail_changestateresp: "mail_changestate",
       store_goodslistresp: "store_goodslist",
