@@ -23,17 +23,31 @@ function extraAttempts(role, config, now) {
   }
   return integer(result || 0, "星级特权次数");
 }
-export async function runNightmareStarOnce({ send, now = Date.now, mondayOnly = false, stopped = () => false, log = () => {}, loadConfig = loadOfficialTaskConfig }) {
+export async function runNightmareStarOnce({ send, now = Date.now, mondayOnly = false, stopped = () => false, log = () => {}, loadConfig = loadOfficialTaskConfig, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   const guard = () => {
     if (stopped()) throw Object.assign(new Error("星级挑战已停止"), { interrupted: true });
     if (mondayOnly && !isStarMonday(now())) throw new Error("已跨出周一，停止星级挑战");
   };
   if (mondayOnly && !isStarMonday(now())) { log("星级挑战跳过：仅周一执行"); return { challenged: 0, skipped: true }; }
+  let lastRequestAt = -Infinity, lastFightAt = -Infinity;
   const request = async (cmd, params = {}) => {
-    guard(); const result = await send(cmd, params);
-    const code = result?._raw?.code ?? result?.code;
-    if (code !== undefined && code !== 0) throw new Error(`${cmd}：服务器错误${code}`);
-    return activityBody(result);
+    const fight = cmd === "nmext_startboss";
+    // Conservative local pacing; the server has not published its cooldown.
+    const delay = Math.max(0, lastRequestAt + 1000 - now(), fight ? lastFightAt + 5000 - now() : 0);
+    if (delay) await sleep(delay);
+    guard();
+    lastRequestAt = now();
+    if (fight) lastFightAt = now();
+    try {
+      const result = await send(cmd, params);
+      const code = result?._raw?.code ?? result?.code;
+      if (code !== undefined && code !== 0) throw Object.assign(new Error(`服务器错误${code}`), { code });
+      return activityBody(result);
+    } catch (error) {
+      const failure = new Error(`${cmd}${params.bossId ? `（第${params.bossId}层）` : ""}：${error.message || error}`);
+      failure.code = error.code; failure.interrupted = error.interrupted; failure.cause = error;
+      throw failure;
+    }
   };
   const role = extractRolePatch(await request("role_getroleinfo"));
   if (!role) throw new Error("角色状态未确认");
@@ -49,7 +63,16 @@ export async function runNightmareStarOnce({ send, now = Date.now, mondayOnly = 
   if (!bosses.length || bosses.some(b => !Number.isInteger(b.bossId) || b.bossId < 1 || b.bossId > 8)) throw new Error("星级层数配置无效");
   const bonus = extraAttempts(role, config, now());
   const readInfo = async () => {
-    const data = (await request("nmext_getinfo")).roleNMExt;
+    let response;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { response = await request("nmext_getinfo"); break; }
+      catch (error) {
+        if (error.interrupted || !/(?:^|\D)400312(?:\D|$)/.test(`${error.code || ""} ${error.message}`) || attempt === 2) throw error;
+        log("星级状态查询被限速，等待5秒后仅重查状态，不重复挑战", "warning");
+        await sleep(5000);
+      }
+    }
+    const data = response.roleNMExt;
     if (!data || !Number.isFinite(data.starResetTime) || data.starResetTime * 1000 < starWeekStart(now())) throw new Error("星级数据尚未刷新至本周，停止挑战");
     return data;
   };

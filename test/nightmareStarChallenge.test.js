@@ -6,7 +6,7 @@ function scenario() {
   const calls = [], logs = [], counts = {}, teams = {}, role = { statistics: { "nm:w:m:boss": 8 }, statisticsTime: { "nm:w:m:boss": monday / 1000 } };
   for (let i = 1; i <= 8; i++) teams[100 + i] = { teamInfo: { 0: { heroId: i + 100 } }, weapon: { weaponId: i }, petUId: String(i) };
   let info = { starResetTime: monday / 1000, starFightCntMap: counts };
-  const options = { now: () => monday, loadConfig: async () => ({ NightMareStarConstant: { nightMareStarUnlockLevel: 8 }, NightMareStarConf: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [i + 1, { bossId: i + 1, challengeTime: 5 }])) }),
+  const options = { sleep: async () => {}, now: () => monday, loadConfig: async () => ({ NightMareStarConstant: { nightMareStarUnlockLevel: 8 }, NightMareStarConf: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [i + 1, { bossId: i + 1, challengeTime: 5 }])) }),
     log: (text, type) => logs.push({ text, type }),
     send: async (cmd, params) => {
       calls.push({ cmd, params });
@@ -89,4 +89,30 @@ import { defaultSettings, defaultTemplate } from "../src/utils/batch/constants.j
 test("账号日常和批量模板星级挑战默认关闭", () => {
   assert.equal(defaultSettings.mondayNightmareStarOnce, false);
   assert.equal(defaultTemplate.mondayNightmareStarOnce, false);
+});
+
+test("层间至少间隔5秒，状态查询限速仅重查，不重复已执行战斗", async () => {
+  const f = scenario(); let clock = monday, limited = false;
+  f.options.now = () => clock; f.options.sleep = async ms => { clock += ms; };
+  const original = f.options.send, fights = [];
+  f.options.send = async (cmd, params) => {
+    if (cmd === "nmext_startboss") fights.push(clock);
+    if (cmd === "nmext_getinfo" && fights.length === 1 && !limited) {
+      limited = true; throw new Error("服务器错误: 400312 - 操作过快");
+    }
+    return original(cmd, params);
+  };
+  assert.equal((await runNightmareStarOnce(f.options)).challenged, 8);
+  assert.equal(fights.length, 8);
+  assert.ok(fights.slice(1).every((time, i) => time - fights[i] >= 5000));
+});
+test("战斗被限速且次数未增则带层号报错，不自动重发", async () => {
+  const f = scenario(), original = f.options.send;
+  let fights = 0;
+  f.options.send = async (cmd, params) => {
+    if (cmd === "nmext_startboss") { fights++; throw new Error("服务器错误: 400312"); }
+    return original(cmd, params);
+  };
+  await assert.rejects(runNightmareStarOnce(f.options), /第1层.*400312/);
+  assert.equal(fights, 1);
 });
