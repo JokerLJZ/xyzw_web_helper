@@ -2881,6 +2881,59 @@
               </div>
             </div>
           </n-collapse-item>
+          <n-collapse-item name="black-market" title="黑市按折扣直购设置">
+            <n-alert
+              type="success"
+              :show-icon="false"
+              style="margin: 8px 0"
+            >
+              这些设置只供“黑市按折扣直购”使用。每轮购买后按次数刷新，并继续购买刷新后的符合商品；默认刷新1次。该任务不读取或修改游戏内采购清单，也不影响原有“一键黑市采购”。
+            </n-alert>
+            <div class="settings-grid" style="margin-bottom: 8px">
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: row;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
+                <label class="setting-label">自动刷新次数</label>
+                <n-input-number
+                  v-model:value="batchSettings.blackMarketRefreshCount"
+                  :min="0"
+                  :max="10"
+                  :step="1"
+                  size="small"
+                  style="width: 120px"
+                />
+              </div>
+            </div>
+            <div class="black-market-discount-grid">
+              <div
+                v-for="item in BLACK_MARKET_ITEMS"
+                :key="item.itemId"
+                class="black-market-discount-item"
+              >
+                <span class="black-market-discount-name">{{ item.name }}</span>
+                <n-input-number
+                  v-model:value="batchSettings.blackMarketDiscounts[item.itemId]"
+                  :min="1"
+                  :max="10"
+                  :step="1"
+                  size="small"
+                  class="black-market-discount-input"
+                >
+                  <template #suffix>折</template>
+                </n-input-number>
+              </div>
+            </div>
+            <div style="margin-top: 8px; text-align: right">
+              <n-button size="tiny" @click="resetBlackMarketDiscounts">
+                恢复预设阈值
+              </n-button>
+            </div>
+          </n-collapse-item>
         </n-collapse>
       </div>
       <div class="modal-actions" style="margin-top: 20px; text-align: right">
@@ -3058,60 +3111,6 @@
             </div>
             <n-divider title-placement="left">江湖黑市周采购设置</n-divider>
             <JianghuBlackMarketSettings v-model="batchSettings.jianghuBlackMarketPurchases" />
-            <n-divider title-placement="left" style="margin: 12px 0 8px 0"
-              >黑市按折扣直购设置</n-divider
-            >
-            <n-alert
-              type="success"
-              :show-icon="false"
-              style="margin: 8px 0"
-            >
-              这些设置只供“黑市按折扣直购”使用。每轮购买后按次数刷新，并继续购买刷新后的符合商品；默认刷新1次。该任务不读取或修改游戏内采购清单，也不影响原有“一键黑市采购”。
-            </n-alert>
-            <div class="settings-grid" style="margin-bottom: 8px">
-              <div
-                class="setting-item"
-                style="
-                  flex-direction: row;
-                  justify-content: space-between;
-                  align-items: center;
-                "
-              >
-                <label class="setting-label">自动刷新次数</label>
-                <n-input-number
-                  v-model:value="batchSettings.blackMarketRefreshCount"
-                  :min="0"
-                  :max="10"
-                  :step="1"
-                  size="small"
-                  style="width: 120px"
-                />
-              </div>
-            </div>
-            <div class="black-market-discount-grid">
-              <div
-                v-for="item in BLACK_MARKET_ITEMS"
-                :key="item.itemId"
-                class="black-market-discount-item"
-              >
-                <span class="black-market-discount-name">{{ item.name }}</span>
-                <n-input-number
-                  v-model:value="batchSettings.blackMarketDiscounts[item.itemId]"
-                  :min="1"
-                  :max="10"
-                  :step="1"
-                  size="small"
-                  class="black-market-discount-input"
-                >
-                  <template #suffix>折</template>
-                </n-input-number>
-              </div>
-            </div>
-            <div style="margin-top: 8px; text-align: right">
-              <n-button size="tiny" @click="resetBlackMarketDiscounts">
-                恢复预设阈值
-              </n-button>
-            </div>
             <n-divider title-placement="left" style="margin: 12px 0 8px 0"
               >功法赠送设置</n-divider
             >
