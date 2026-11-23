@@ -815,7 +815,7 @@
                   size="small"
                   @click="batchAltAccountRefine"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="按装备顺序洗练，命中橙色减伤或红色攻击、减伤、技能伤害即换下一件；武将和次数上限在全局任务设置中配置"
+                  title="按全局任务设置的目标、颜色及装备数量要求执行；仅用白玉，不自动锁孔"
                 >
                   小号自动洗练
                 </n-button>
@@ -2764,6 +2764,21 @@
                 />
               </div>
               <div class="setting-item">
+                <label class="setting-label">自定义小号洗练目标 <n-switch v-model:value="batchSettings.altRefineCustom" /></label>
+                <span class="setting-description">关闭时沿用原规则：橙减伤或红攻击/减伤/技能伤害，四件达标后至少一件有橙/红减伤。仅用白玉，不自动锁孔。</span>
+              </div>
+              <template v-if="batchSettings.altRefineCustom">
+                <div class="setting-item"><label class="setting-label">目标属性（每件至少命中一种）</label><n-select v-model:value="batchSettings.altRefineAttrs" multiple :options="ALT_REFINE_ATTRIBUTES" /></div>
+                <div class="setting-item"><label class="setting-label">最低颜色（含更高颜色）</label><n-select v-model:value="batchSettings.altRefineMinColor" :options="ALT_REFINE_COLORS" /></div>
+                <div class="setting-item"><label class="setting-label">指定属性装备数量要求 <n-switch v-model:value="batchSettings.altRefineCountEnabled" /></label></div>
+                <div v-if="batchSettings.altRefineCountEnabled" class="setting-item">
+                  <label class="setting-label">至少几件装备具有指定属性</label>
+                  <n-input-number v-model:value="batchSettings.altRefineCount" :min="1" :max="4" :precision="0" />
+                  <n-select v-model:value="batchSettings.altRefineCountAttr" :options="ALT_REFINE_ATTRIBUTES.filter(a => batchSettings.altRefineAttrs?.includes(a.value))" placeholder="选择目标属性之一" />
+                  <span class="setting-description">按四件装备统计，每件只计一次；指定属性也需达到最低颜色。先让四件达标，再补足指定属性装备数；整件重洗可能覆盖原属性，不使用彩玉锁孔。</span>
+                </div>
+              </template>
+              <div class="setting-item">
                 <label class="setting-label">宠物自动合成最高品质</label>
                 <n-select v-model:value="batchSettings.petMergeMaxColor" :options="[{label:'白',value:1},{label:'绿',value:2},{label:'蓝',value:3},{label:'紫（默认）',value:4},{label:'橙',value:5},{label:'红',value:6}]" size="small" />
                 <span class="setting-description">先使用白、绿、蓝宠物蛋，槽位满时合成腾位并继续开蛋；不购买槽位。默认合成白、绿、蓝、紫；跳过当前佩戴、锁定及金色宠物。紫色及以上继承较高等级宠物，同等级优先靠前槽位。执行前弹窗确认。</span>
@@ -3848,6 +3863,7 @@
 </template>
 
 <script setup>
+import { ALT_REFINE_ATTRIBUTES, ALT_REFINE_COLORS } from "@/utils/altRefinePolicy.js";
 import { createTasksAltUtilities } from "@/utils/batch/tasksAltUtilities.js";
 import SaltBattleSettings from "@/components/SaltBattleSettings.vue";
 import { createTasksSaltBattle } from "@/utils/batch/tasksSaltBattle.js";
@@ -4688,6 +4704,12 @@ const batchSettings = reactive({
   feudatoryRescueTokenId: null,
   altRefineHeroId: 107,
   altRefineLimit: 1000,
+  altRefineCustom: false,
+  altRefineAttrs: [1, 9, 14],
+  altRefineMinColor: 6,
+  altRefineCountEnabled: false,
+  altRefineCount: 1,
+  altRefineCountAttr: 9,
   pearlFishAutoUpgrade: true,
   petMergeMaxColor: 4,
   fishReplacementHeroId: 107,

@@ -134,3 +134,24 @@ test("各账号白玉独立预算，无白玉正常结束且不请求洗练",asy
   assert.equal(f.calls.filter(x=>x.id==='b').length,2);
   assert.deepEqual(f.deps.tokenStatus.value,{a:'completed',b:'completed'});
 });
+
+test("批量入口传递自定义属性颜色及装备数量条件，只发白玉洗练", async () => {
+ const f=fixture({ids:['a'],limit:10});
+ Object.assign(f.deps.batchSettings,{altRefineCustom:true,altRefineAttrs:[1,9],altRefineMinColor:6,altRefineCountEnabled:true,altRefineCount:2,altRefineCountAttr:9});
+ f.deps.loadRefineConfig=async()=>({ConstantConf:{quenchCostId:1022,quenchCostNum:100},QuenchAttrConf:{1:{id:1},9:{id:9}}});
+ f.deps.tokenStore.sendMessageWithPromise=async(id,cmd,p)=>{
+   f.calls.push({id,cmd,params:p});
+   return {role:{heroes:{107:{equipment:{[p.part]:{quenches:{1:{colorId:6,attrId:9}}}}}}}};
+ };
+ await f.run();
+ assert.equal(f.deps.tokenStatus.value.a,'completed');
+ assert.equal(f.calls.filter(c=>c.cmd==='equipment_quench').length,4);
+ assert.ok(!f.calls.some(c=>c.cmd.includes('lock')));
+ assert.ok(f.logs.some(l=>l.message.includes('指定属性装备4/2件')));
+});
+
+test("自定义空属性配置在连接前拒绝，旧设置默认继续原规则", async () => {
+ const f=fixture();Object.assign(f.deps.batchSettings,{altRefineCustom:true,altRefineAttrs:[]});
+ await f.run();assert.equal(f.connected.length,0);assert.equal(f.calls.length,0);
+ assert.equal(defaultBatchSettings.altRefineCustom,false);
+});

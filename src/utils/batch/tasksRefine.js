@@ -1,3 +1,4 @@
+import { normalizeAltRefinePolicy, matchesAltRefinePolicy, hasAltRefineRequiredAttribute, ALT_REFINE_ATTRIBUTES, ALT_REFINE_COLORS } from "../altRefinePolicy.js";
 import { loadSignupCheerConfig } from "./tasksSignupCheer.js";
 import { DEFAULT_ALT_REFINE_LIMIT, hasAltRefineTarget, hasAltRefineDamageReduction, runAltAccountRefine } from "../altAccountRefine.js";
 import { extractRolePatch } from "../roleSnapshot.js";
@@ -24,6 +25,10 @@ export function createTasksRefine(deps) {
       message.warning("白玉使用次数上限必须为正整数");
       return;
     }
+    let policy;
+    try { policy = normalizeAltRefinePolicy(batchSettings); }
+    catch (error) { message.warning(error.message); return; }
+    const targetMatches = policy ? equip => matchesAltRefinePolicy(equip, policy) : hasAltRefineTarget;
     isRunning.value = true;
     shouldStop.value = false;
     ids.forEach(id => { tokenStatus.value[id] = "waiting"; });
@@ -50,6 +55,8 @@ export function createTasksRefine(deps) {
           const equipment = { ...role?.heroes?.[heroId]?.equipment };
           const config = await (deps.loadRefineConfig || loadSignupCheerConfig)((cmd, params) => tokenStore.sendMessageWithPromise(id, cmd, params, 15000));
           if (shouldStop.value) { tokenStatus.value[id] = "stopped"; break; }
+          if (policy && policy.attrs.some(attr => !config?.QuenchAttrConf?.[attr])) throw new Error("官方配置不支持所选洗练属性，停止执行");
+          if (policy) log(`目标：${policy.attrs.map(id => ALT_REFINE_ATTRIBUTES.find(a => a.value === id).label).join("、")}，最低${ALT_REFINE_COLORS.find(c => c.value === policy.color).label}色${policy.countEnabled ? `；至少${policy.count}件装备具有${ALT_REFINE_ATTRIBUTES.find(a => a.value === policy.attr).label}` : ""}；仅使用白玉、不锁孔`);
           const quenchCost = config?.ConstantConf?.quenchCostNum;
           if (config?.ConstantConf?.quenchCostId !== 1022) throw new Error("洗练消耗道具配置异常");
           const jadeQuantity = role.items?.[1022]?.quantity ?? (role.items && !Object.hasOwn(role.items, 1022) ? 0 : undefined);
@@ -57,10 +64,10 @@ export function createTasksRefine(deps) {
           log(`白玉${jadeQuantity}，单次消耗${quenchCost}，计划最多洗练${plannedLimit}次`);
           log(`开始${HERO_DICT[heroId].name}小号自动洗练，本账号本次上限${limit}次`);
           for (const [part, equip] of Object.entries(equipment)) {
-            if (hasAltRefineTarget(equip)) log(`${partNames[part] || part}已有目标属性，跳过`);
+            if (targetMatches(equip)) log(`${partNames[part] || part}已有目标属性${policy ? "（基础条件已满足，数量要求另行检查）" : "，跳过"}`);
           }
           const result = await runAltAccountRefine({
-            heroId, equipment, jadeQuantity, quenchCost, limit, shouldStop: () => shouldStop.value,
+            heroId, equipment, policy, jadeQuantity, quenchCost, limit, shouldStop: () => shouldStop.value,
             send: async (cmd, params) => {
               if (tokenStore.getWebSocketStatus(id) !== "connected") throw new Error("连接已断开");
               try {
@@ -72,10 +79,10 @@ export function createTasksRefine(deps) {
             },
             onUpdate: update => {
               count = update.count;
-              if ((update.damageReductionStage ? hasAltRefineDamageReduction : hasAltRefineTarget)(update.equipment)) {
+              if ((update.requiredAttributeStage ? equip => hasAltRefineRequiredAttribute(equip, policy) : update.damageReductionStage ? hasAltRefineDamageReduction : targetMatches)(update.equipment)) {
                 log(`${partNames[update.part]}已命中目标属性，本次累计${count}次`, "success");
               } else if (count % 100 === 0) {
-                log(`正在${update.damageReductionStage ? "补减伤，洗练" : "洗练"}${partNames[update.part]}，本次累计${count}/${limit}次`);
+                log(`正在${update.requiredAttributeStage ? "补指定属性装备数，洗练" : update.damageReductionStage ? "补减伤，洗练" : "洗练"}${partNames[update.part]}，本次累计${count}/${limit}次`);
               }
             },
             wait: () => new Promise(resolve => setTimeout(resolve,
@@ -89,10 +96,10 @@ export function createTasksRefine(deps) {
             log(`白玉不足或已达白玉预算，本次计划最多${plannedLimit}次；已确认洗练${result.count}次，未完成洗练目标`, "warning");
           } else if (result.reason === "limit") {
             tokenStatus.value[id] = "completed";
-            log(`已达本次白玉洗练上限${limit}次，达标${result.completedParts.length}/4件，未完成的装备或武器补减伤未继续洗练`, "warning");
+            log(`已达本次白玉洗练上限${limit}次，达标${result.completedParts.length}/4件，未完成的装备或附加属性要求未继续洗练`, "warning");
           } else {
             tokenStatus.value[id] = "completed";
-            log(`四件装备均已达标，本次累计${result.count}次`, "success");
+            log(`四件装备均已达标${policy?.countEnabled ? `，指定属性装备${result.requiredEquipmentCount}/${policy.count}件` : ""}，本次累计${result.count}次`, "success");
           }
         } catch (error) {
           failures++;

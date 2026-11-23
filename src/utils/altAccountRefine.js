@@ -1,3 +1,4 @@
+import { matchesAltRefinePolicy, hasAltRefineRequiredAttribute, countAltRefineEquipment } from "./altRefinePolicy.js";
 // 当前客户端依据及响应限制见 docs/小号洗练补减伤.md。
 export const DEFAULT_ALT_REFINE_LIMIT = 1000;
 export const REFINE_PARTS = [1, 2, 3, 4];
@@ -21,7 +22,7 @@ function bodyOf(result) {
 }
 
 export async function runAltAccountRefine({
-  heroId, equipment, jadeQuantity, quenchCost, limit = DEFAULT_ALT_REFINE_LIMIT, send,
+  heroId, equipment, policy = null, jadeQuantity, quenchCost, limit = DEFAULT_ALT_REFINE_LIMIT, send,
   shouldStop = () => false, onUpdate = () => {},
   wait = () => Promise.resolve(),
 }) {
@@ -32,14 +33,17 @@ export async function runAltAccountRefine({
   if (!Number.isSafeInteger(quenchCost) || quenchCost < 1) throw new Error("白玉单次消耗配置异常");
   const jadeLimit = Math.floor(jadeQuantity / quenchCost);
   const plannedLimit = Math.min(limit, jadeLimit);
+  const targetMatches = policy ? equip => matchesAltRefinePolicy(equip, policy) : hasAltRefineTarget;
   let count = 0;
   const completedParts = [];
-  const finish = (reason) => ({ reason, count, completedParts: completedParts.filter(p => hasAltRefineTarget(equipment[p])) });
+  const finish = (reason) => ({ reason, count, completedParts: completedParts.filter(p => targetMatches(equipment[p])), requiredEquipmentCount: policy ? countAltRefineEquipment(equipment, policy) : undefined });
   // 最后一轮只重洗武器，开始后持续追减伤，不再接受攻击/技能伤害。
-  for (const [index, part] of [...REFINE_PARTS, 1].entries()) {
-    const damageReductionStage = index === REFINE_PARTS.length;
+  for (const [index, part] of (policy ? [...REFINE_PARTS, ...(policy.countEnabled ? REFINE_PARTS : [])] : [...REFINE_PARTS, 1]).entries()) {
+    const requiredAttributeStage = !!policy && index >= REFINE_PARTS.length;
+    if (requiredAttributeStage && countAltRefineEquipment(equipment, policy) >= policy.count) break;
+    const damageReductionStage = !policy && index === REFINE_PARTS.length;
     if (damageReductionStage && REFINE_PARTS.some(p => hasAltRefineDamageReduction(equipment[p]))) break;
-    const matches = damageReductionStage ? hasAltRefineDamageReduction : hasAltRefineTarget;
+    const matches = requiredAttributeStage ? equip => hasAltRefineRequiredAttribute(equip, policy) : damageReductionStage ? hasAltRefineDamageReduction : targetMatches;
     if (shouldStop()) return finish("stopped");
     if (!equipment[part]) throw new Error(`未获取到装备${part}的数据，请刷新阵容`);
     while (!matches(equipment[part])) {
@@ -82,7 +86,7 @@ export async function runAltAccountRefine({
         if (!Number.isSafeInteger(reported) || reported < 0) throw new Error("洗练响应白玉数量异常，已停止");
         jadeQuantity = Math.min(jadeQuantity, reported);
       }
-      onUpdate({ part, count, damageReductionStage, equipment: equipment[part], items: result.role?.items });
+      onUpdate({ part, count, damageReductionStage, requiredAttributeStage, equipment: equipment[part], items: result.role?.items });
       if (shouldStop()) return finish("stopped");
       if (!matches(equipment[part]) && count >= limit) return finish("limit");
       await wait();
