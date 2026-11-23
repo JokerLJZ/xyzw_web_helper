@@ -19,6 +19,7 @@ export const TASK_GROUPS = [
     "tasks": [
       "climbTower",
       "batchWeirdTower",
+      "batchNightmareStarOnce",
       "batchmengjing",
       "batcharenafight",
       "batchGenieSweep",

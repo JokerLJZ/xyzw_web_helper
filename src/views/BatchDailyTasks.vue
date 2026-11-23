@@ -378,6 +378,7 @@
             </n-tab-pane>
             <n-tab-pane name="dungeon" tab="副本与挑战">
               <n-space>
+                <n-button size="small" @click="batchNightmareStarOnce" :disabled="isRunning || selectedTokens.length === 0">一键星级挑战一次</n-button>
                 <n-button
                   size="small"
                   @click="climbTower"
@@ -1099,6 +1100,7 @@
               <span class="switch-label">领取邮件奖励</span
               ><n-switch v-model:value="currentSettings.claimEmail" />
             </div>
+            <div class="switch-row"><span class="switch-label">周一星级挑战一次（保存阵容）</span><n-switch v-model:value="currentSettings.mondayNightmareStarOnce" /></div>
             <div class="switch-row">
               <span class="switch-label" title="每周一先领取附件并核对，再删除系统邮件和游戏公告">周一领取并删除系统邮件与公告</span>
               <n-switch v-model:value="currentSettings.mondayMailCleanup" />
@@ -1248,6 +1250,7 @@
               <span class="switch-label">领取邮件奖励</span
               ><n-switch v-model:value="currentTemplate.claimEmail" />
             </div>
+            <div class="switch-row"><span class="switch-label">周一星级挑战一次（保存阵容）</span><n-switch v-model:value="currentTemplate.mondayNightmareStarOnce" /></div>
             <div class="switch-row">
               <span class="switch-label" title="每周一先领取附件并核对，再删除系统邮件和游戏公告">周一领取并删除系统邮件与公告</span>
               <n-switch v-model:value="currentTemplate.mondayMailCleanup" />
@@ -4466,6 +4469,7 @@ const currentSettings = reactive({
   claimHangUp: true,
   claimEmail: true,
   mondayMailCleanup: false,
+  mondayNightmareStarOnce: false,
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
   holyBeastFragmentPurchase: false,
@@ -4504,6 +4508,7 @@ const currentTemplate = reactive({
   claimHangUp: true,
   claimEmail: true,
   mondayMailCleanup: false,
+  mondayNightmareStarOnce: false,
   blackMarketPurchase: true,
   blackMarketDiscountPurchase: false,
   holyBeastFragmentPurchase: false,
@@ -7170,6 +7175,7 @@ const loadSettings = (tokenId) => {
       claimHangUp: true,
       claimEmail: true,
       mondayMailCleanup: false,
+  mondayNightmareStarOnce: false,
       blackMarketPurchase: true,
       blackMarketDiscountPurchase: false,
       holyBeastFragmentPurchase: false,
@@ -7228,6 +7234,7 @@ const openTaskTemplateModal = () => {
     claimHangUp: true,
     claimEmail: true,
     mondayMailCleanup: false,
+  mondayNightmareStarOnce: false,
     blackMarketPurchase: true,
     blackMarketDiscountPurchase: false,
     holyBeastFragmentPurchase: false,
@@ -7391,6 +7398,7 @@ const resetTemplateForm = () => {
     claimHangUp: true,
     claimEmail: true,
     mondayMailCleanup: false,
+  mondayNightmareStarOnce: false,
     blackMarketPurchase: true,
     blackMarketDiscountPurchase: false,
     holyBeastFragmentPurchase: false,
@@ -8152,6 +8160,7 @@ const {
   climbTower,
   climbWeirdTower,
   batchWeirdTower,
+  batchNightmareStarOnce,
   batchClaimFreeEnergy,
   skinChallenge,
   batchUseItems,
@@ -8364,6 +8373,7 @@ const getScheduledTaskFunction = (name) => {
     batchlingguanzi,
     climbTower,
     batchWeirdTower,
+    batchNightmareStarOnce,
     batchOpenBox,
     batchOpenBoxByPoints,
     batchClaimBoxPointReward,

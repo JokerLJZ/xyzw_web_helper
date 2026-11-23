@@ -6,7 +6,8 @@ import { availableTasks } from '../src/utils/batch/constants.js';
 test('全部已批准任务及兼容任务各归一组，定时可选任务无遗漏', () => {
   const defined = TASK_GROUPS.flatMap(group => group.tasks);
   assert.equal(TASK_GROUPS.length, 12);
-  assert.equal(defined.length, 101);
+  assert.equal(defined.length, 102);
+  assert.ok(TASK_GROUPS.find(group => group.name === 'dungeon').tasks.includes('batchNightmareStarOnce'));
   assert.equal(new Set(defined).size, defined.length);
   const grouped = groupTaskCatalog(availableTasks);
   assert.ok(!grouped.some(group => group.name === 'other'));

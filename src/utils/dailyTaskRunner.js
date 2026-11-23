@@ -1,3 +1,4 @@
+import { runNightmareStarOnce } from "./nightmareStarChallenge.js";
 import { claimMailRewards } from "./claimMailRewards.js";
 import { runMondayFreeJade } from "./mondayFreeJade.js";
 import { runDailyMatchRoom } from "./dailyMatchRoom.js";
@@ -1388,6 +1389,7 @@ export class DailyTaskRunner {
         claimHangUp: true,
         claimEmail: true,
         mondayMailCleanup: false,
+        mondayNightmareStarOnce: false,
         blackMarketPurchase: true,
         blackMarketDiscountPurchase: false,
         holyBeastFragmentPurchase: false,
@@ -1902,6 +1904,23 @@ export class DailyTaskRunner {
         ? [{ name: "领取免费礼包", cmd: "card_claimreward" }]
         : []),
     ];
+
+    if (settings.mondayNightmareStarOnce === true) taskList.push({
+      name: "周一星级挑战一次",
+      execute: () => runNightmareStarOnce({
+        mondayOnly: true, now: () => this.serverNow(tokenId),
+        stopped: () => this.callbacks?.shouldStop?.() === true,
+        send: async (cmd, params) => {
+          if (cmd === "nmext_startboss") this.roleStateDirty = true;
+          const response = await this.sendRequest(tokenId, () =>
+            this.tokenStore.sendMessageWithPromise(tokenId, cmd, params, 20000), cmd);
+          const patch = extractRolePatch(response), snapshot = this.roleSnapshots.get(tokenId);
+          if (patch && snapshot) mergeRoleSnapshot(snapshot, patch);
+          return response;
+        },
+        log: (text, type = "info") => this.logDetail(text, type),
+      }),
+    });
 
     if (settings.mondayMailCleanup === true) {
       taskList.push({

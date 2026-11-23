@@ -1,3 +1,4 @@
+import { runNightmareStarOnce } from "../nightmareStarChallenge.js";
 import { createWeirdTowerRequester, createWeirdTowerStartGate } from "../weirdTowerRequests.js";
 import { runWeirdTowerAccount } from "../weirdTowerRunner.js";
 /**
@@ -52,6 +53,33 @@ export function createTasksTower(deps) {
     currentSettings,
     loadSettings,
   } = deps;
+
+  const batchNightmareStarOnce = async () => {
+    if (!selectedTokens.value.length) return;
+    isRunning.value = true; shouldStop.value = false;
+    try {
+      for (const tokenId of selectedTokens.value) {
+        if (shouldStop.value) break;
+        const name = tokens.value.find(t => t.id === tokenId)?.name || tokenId;
+        const log = (text, type = "info") => addLog({ time: new Date().toLocaleTimeString(), message: `${name} ${text}`, type });
+        let connected = false;
+        try {
+          tokenStatus.value[tokenId] = "running";
+          await ensureConnection(tokenId); connected = true;
+          await runNightmareStarOnce({
+            send: async (cmd, params) => {
+              const result = await tokenStore.sendMessageWithPromise(tokenId, cmd, params, 20000);
+              await new Promise(resolve => setTimeout(resolve, 500)); return result;
+            },
+            now: () => tokenStore.getWebSocketClient?.(tokenId)?.getServerTime?.() ?? Date.now(),
+            stopped: () => shouldStop.value, log,
+          });
+          tokenStatus.value[tokenId] = "completed";
+        } catch (error) { tokenStatus.value[tokenId] = "failed"; log(error.message, "error"); }
+        finally { if (connected) { tokenStore.closeWebSocketConnection(tokenId); releaseConnectionSlot(); } }
+      }
+    } finally { isRunning.value = false; currentRunningTokenId.value = null; }
+  };
 
   const weirdRequestOptions = deps.weirdTowerRequestOptions || {};
   const startWeirdAccount = createWeirdTowerStartGate({ ...deps.weirdTowerStartOptions, stopped: () => shouldStop.value });
@@ -519,6 +547,7 @@ export function createTasksTower(deps) {
   const batchWeirdTower = () => runWeirdTowerBatch("all");
 
   return {
+    batchNightmareStarOnce,
     climbTower,
     climbWeirdTower,
     batchWeirdTower,
