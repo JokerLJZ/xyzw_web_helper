@@ -30,12 +30,27 @@ export function clubRewardDates(config, firstMonthDate, now) {
   }).map(r=>format(day(r.serverDate)));
   return [...new Set(dates)].sort().reverse();
 }
-export async function claimClubEventRewards({send,now=Date.now,stopped=()=>false,log=()=>{},loadConfig=loadSignupCheerConfig}) {
+export async function claimClubEventRewards({send,now=Date.now,stopped=()=>false,log=()=>{},loadConfig=loadSignupCheerConfig,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))}) {
   const request=async(cmd,params={})=>{
-    if(stopped())throw Object.assign(new Error("大事件领奖已停止"),{interrupted:true});
-    const response=await send(cmd,params),code=response?._raw?.code??response?.code;
-    if(code!==undefined&&code!==0)throw new Error(`${cmd}：服务器错误${code}`);
-    return activityBody(response);
+    const query=cmd!=="legion_claimwarrankreward";
+    for(let attempt=0;attempt<3;attempt++){
+      await sleep(attempt?3000:800);
+      if(stopped())throw Object.assign(new Error("大事件领奖已停止"),{interrupted:true});
+      try {
+        const response=await send(cmd,params),code=response?._raw?.code??response?.code;
+        if(code!==undefined&&code!==0)throw Object.assign(new Error(`服务器错误${code}`),{code});
+        return activityBody(response);
+      } catch(error) {
+        const limited=/(?:^|\D)200400(?:\D|$)/.test(`${error.code || ""} ${error.message}`);
+        if(query&&limited&&!error.interrupted&&attempt<2){
+          log(`${cmd}${params.date?`（${params.date}）`:""}查询被限速，等待3秒后重查`,"warning");
+          continue;
+        }
+        const failure=new Error(`${cmd}${params.date?`（${params.date}）`:""}：${error.message || error}`);
+        failure.code=error.code;failure.interrupted=error.interrupted;failure.cause=error;
+        throw failure;
+      }
+    }
   };
   const readRole=async()=>{
     const role=extractRolePatch(await request("role_getroleinfo"));
@@ -58,10 +73,16 @@ export async function claimClubEventRewards({send,now=Date.now,stopped=()=>false
     const list=result.legionRankList===undefined?[]:result.legionRankList;
     if(!Array.isArray(list))throw new Error(`${date}大事件榜单结构无效`);
     if(!list.length){log(`${date}大事件无榜单，跳过`);continue;}
-    let failure;
-    try{await request("legion_claimwarrankreward",{date});}catch(error){failure=error;}
+    let failure,response;
+    try{response=await request("legion_claimwarrankreward",{date});}catch(error){failure=error;}
     if(failure?.interrupted)throw failure;
-    role=await readRole();
+    // A matching explicit statistics patch already confirms the claim; avoid
+    // querying the entire role once more for every date in that case.
+    const confirmed=get(extractRolePatch(response)?.statistics,key);
+    if(confirmed){
+      role.statistics=role.statistics instanceof Map?new Map(role.statistics):{...role.statistics};
+      if(role.statistics instanceof Map)role.statistics.set(key,confirmed);else role.statistics[key]=confirmed;
+    }else role=await readRole();
     if(!get(role.statistics,key))throw failure||new Error(`${date}大事件领奖未确认，停止且不重发`);
     claimed++;log(`${date}大事件奖励已确认领取`,'success');
   }

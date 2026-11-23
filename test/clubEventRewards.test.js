@@ -5,7 +5,7 @@ const config={LegionScheduleConf:{1:{legionWarType:2,serverDate:"2026/10/01"},2:
 const now=()=>Date.parse("2026-11-23T12:00:00+08:00");
 function fixture(){
  const flags={},calls=[];
- const options={now,loadConfig:async()=>config,send:async(cmd,p)=>{
+ const options={sleep:async()=>{},now,loadConfig:async()=>config,send:async(cmd,p)=>{
   calls.push({cmd,p});
   if(cmd==='role_getroleinfo')return {role:{statistics:{...flags}}};
   if(cmd==='role_getfirstmonthdate')return {firstMonthDate:'2026/10/01'};
@@ -50,4 +50,27 @@ test("无首次月赛跳过；账号统计独立；用户停止不发请求",asy
  assert.deepEqual((await Promise.all([claimClubEventRewards(a.options),claimClubEventRewards(b.options)])).map(r=>r.claimed),[1,2]);
  const f=fixture();f.options.stopped=()=>true;await assert.rejects(claimClubEventRewards(f.options),e=>e.interrupted);assert.equal(f.calls.length,0);
  const g=fixture();g.options.send=async(cmd)=>cmd==='role_getroleinfo'?{role:{}}:{};assert.equal((await claimClubEventRewards(g.options)).claimed,0);
+});
+
+test("限速只重试只读查询，错误保留指令和日期；写请求不重发",async()=>{
+ const f=fixture(),original=f.options.send;let reads=0,writes=0;
+ f.options.send=async(cmd,p)=>{
+  if(cmd==='role_getfirstmonthdate'&&reads++===0)throw new Error('服务器错误: 200400');
+  if(cmd==='legion_claimwarrankreward'){writes++;throw new Error('服务器错误: 200400');}
+  return original(cmd,p);
+ };
+ await assert.rejects(claimClubEventRewards(f.options),/legion_claimwarrankreward.*2026\/11\/01.*200400/);
+ assert.equal(reads,2);assert.equal(writes,1);
+});
+test("领取响应已有明确日期统计时复用增量，不再逐场查询整个角色",async()=>{
+ const f=fixture(),original=f.options.send;
+ f.options.send=async(cmd,p)=>{const result=await original(cmd,p);return cmd==='legion_claimwarrankreward'?{role:{statistics:{['war:rank:reward:'+p.date]:1}}}:result;};
+ assert.equal((await claimClubEventRewards(f.options)).claimed,2);
+ assert.equal(f.calls.filter(c=>c.cmd==='role_getroleinfo').length,1);
+});
+test("每次请求等待且查询200400有界，停止后不发送",async()=>{
+ const f=fixture(),waits=[];f.options.sleep=async ms=>waits.push(ms);
+ f.options.send=async()=>{throw new Error('服务器错误: 200400');};
+ await assert.rejects(claimClubEventRewards(f.options),/role_getroleinfo.*200400/);
+ assert.deepEqual(waits,[800,3000,3000]);
 });
