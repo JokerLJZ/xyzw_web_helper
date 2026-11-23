@@ -83,6 +83,7 @@ export async function runNightmareStarOnce({ send, now = Date.now, mondayOnly = 
     guard();
     if (starWeekStart(now()) !== week) throw new Error("星级挑战已跨周，停止执行");
     const id = boss.bossId;
+    info = await readInfo();
     const used = integer(get(info.starFightCntMap, id) ?? 0, "已挑战次数") + integer(get(info.privilegeStarFightCntMap, id) ?? 0, "已用特权次数");
     if (used >= integer(boss.challengeTime, "挑战次数上限") + bonus) { log(`星级第${id}层跳过：无剩余次数`); continue; }
     const team = get(presets, 100 + id);
@@ -94,6 +95,10 @@ export async function runNightmareStarOnce({ send, now = Date.now, mondayOnly = 
     if (!Number.isSafeInteger(params.lordWeaponId) || params.lordWeaponId < 0 || typeof params.petUId !== "string") throw new Error(`星级第${id}层玩具或宠物状态缺失`);
     let failure;
     try { await request("nmext_startboss", params); } catch (error) { failure = error; }
+    if (failure && !failure.interrupted && /(?:^|\D)3300030(?:\D|$)/.test(`${failure.code || ""} ${failure.message}`)) {
+      log(`星级第${id}层跳过：服务器确认挑战次数已用完，继续后续层`);
+      continue;
+    }
     info = await readInfo();
     const after = integer(get(info.starFightCntMap, id) ?? 0, "挑战后次数") + integer(get(info.privilegeStarFightCntMap, id) ?? 0, "挑战后特权次数");
     if (after <= used) throw failure || new Error(`星级第${id}层挑战消耗未确认，停止且不重发`);

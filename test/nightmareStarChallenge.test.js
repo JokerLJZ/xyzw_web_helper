@@ -23,7 +23,7 @@ test("八层各用对应保存阵容打一次，按次数增长确认，不改�
   const f = scenario(); assert.equal((await runNightmareStarOnce(f.options)).challenged, 8);
   const fights = f.calls.filter(c => c.cmd === "nmext_startboss"); assert.equal(fights.length, 8);
   assert.deepEqual(fights[0].params, { bossId: 1, battleTeam: { 0: 101 }, lordWeaponId: 1, petUId: "1", presetTeamType: 101 });
-  assert.equal(f.calls.filter(c => c.cmd === "nmext_getinfo").length, 9);
+  assert.equal(f.calls.filter(c => c.cmd === "nmext_getinfo").length, 17);
 });
 test("周一限制按北京时间，非周一不发请求；手动执行不受此限制", async () => {
   const f = scenario(); f.options.mondayOnly = true; f.options.now = () => monday + 86400000;
@@ -115,4 +115,29 @@ test("战斗被限速且次数未增则带层号报错，不自动重发", async
   };
   await assert.rejects(runNightmareStarOnce(f.options), /第1层.*400312/);
   assert.equal(fights, 1);
+});
+
+test("单层3300030正常跳过且不重发，继续后续独立层", async () => {
+  const f = scenario(), original = f.options.send, attempted = [];
+  f.options.send = async (cmd, params) => {
+    if (cmd === "nmext_startboss") {
+      attempted.push(params.bossId);
+      if (params.bossId === 6) throw new Error("服务器错误: 3300030 - 挑战次数已用完");
+    }
+    return original(cmd, params);
+  };
+  assert.equal((await runNightmareStarOnce(f.options)).challenged, 7);
+  assert.deepEqual(attempted, [1,2,3,4,5,6,7,8]);
+  assert.ok(f.logs.some(l => /第6层跳过.*次数已用完/.test(l.text) && l.type !== "error"));
+});
+test("每层开战前查最新次数：上层结束后变为耗尽的下一层不发送战斗", async () => {
+  const f = scenario(), original = f.options.send;
+  let reads = 0;
+  f.options.send = async (cmd, params) => {
+    if (cmd === "nmext_getinfo" && ++reads === 4) f.counts[2] = 5;
+    return original(cmd, params);
+  };
+  assert.equal((await runNightmareStarOnce(f.options)).challenged, 7);
+  assert.ok(!f.calls.some(c => c.cmd === "nmext_startboss" && c.params.bossId === 2));
+  assert.ok(f.calls.some(c => c.cmd === "nmext_startboss" && c.params.bossId === 8));
 });
