@@ -81,7 +81,7 @@ export function validateDailyTaskConfig(config) {
     throw new Error("官方每日任务配置无效，停止执行");
   return { tasks, dailyRewards, weeklyRewards, constants: config.ConstantConf,
     bossLoop: config.BossLoopConfig, bossRewards: config.BossRewardsConfig,
-    legionStore: config.LegionStoreConf };
+    rollUpPacks: config.RollUpPackConf, legionStore: config.LegionStoreConf };
 }
 
 /**

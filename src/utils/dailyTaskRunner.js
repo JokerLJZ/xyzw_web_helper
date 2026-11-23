@@ -1,3 +1,4 @@
+import { runMondayFreeJade } from "./mondayFreeJade.js";
 import { runDailyMatchRoom } from "./dailyMatchRoom.js";
 import { cleanupMondayMail } from "./mondayMailCleanup.js";
 import { normalizeDailyRoleSnapshot, chinaDayStart, arenaAvailability, remainingFreeFishing, rewardProgressText, dailyConditionEnabled, classifyDailyStepResult } from "./dailyTaskPolicy.js";
@@ -1939,6 +1940,12 @@ export class DailyTaskRunner {
           ),
       });
     });
+
+    taskList.push({ name: "领取十殿精选免费100白玉", execute: () => runMondayFreeJade({
+      now: this.serverNow(tokenId), packs: this.taskConfig?.rollUpPacks,
+      getRole: () => this.getLatestRole(tokenId, "检查十殿精选礼包"),
+      claim: (id) => this.executeGameCommand(tokenId, "activity_claimrolluppack", { id }, "领取十殿精选免费100白玉"),
+    }) });
 
     taskList.push({ name: "领取每日礼包", execute: () => this.claimDailyDiscountIfAvailable(tokenId) });
 

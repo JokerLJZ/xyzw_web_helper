@@ -149,6 +149,7 @@ export class CommandRegistry {
 export function registerDefaultCommands(reg) {
   const registry = reg
     .registerHeartbeat()
+    .register("activity_claimrolluppack", {})
     .register("pkroom_getfightroominfo", {})
     .register("pkroom_getfightroomdetail", {})
     .register("pkroom_appoint", {})
