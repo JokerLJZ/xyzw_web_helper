@@ -1924,7 +1924,7 @@ export class DailyTaskRunner {
 
     if (settings.mondayMailCleanup === true) {
       taskList.push({
-        name: "周一领取并删除系统邮件与公告",
+        name: "周二领取并删除系统邮件与公告",
         execute: () => cleanupMondayMail({
           send: async (cmd, params) => {
             if (cmd !== "mail_getlist") this.roleStateDirty = true;

@@ -1102,7 +1102,7 @@
             </div>
             <div class="switch-row"><span class="switch-label">周一星级挑战一次（保存阵容）</span><n-switch v-model:value="currentSettings.mondayNightmareStarOnce" /></div>
             <div class="switch-row">
-              <span class="switch-label" title="每周一先领取附件并核对，再删除系统邮件和游戏公告">周一领取并删除系统邮件与公告</span>
+              <span class="switch-label" title="每周二先领取附件并核对，再删除系统邮件和游戏公告">周二领取并删除系统邮件与公告</span>
               <n-switch v-model:value="currentSettings.mondayMailCleanup" />
             </div>
             <div class="switch-row">
@@ -1252,7 +1252,7 @@
             </div>
             <div class="switch-row"><span class="switch-label">周一星级挑战一次（保存阵容）</span><n-switch v-model:value="currentTemplate.mondayNightmareStarOnce" /></div>
             <div class="switch-row">
-              <span class="switch-label" title="每周一先领取附件并核对，再删除系统邮件和游戏公告">周一领取并删除系统邮件与公告</span>
+              <span class="switch-label" title="每周二先领取附件并核对，再删除系统邮件和游戏公告">周二领取并删除系统邮件与公告</span>
               <n-switch v-model:value="currentTemplate.mondayMailCleanup" />
             </div>
             <div class="switch-row">

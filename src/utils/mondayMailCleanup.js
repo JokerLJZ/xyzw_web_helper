@@ -1,7 +1,7 @@
 import { activityBody } from "./rechargeActivity.js";
 
 const CATEGORIES = [0, 5]; // categorySystemMail, categoryPublicNoticeMail
-export const isMailCleanupMonday = time => new Date(time + 8 * 3600000).getUTCDay() === 1;
+export const isMailCleanupTuesday = time => new Date(time + 8 * 3600000).getUTCDay() === 2;
 
 /** Mail_GetListResp defaults omitted in raw BON: list=[], left=0. */
 export function normalizeMailListResponse(response) {
@@ -18,11 +18,12 @@ export function normalizeMailListResponse(response) {
 }
 
 /** Claim before delete, scoped to system mail and announcements; never blindly retry writes. */
+// Keep the legacy function/settings names so saved preferences remain compatible.
 export async function cleanupMondayMail({ send, now = Date.now, stopped = () => false }) {
-  if (!isMailCleanupMonday(now())) return { status: "skipped", reason: "非周一，跳过系统邮件与公告清理" };
+  if (!isMailCleanupTuesday(now())) return { status: "skipped", reason: "非周二，跳过系统邮件与公告清理" };
   const guard = () => {
     if (stopped()) throw Object.assign(new Error("邮件清理已停止"), { interrupted: true });
-    if (!isMailCleanupMonday(now())) throw new Error("邮件清理已跨出周一，停止继续操作");
+    if (!isMailCleanupTuesday(now())) throw new Error("邮件清理已跨出周二，停止继续操作");
   };
   const read = async () => {
     guard();
