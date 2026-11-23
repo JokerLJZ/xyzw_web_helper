@@ -771,6 +771,7 @@
             </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
               <n-space style="margin-bottom: 12px">
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchClaimClubEventRewards">领取俱乐部大事件奖励</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchCleanupSystemMail" title="先领取附件并确认，再删除系统邮件与公告；手动执行不限星期">领取并删除系统邮件与公告</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchUnlockStudySkins" title="按当前条件解锁已达标的大冲关皮肤，不切换装扮">一键解锁大冲关皮肤</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchDeleteLordReports" title="只删除咸主战报，保留未领取附件">一键删除咸主战报</n-button>
@@ -8164,7 +8165,7 @@ const createTaskDeps = () => ({
 });
 
 // 初始化任务模块
-const { batchCleanupSystemMail, batchUnlockStudySkins, batchDeleteLordReports } = createTasksAltUtilities({ ...createTaskDeps(), isScheduledSession: isScheduledTokenSession });
+const { batchClaimClubEventRewards, batchCleanupSystemMail, batchUnlockStudySkins, batchDeleteLordReports } = createTasksAltUtilities({ ...createTaskDeps(), isScheduledSession: isScheduledTokenSession });
 const tasksHangUp = createTasksHangUp(createTaskDeps());
 const {
   claimHangUpRewards,
@@ -8464,6 +8465,7 @@ const getScheduledTaskFunction = (name) => {
     batchUnlockStudySkins,
     batchDeleteLordReports,
     batchCleanupSystemMail,
+    batchClaimClubEventRewards,
     batchXuanwuBlessing,
     batchClaimConsumptionRewards,
     batchRechargeStandard,

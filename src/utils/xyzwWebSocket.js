@@ -493,6 +493,9 @@ export function registerDefaultCommands(reg) {
     .register("legacy_claimhangup")
     .register("legacy_beginhangup")
     .register("legacy_claimchargereward", { id: 2 })
+    .register("role_getfirstmonthdate")
+    .register("legionwar_getmajoreventslist")
+    .register("legion_claimwarrankreward")
     .register("role_backclaimreward")
     .register("nmext_getinfo")
     .register("nmext_startboss")
@@ -1386,6 +1389,9 @@ export class XyzwWebSocketClient {
       presetteam_getinforesp: "presetteam_getinfo",
       mail_claimallattachmentresp: "mail_claimallattachment",
       mail_getlistresp: "mail_getlist",
+      role_getfirstmonthdateresp: "role_getfirstmonthdate",
+      legionwar_getmajoreventslistresp: "legionwar_getmajoreventslist",
+      legion_claimwarrankrewardresp: "legion_claimwarrankreward",
       nmext_getinforesp: "nmext_getinfo",
       nmext_startbossresp: "nmext_startboss",
       presetteam_typegetinforesp: "presetteam_typegetinfo",
