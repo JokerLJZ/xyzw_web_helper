@@ -1,7 +1,8 @@
+import { syncPendingRewards } from "./syncPendingRewards.js";
 import { normalizeMailListResponse } from "./mondayMailCleanup.js";
 
 /** Follow login settlement before claiming existing system-mail attachments. Never retry writes. */
-export async function claimMailRewards({ send, stopped = () => false, log = () => {}, wait = () => Promise.resolve() }) {
+export async function claimMailRewards({ send, stopped = () => false, log = () => {}, wait = () => Promise.resolve(), loadConfig }) {
   const request = async (stage, command, params = {}) => {
     if (stopped()) throw Object.assign(new Error("邮件领取已停止"), { interrupted: true });
     try {
@@ -18,17 +19,7 @@ export async function claimMailRewards({ send, stopped = () => false, log = () =
       throw failure;
     }
   };
-  // The official client only queries NMExt when Nightmare is unlocked. A failed
-  // optional query must not block unrelated mail on accounts without the feature.
-  log("查询十殿星级状态");
-  try {
-    await request("十殿状态查询", "nmext_getinfo");
-  } catch (error) {
-    if (error.interrupted) throw error;
-    log(`${error.message}；继续补发普通奖励，十殿奖励尚未确认`, "warning");
-  }
-  log("请求登录奖励补发");
-  await request("奖励补发", "role_backclaimreward");
+  await syncPendingRewards({ request, log, loadConfig });
   const read = async () => normalizeMailListResponse(await request("邮箱刷新", "mail_getlist", {
     category: [0, 4, 5], lastId: 0, size: 60,
   }));

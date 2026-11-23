@@ -35,6 +35,8 @@ const createRecruitScenario = ({
     async sendMessageWithPromise(_tokenId, cmd, params) {
       commands.push({ cmd, params });
 
+      if (cmd === "role_getroleinfo") return getRoleInfo();
+
       if (cmd === "activity_get") {
         return {
           activity: {

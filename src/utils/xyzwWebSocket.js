@@ -309,6 +309,7 @@ export function registerDefaultCommands(reg) {
     .register("evotower_getshareinfo")
     .register("evotower_claimsharetaskreward")
     .register("evotower_claimorderpassdailyreward")
+    .register("role_asyncclaimreward")
     .register("role_asyncclaimrewardv2")
     .register("activity_battlepassrewardclaim")
     .register("evotower_buyenergy", { energy: 1 })
@@ -1516,6 +1517,7 @@ export class XyzwWebSocketClient {
 
       legion_researchresp: ["legion_research", "legion_resetresearch"],
       syncresp: [
+        "role_asyncclaimreward",
         "book_claimskinpoint",
         "system_mysharecallback",
         "task_claimdailypoint",
