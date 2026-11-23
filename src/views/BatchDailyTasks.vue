@@ -112,6 +112,7 @@
             >
               任务模板
             </n-button>
+            <n-button @click="openAltSettings" type="default" size="medium">小号全局配置</n-button>
             <n-button @click="openBatchSettings" type="default" size="medium">
               <template #icon>
                 <n-icon>
@@ -771,6 +772,7 @@
             </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
               <n-space style="margin-bottom: 12px">
+                <n-button size="small" type="primary" @click="openAltSettings">小号全局配置</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchClaimClubEventRewards">领取俱乐部大事件奖励</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchCleanupSystemMail" title="先领取附件并确认，再删除系统邮件与公告；手动执行不限星期">领取并删除系统邮件与公告</n-button>
                 <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchUnlockStudySkins" title="按当前条件解锁已达标的大冲关皮肤，不切换装扮">一键解锁大冲关皮肤</n-button>
@@ -792,7 +794,7 @@
                   size="small"
                   @click="batchJoinLegion"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="俱乐部号请在任务设置中填写"
+                  title="俱乐部号请在小号全局配置中填写"
                 >
                   批量加入俱乐部
                 </n-button>
@@ -800,7 +802,7 @@
                   size="small"
                   @click="batchUpgradeCrystal"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="武将和属性锁定方式请在任务设置中选择"
+                  title="武将和属性锁定方式请在小号全局配置中选择"
                 >
                   水晶升级至资源不足
                 </n-button>
@@ -808,7 +810,7 @@
                   size="small"
                   @click="batchUpgradeEquipment"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="使用精铁一键升级全局设置中所选武将的全部装备"
+                  title="使用精铁一键升级小号全局配置中所选武将的全部装备"
                 >
                   精铁一键升级装备
                 </n-button>
@@ -816,7 +818,7 @@
                   size="small"
                   @click="batchAltAccountRefine"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="按全局任务设置的目标、颜色及装备数量要求执行；仅用白玉，不自动锁孔"
+                  title="按小号全局配置的目标、颜色及装备数量要求执行；仅用白玉，不自动锁孔"
                 >
                   小号自动洗练
                 </n-button>
@@ -895,7 +897,7 @@
                   size="small"
                   @click="batchAwakenHeroSkills"
                   :disabled="isRunning || selectedTokens.length === 0"
-                  title="按全局设置中选择的红将，检查条件后自动觉醒技能"
+                  title="按小号全局配置中选择的红将，检查条件后自动觉醒技能"
                 >
                   自动技能觉醒
                 </n-button>
@@ -2671,40 +2673,13 @@
       </div>
     </n-modal>
 
-    <!-- Batch Settings Modal -->
-    <n-modal
-      v-model:show="showBatchSettingsModal"
-      preset="card"
-      title="全局任务设置"
-      style="width: 90%; max-width: 820px"
-    >
-      <n-button :disabled="isRunning" @click="showCheerShopModal = true">配置月度助威商店采购</n-button>
-        <div class="settings-content">
-        <n-grid :cols="2" :x-gap="24">
-          <!-- 左列：批量操作设置 -->
-          <n-grid-item>
-            <n-divider title-placement="left" style="margin: 1px 0 8px 0"
-              >批量操作设置</n-divider
-            >
+    <!-- Small-account global settings: same persisted batchSettings as other tasks. -->
+    <n-modal v-model:show="showAltSettingsModal" preset="card" title="小号全局配置" style="width: 90%; max-width: 820px">
+      <p class="setting-description">对所选账号的手动、批量和定时小号任务生效。武将、鱼灵、宠物等共享配置也会影响使用它们的其他任务。</p>
+      <div style="max-height: 65vh; overflow-y: auto; padding: 4px">
+        <n-collapse :default-expanded-names="['refine']">
+          <n-collapse-item name="club" title="俱乐部与咸臣">
             <div class="settings-grid">
-              <div
-                class="setting-item"
-                style="
-                  flex-direction: row;
-                  justify-content: space-between;
-                  align-items: center;
-                "
-              >
-                <label class="setting-label">开箱数量(10倍)</label>
-                <n-input-number
-                  v-model:value="batchSettings.boxCount"
-                  :min="10"
-                  :max="10000"
-                  :step="10"
-                  size="small"
-                  style="width: 100px"
-                />
-              </div>
               <div
                 class="setting-item"
                 style="flex-direction: row; justify-content: space-between; align-items: center"
@@ -2720,6 +2695,15 @@
                   style="width: 140px"
                 />
               </div>
+              <div class="setting-item">
+                <label class="setting-label">咸臣解救执行账号</label>
+                <n-select v-model:value="batchSettings.feudatoryRescueTokenId" :options="tokens.map(t => ({ label: t.name || t.id, value: t.id }))" clearable filterable placeholder="不设置则跳过解救" size="small" />
+                <span class="setting-description">整批自动寻找咸臣结束后，由此账号征服并释放本轮仍有咸主的账号，再推送报表。每目标最多战败3次，不买精力、不自动腾名额；执行账号无法解救自己。</span>
+              </div>
+            </div>
+          </n-collapse-item>
+          <n-collapse-item name="hero" title="武将与装备">
+            <div class="settings-grid">
               <div
                 class="setting-item"
                 style="flex-direction: row; justify-content: space-between; align-items: center"
@@ -2747,73 +2731,6 @@
                 <label class="setting-label">装备升级武将</label>
                 <n-select
                   v-model:value="batchSettings.equipmentUpgradeHeroId"
-                  :options="heroLevelUpgradeHeroOptions"
-                  filterable
-                  size="small"
-                  style="width: 180px"
-                />
-              </div>
-              <div
-                class="setting-item"
-                style="flex-direction: row; justify-content: space-between; align-items: center"
-              >
-                <label class="setting-label">小号洗练武将</label>
-                <n-select
-                  v-model:value="batchSettings.altRefineHeroId"
-                  :options="heroLevelUpgradeHeroOptions"
-                  filterable size="small" style="width: 180px"
-                />
-              </div>
-              <div class="setting-item">
-                <label class="setting-label">自定义小号洗练目标 <n-switch v-model:value="batchSettings.altRefineCustom" /></label>
-                <span class="setting-description">关闭时沿用原规则：橙减伤或红攻击/减伤/技能伤害，四件达标后至少一件有橙/红减伤。仅用白玉，不自动锁孔。</span>
-              </div>
-              <template v-if="batchSettings.altRefineCustom">
-                <div class="setting-item"><label class="setting-label">目标属性（每件至少命中一种）</label><n-select v-model:value="batchSettings.altRefineAttrs" multiple :options="ALT_REFINE_ATTRIBUTES" /></div>
-                <div class="setting-item"><label class="setting-label">最低颜色（含更高颜色）</label><n-select v-model:value="batchSettings.altRefineMinColor" :options="ALT_REFINE_COLORS" /></div>
-                <div class="setting-item"><label class="setting-label">指定属性装备数量要求 <n-switch v-model:value="batchSettings.altRefineCountEnabled" /></label></div>
-                <div v-if="batchSettings.altRefineCountEnabled" class="setting-item">
-                  <label class="setting-label">至少几件装备具有指定属性</label>
-                  <n-input-number v-model:value="batchSettings.altRefineCount" :min="1" :max="4" :precision="0" />
-                  <n-select v-model:value="batchSettings.altRefineCountAttr" :options="ALT_REFINE_ATTRIBUTES.filter(a => batchSettings.altRefineAttrs?.includes(a.value))" placeholder="选择目标属性之一" />
-                  <span class="setting-description">按四件装备统计，每件只计一次；指定属性也需达到最低颜色。先让四件达标，再补足指定属性装备数；整件重洗可能覆盖原属性，不使用彩玉锁孔。</span>
-                </div>
-              </template>
-              <div class="setting-item">
-                <label class="setting-label">宠物自动合成最高品质</label>
-                <n-select v-model:value="batchSettings.petMergeMaxColor" :options="[{label:'白',value:1},{label:'绿',value:2},{label:'蓝',value:3},{label:'紫（默认）',value:4},{label:'橙',value:5},{label:'红',value:6}]" size="small" />
-                <span class="setting-description">先使用白、绿、蓝宠物蛋，槽位满时合成腾位并继续开蛋；不购买槽位。默认合成白、绿、蓝、紫；跳过当前佩戴、锁定及金色宠物。紫色及以上继承较高等级宠物，同等级优先靠前槽位。执行前弹窗确认。</span>
-              </div>
-              <div class="setting-item">
-                <label class="setting-label">单次白玉使用次数上限（每个账号）</label>
-                <n-input-number
-                  v-model:value="batchSettings.altRefineLimit"
-                  :min="1" :precision="0" size="small"
-                />
-                <span class="setting-description">默认1000次，为每个账号本次四件装备的累计洗练次数。按武器、铠甲、头冠、坐骑顺序执行，已有目标属性直接跳过；未达标装备的锁定孔位需先手动解锁。</span>
-              </div>
-              <div class="setting-item">
-                <label class="setting-label">咸臣解救执行账号</label>
-                <n-select v-model:value="batchSettings.feudatoryRescueTokenId" :options="tokens.map(t => ({ label: t.name || t.id, value: t.id }))" clearable filterable placeholder="不设置则跳过解救" size="small" />
-                <span class="setting-description">整批自动寻找咸臣结束后，由此账号征服并释放本轮仍有咸主的账号，再推送报表。每目标最多战败3次，不买精力、不自动腾名额；执行账号无法解救自己。</span>
-              </div>
-              <div
-                class="setting-item"
-                style="flex-direction: row; justify-content: space-between; align-items: center"
-              >
-                <label class="setting-label">珍珠采购后自动升星</label>
-                <n-switch v-model:value="batchSettings.pearlFishAutoUpgrade" />
-              </div>
-              <div class="setting-item">
-                <span class="setting-description">优先补齐当前最高星赤羽升4星所缺数量（60珍珠/条），再用剩余珍珠买八卦（75珍珠/条）。仅对本次实际采购成功的鱼灵升星并佩戴：吕布戴最高星赤羽，诸葛亮戴最高星八卦。赤羽最多升4星，八卦最多升5星；没有采购则不操作。</span>
-              </div>
-              <div
-                class="setting-item"
-                style="flex-direction: row; justify-content: space-between; align-items: center"
-              >
-                <label class="setting-label">鱼灵替换武将</label>
-                <n-select
-                  v-model:value="batchSettings.fishReplacementHeroId"
                   :options="heroLevelUpgradeHeroOptions"
                   filterable
                   size="small"
@@ -2890,6 +2807,120 @@
                   filterable
                   size="small"
                   style="width: 180px"
+                />
+              </div>
+            </div>
+          </n-collapse-item>
+          <n-collapse-item name="refine" title="自动洗练">
+            <div class="settings-grid">
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">小号洗练武将</label>
+                <n-select
+                  v-model:value="batchSettings.altRefineHeroId"
+                  :options="heroLevelUpgradeHeroOptions"
+                  filterable size="small" style="width: 180px"
+                />
+              </div>
+              <div class="setting-item">
+                <label class="setting-label">自定义小号洗练目标 <n-switch v-model:value="batchSettings.altRefineCustom" /></label>
+                <span class="setting-description">关闭时沿用原规则：橙减伤或红攻击/减伤/技能伤害，四件达标后至少一件有橙/红减伤。仅用白玉，不自动锁孔。</span>
+              </div>
+              <template v-if="batchSettings.altRefineCustom">
+                <div class="setting-item"><label class="setting-label">目标属性（每件至少命中一种）</label><n-select v-model:value="batchSettings.altRefineAttrs" multiple :options="ALT_REFINE_ATTRIBUTES" /></div>
+                <div class="setting-item"><label class="setting-label">最低颜色（含更高颜色）</label><n-select v-model:value="batchSettings.altRefineMinColor" :options="ALT_REFINE_COLORS" /></div>
+                <div class="setting-item"><label class="setting-label">指定属性装备数量要求 <n-switch v-model:value="batchSettings.altRefineCountEnabled" /></label></div>
+                <div v-if="batchSettings.altRefineCountEnabled" class="setting-item">
+                  <label class="setting-label">至少几件装备具有指定属性</label>
+                  <n-input-number v-model:value="batchSettings.altRefineCount" :min="1" :max="4" :precision="0" />
+                  <n-select v-model:value="batchSettings.altRefineCountAttr" :options="ALT_REFINE_ATTRIBUTES.filter(a => batchSettings.altRefineAttrs?.includes(a.value))" placeholder="选择目标属性之一" />
+                  <span class="setting-description">按四件装备统计，每件只计一次；指定属性也需达到最低颜色。先让四件达标，再补足指定属性装备数；整件重洗可能覆盖原属性，不使用彩玉锁孔。</span>
+                </div>
+              </template>
+              <div class="setting-item">
+                <label class="setting-label">单次白玉使用次数上限（每个账号）</label>
+                <n-input-number
+                  v-model:value="batchSettings.altRefineLimit"
+                  :min="1" :precision="0" size="small"
+                />
+                <span class="setting-description">默认1000次，为每个账号本次四件装备的累计洗练次数。按武器、铠甲、头冠、坐骑顺序执行，已有目标属性直接跳过；未达标装备的锁定孔位需先手动解锁。</span>
+              </div>
+            </div>
+          </n-collapse-item>
+          <n-collapse-item name="fish-pet" title="鱼灵与宠物">
+            <div class="settings-grid">
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">珍珠采购后自动升星</label>
+                <n-switch v-model:value="batchSettings.pearlFishAutoUpgrade" />
+              </div>
+              <div class="setting-item">
+                <span class="setting-description">优先补齐当前最高星赤羽升4星所缺数量（60珍珠/条），再用剩余珍珠买八卦（75珍珠/条）。仅对本次实际采购成功的鱼灵升星并佩戴：吕布戴最高星赤羽，诸葛亮戴最高星八卦。赤羽最多升4星，八卦最多升5星；没有采购则不操作。</span>
+              </div>
+              <div
+                class="setting-item"
+                style="flex-direction: row; justify-content: space-between; align-items: center"
+              >
+                <label class="setting-label">鱼灵替换武将</label>
+                <n-select
+                  v-model:value="batchSettings.fishReplacementHeroId"
+                  :options="heroLevelUpgradeHeroOptions"
+                  filterable
+                  size="small"
+                  style="width: 180px"
+                />
+              </div>
+              <div class="setting-item">
+                <label class="setting-label">宠物自动合成最高品质</label>
+                <n-select v-model:value="batchSettings.petMergeMaxColor" :options="[{label:'白',value:1},{label:'绿',value:2},{label:'蓝',value:3},{label:'紫（默认）',value:4},{label:'橙',value:5},{label:'红',value:6}]" size="small" />
+                <span class="setting-description">先使用白、绿、蓝宠物蛋，槽位满时合成腾位并继续开蛋；不购买槽位。默认合成白、绿、蓝、紫；跳过当前佩戴、锁定及金色宠物。紫色及以上继承较高等级宠物，同等级优先靠前槽位。执行前弹窗确认。</span>
+              </div>
+            </div>
+          </n-collapse-item>
+        </n-collapse>
+      </div>
+      <div class="modal-actions" style="margin-top: 20px; text-align: right">
+        <n-button @click="showAltSettingsModal = false" style="margin-right: 12px">取消</n-button>
+        <n-button type="primary" @click="saveBatchSettings">保存配置</n-button>
+      </div>
+    </n-modal>
+
+    <!-- Batch Settings Modal -->
+    <n-modal
+      v-model:show="showBatchSettingsModal"
+      preset="card"
+      title="全局任务设置"
+      style="width: 90%; max-width: 820px"
+    >
+      <n-button :disabled="isRunning" @click="showCheerShopModal = true">配置月度助威商店采购</n-button>
+        <div class="settings-content">
+        <n-grid :cols="2" :x-gap="24">
+          <!-- 左列：批量操作设置 -->
+          <n-grid-item>
+            <n-divider title-placement="left" style="margin: 1px 0 8px 0"
+              >批量操作设置</n-divider
+            >
+            <div class="settings-grid">
+              <div
+                class="setting-item"
+                style="
+                  flex-direction: row;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
+                <label class="setting-label">开箱数量(10倍)</label>
+                <n-input-number
+                  v-model:value="batchSettings.boxCount"
+                  :min="10"
+                  :max="10000"
+                  :step="10"
+                  size="small"
+                  style="width: 100px"
                 />
               </div>
               <div
@@ -4684,6 +4715,7 @@ const helperModalTitle = computed(() => {
 
 // Batch Settings State
 const showBatchSettingsModal = ref(false);
+const showAltSettingsModal = ref(false);
 
 const defaultDreamPurchaseList = [];
 for (const merchantId in goldItemsConfig) {
@@ -4890,8 +4922,9 @@ const saveBatchSettings = () => {
     normalizeAwakeningSettings();
     delete batchSettings.blackMarketPurchaseMode;
     localStorage.setItem("batchSettings", JSON.stringify(batchSettings));
-    message.success("全局任务设置已保存");
+    message.success(showAltSettingsModal.value ? "小号全局配置已保存" : "全局任务设置已保存");
     showBatchSettingsModal.value = false;
+    showAltSettingsModal.value = false;
   } catch (error) {
     console.error("Failed to save batch settings:", error);
     message.error("保存设置失败");
@@ -4904,8 +4937,15 @@ const resetBlackMarketDiscounts = () => {
 
 // Open batch settings modal
 const openBatchSettings = () => {
+  showAltSettingsModal.value = false;
   loadBatchSettings();
   showBatchSettingsModal.value = true;
+};
+
+const openAltSettings = () => {
+  loadBatchSettings();
+  showBatchSettingsModal.value = false;
+  showAltSettingsModal.value = true;
 };
 
 // Load settings on component mount
