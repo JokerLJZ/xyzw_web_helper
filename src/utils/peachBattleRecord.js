@@ -28,3 +28,13 @@ export function getPercent(value, maximum) {
   if (!Number.isFinite(number) || !Number.isFinite(max) || max <= 0) return 0;
   return Math.max(0, Math.min(100, number / max * 100));
 }
+
+// 样式一用柔和底色标出非零击杀与复活；缺失或无效计数不着色。
+export function getKillColor(value) {
+  return Number.isFinite(Number(value)) && Number(value) > 0
+    ? 'rgba(245, 108, 108, 0.16)' : 'transparent';
+}
+export function getReviveColor(value) {
+  return Number.isFinite(Number(value)) && Number(value) > 0
+    ? 'rgba(103, 194, 58, 0.16)' : 'transparent';
+}

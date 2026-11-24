@@ -32,8 +32,17 @@ test('三种战报模板使用的展示函数必须绑定到组件', () => {
   const source = fs.readFileSync(new URL('../src/components/Club/PeachBattleRecords.vue', import.meta.url), 'utf8');
   const { descriptor } = parse(source);
   const { bindings } = compileScript(descriptor, {id:'peach-record-regression'});
-  for (const name of ['formatPower','getPercent','getMaxKills']) {
+  for (const name of [...new Set([...descriptor.template.content.matchAll(/(?<![.\w])([A-Za-z_$][\w$]*)\(/g)].map(match => match[1]))]) {
     assert.ok(descriptor.template.content.includes(`${name}(`));
     assert.ok(bindings[name], `${name}缺失会导致成功加载数据后渲染空白`);
+  }
+});
+
+import { getKillColor, getReviveColor } from '../src/utils/peachBattleRecord.js';
+test('样式一双方成员的击杀与复活底色支持空值和有效计数', () => {
+  for (const color of [getKillColor, getReviveColor]) {
+    for (const value of [undefined, null, 0, -1, 'bad', Infinity]) assert.equal(color(value), 'transparent');
+    assert.match(color(5), /^rgba\(/);
+    assert.equal(color('5'), color(5));
   }
 });
