@@ -205,7 +205,7 @@ test("账号库存与领取记录独立，不足4001级不领取、不换阵", a
   assert.equal(b.role.items[1026].quantity, 0);
 });
 
-test("动态配置从当前版本BON读取，JSON缺玩具配置时不猜测旧门槛", async () => {
+test("动态配置按账号版本合并JSON分表，不使用不匹配BON", async () => {
   const requests = [];
   const config = await loadShoeToyConfig(async (cmd, params) => {
     assert.equal(cmd, "system_getdatabundlever");
@@ -213,10 +213,12 @@ test("动态配置从当前版本BON读取，JSON缺玩具配置时不猜测旧�
     return { dataBundleVer: "shoe-test-version" };
   }, async url => {
     requests.push(url);
-    return officialConfigFetch('shoe-test-version',official)(url);
+    return officialConfigFetch('shoe-test-version',{}, {}, {WeaponConf:official.WeaponConf}, false, {WeaponActiveConf:official.WeaponActiveConf,WeaponPassiveConf:official.WeaponPassiveConf})(url);
   });
   assert.equal(config.version, "shoe-test-version");
-  assert.ok(requests.some(url=>url.endsWith(".binary.bin")));
+  assert.ok(requests.some(url=>url.endsWith("config.shoe-test-version.json")));
+  assert.ok(requests.some(url=>url.endsWith(".level.json")));
+  assert.ok(!requests.some(url=>url.endsWith(".bin")));
   await assert.rejects(loadShoeToyConfig(async () => ({ dataBundleVer: "shoe-invalid" }), officialConfigFetch('shoe-invalid',{})), /皮鞋被动配置不完整/);
 });
 

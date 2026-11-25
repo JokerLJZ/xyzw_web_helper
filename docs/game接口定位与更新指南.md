@@ -236,3 +236,8 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 本次manifest再次确认dataBundleVer 152261a3c8、game 57a46、协议757be。当前Mail_GetListResp构造器初始化list=[]、left=0，BattleReportModule._getMailList调用getBattlefieldReportList后读取getData().list；助手直接解BON未经过协议模型默认值填充，因此不能要求原始响应总显式含list。
 
 新增normalizeLordReportList用于查询与删除后确认：无list时只接受空结构、非负left=0及正确_originalCmd等已核对字段；非空剩余数量、未知结构、null、非数组list和错误码不视作空。日志提示的真实返回体尚未抓取，空字段省略是依据协议模型采取的兼容处理，不能宣称已经用账号响应证实。连接失败/Token自动刷新属于连接层，本次未改。
+
+
+## 2026-11-25：皮鞋配置版本问题的运行态结论
+
+Edge只读运行态确认config包按dataBundleVer加载JSON分表；WeaponConf在language，WeaponActiveConf/WeaponPassiveConf在level。此前仅合并config/config_ap导致误判JSON缺表，不应改用内部版本不匹配的configc。现皮鞋专用toy模式按账号版本索引合并四表并保持版本校验；真实公开资源通过validateShoeToyConfig。分析版本、具体证据和限制见[皮鞋配置调查](./皮鞋配置版本不一致研究方案.md)。21项相关测试通过，构建通过；全量1204项中1项竞技场日常测试失败。未执行真实账号升级或消费。后续仍从当前manifest和账号版本确定资源，不固定本次哈希。

@@ -16,7 +16,7 @@ const toy = role => get(role.lordWeapon, SHOE_ID);
 const level = skill => number(skill?.level ?? 1, "技能等级");
 const stock = (role, id) => number(get(role.items, id)?.quantity ?? 0, "道具库存");
 
-/** 当前官方加载器用 BON configc.bin；JSON config.json 不包含玩具表。 */
+/** 官方运行态合并 config、config_ap、level、language，玩具表分布于后两者。 */
 export async function loadShoeToyConfig(send, fetcher = globalThis.fetch) {
   const response = await send("system_getdatabundlever", { isAudit: false });
   const body = response?._raw?.body || response?.body || response?.data || response;
@@ -24,7 +24,7 @@ export async function loadShoeToyConfig(send, fetcher = globalThis.fetch) {
   if (typeof version !== "string" || !/^[\w-]+$/.test(version)) throw new Error("未取得玩具配置版本");
   if (!cache.has(version)) {
     const loading = (async () => {
-      return validateShoeToyConfig(await loadOfficialTaskConfig(version, fetcher, { binary: true }));
+      return validateShoeToyConfig(await loadOfficialTaskConfig(version, fetcher, { toy: true }));
     })();
     cache.set(version, loading);
     loading.catch(() => cache.delete(version));

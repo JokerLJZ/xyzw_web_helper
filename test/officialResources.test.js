@@ -44,3 +44,10 @@ test('concurrent JSON and language requests share one manifest but failures rema
   await Promise.all([loadOfficialTaskConfig('shared-manifest',fetcher),loadOfficialTaskConfig('shared-manifest',fetcher,{language:true})]);
   assert.equal(manifests,2);
 });
+
+test('toy JSON refuses level or language versions from another release', async () => {
+  for (const name of ['level', 'language']) {
+    const fetcher = officialConfigFetch('toy-check-'+name, {}, {}, name === 'language' ? {COMMIT_ID:'other'} : {}, false, name === 'level' ? {COMMIT_ID:'other'} : {});
+    await assert.rejects(loadOfficialTaskConfig('toy-check-'+name, fetcher, {toy:true}), /版本不一致/);
+  }
+});
