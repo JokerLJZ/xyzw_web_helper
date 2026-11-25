@@ -1544,6 +1544,14 @@ export class DailyTaskRunner {
     this.reportedProgress = undefined;
     this.loggedTaskStates = new Map();
     this.throwIfInterrupted(tokenId);
+    if (this.tokenStore.refreshTokenClubInfo) {
+      try {
+        await this.tokenStore.refreshTokenClubInfo(tokenId);
+      } catch (error) {
+        this.log(`俱乐部信息更新失败，保留上次记录：${error.message}`, "warning");
+      }
+      this.throwIfInterrupted(tokenId);
+    }
     const settings = customSettings || this.loadSettings(tokenId);
     this.dailySettings = settings;
     this.freeFishingExpected = null;

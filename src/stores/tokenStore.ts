@@ -1,3 +1,4 @@
+import { fetchTokenClubInfo } from '@/utils/tokenClubInfo.js';
 import { useLocalStorage } from "@vueuse/core";
 import { defineStore } from "pinia";
 import { computed, ref, toRaw } from "vue";
@@ -23,6 +24,7 @@ const { getArrayBuffer, storeArrayBuffer, deleteArrayBuffer, clearAll } =
 declare interface TokenData {
   id: string;
   name: string;
+  clubInfo?: { id: string | null; name: string; updatedAt: string };
   token: string; // 原始Base64 token
   wsUrl: string | null; // 可选的自定义WebSocket URL
   server: string;
@@ -232,6 +234,13 @@ export const useTokenStore = defineStore("tokens", () => {
 
     gameTokens.value.push(newToken);
     return newToken;
+  };
+
+  const refreshTokenClubInfo = async (tokenId: string) => {
+    const clubInfo = await fetchTokenClubInfo((cmd: string, params: object) =>
+      sendMessageWithPromise(tokenId, cmd, params, 10000));
+    updateToken(tokenId, { clubInfo });
+    return clubInfo;
   };
 
   const updateToken = (tokenId: string, updates: Partial<TokenData>) => {
@@ -1548,6 +1557,7 @@ export const useTokenStore = defineStore("tokens", () => {
     // Token管理方法
     addToken,
     updateToken,
+    refreshTokenClubInfo,
     removeToken,
     selectToken,
 

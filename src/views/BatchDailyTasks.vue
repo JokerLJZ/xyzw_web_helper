@@ -178,6 +178,12 @@
                 </div>
               </div>
 
+              <n-space align="center">
+                <span>按俱乐部选择</span>
+                <n-select :value="null" :options="clubSelectionOptions" placeholder="一键选择对应俱乐部账号" clearable filterable :disabled="isRunning" style="width: 300px" @update:value="selectClubAccounts" />
+                <n-button size="small" :disabled="isRunning || !tokens.length" @click="batchFetchClubInfo">一键获取俱乐部信息</n-button>
+              </n-space>
+
               <!-- 分组管理按钮 -->
               <div
                 style="
@@ -268,6 +274,7 @@
                     >
                       <div class="token-item">
                         <span>{{ token.name }}</span>
+                        <n-tag size="small" :title="token.clubInfo ? `更新于 ${token.clubInfo.updatedAt}` : '点击一键获取俱乐部信息'">{{ token.clubInfo ? (token.clubInfo.id ? `${token.clubInfo.name}（${token.clubInfo.id}）` : '未加入俱乐部') : '俱乐部未获取' }}</n-tag>
                         <n-tag
                           size="small"
                           :type="getStatusType(token.id)"
@@ -3896,6 +3903,7 @@
 </template>
 
 <script setup>
+import { getClubOptions, getClubTokenIds } from "@/utils/tokenClubInfo.js";
 import { APEX_SHOP_OPTIONS } from '@/utils/apexShop.js';
 import { ALT_REFINE_ATTRIBUTES, ALT_REFINE_COLORS } from "@/utils/altRefinePolicy.js";
 import { createTasksAltUtilities } from "@/utils/batch/tasksAltUtilities.js";
@@ -8546,6 +8554,43 @@ const footballPickLabel = computed(() => {
 const onFootballPickChange = async (val) => {
   footballPick.value = val;
   await batchFootballBet(val);
+};
+
+const clubSelectionOptions = computed(() => getClubOptions(tokens.value));
+const selectClubAccounts = (clubId) => {
+  if (clubId == null || isRunning.value) return;
+  selectedGroups.value = [];
+  selectedTokens.value = normalizeTokenIdsByBatchOrder(getClubTokenIds(tokens.value, clubId));
+};
+const batchFetchClubInfo = async () => {
+  if (isRunning.value) return;
+  const ids = tokens.value.map(t => t.id);
+  isRunning.value = true;
+  shouldStop.value = false;
+  try {
+    for (const id of ids) {
+      if (shouldStop.value) break;
+      let ownsSlot = false;
+      const name = tokens.value.find(t => t.id === id)?.name || id;
+      try {
+        currentRunningTokenId.value = id;
+        await ensureConnection(id, 2, owned => { ownsSlot = owned; });
+        if (shouldStop.value) break;
+        const club = await tokenStore.refreshTokenClubInfo(id);
+        addLog({ time: new Date().toLocaleTimeString(), type: 'success', message: `${name}：${club.id ? `${club.name}（${club.id}）` : '未加入俱乐部'}` });
+      } catch (error) {
+        addLog({ time: new Date().toLocaleTimeString(), type: 'error', message: `${name} 俱乐部信息获取失败，保留上次记录：${error.message}` });
+      } finally {
+        if (ownsSlot) {
+          try { tokenStore.closeWebSocketConnection(id); }
+          finally { releaseConnectionSlot(); }
+        }
+      }
+    }
+  } finally {
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+  }
 };
 
 const startBatch = async () => {
