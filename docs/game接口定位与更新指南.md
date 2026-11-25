@@ -241,3 +241,8 @@ npm run build -- --outDir /tmp/xyzw-game-build-check
 ## 2026-11-25：皮鞋配置版本问题的运行态结论
 
 Edge只读运行态确认config包按dataBundleVer加载JSON分表；WeaponConf在language，WeaponActiveConf/WeaponPassiveConf在level。此前仅合并config/config_ap导致误判JSON缺表，不应改用内部版本不匹配的configc。现皮鞋专用toy模式按账号版本索引合并四表并保持版本校验；真实公开资源通过validateShoeToyConfig。分析版本、具体证据和限制见[皮鞋配置调查](./皮鞋配置版本不一致研究方案.md)。21项相关测试通过，构建通过；全量1204项中1项竞技场日常测试失败。未执行真实账号升级或消费。后续仍从当前manifest和账号版本确定资源，不固定本次哈希。
+
+
+## 2026-11-25：其他任务分表核查
+
+无将阵容也因HeroConf位于language而误用不匹配BON，现与皮鞋共同使用gameTables JSON分表模式；其余已检查任务依赖表由当前加载资源覆盖。实际资源确认64项HeroConf，相关29项测试通过，构建通过；全量测试仍有1项竞技场日常测试失败。范围、表名兼容性和验证边界见[任务配置分表核查](./任务配置分表核查.md)。未操作真实账号。

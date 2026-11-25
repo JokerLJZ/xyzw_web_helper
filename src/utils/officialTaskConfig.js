@@ -4,7 +4,7 @@ const CDN = "https://xxz-xyzw-res.hortorgames.com";
 const safeVersion = (value) => typeof value === "string" && /^[\w-]+$/.test(value);
 
 /** Resolve the current launcher resources without pinning a remote bundle hash. */
-async function readOfficialTaskConfig(version, fetchConfig, { language = false, binary = false, toy = false, snapshot } = {}) {
+async function readOfficialTaskConfig(version, fetchConfig, { language = false, binary = false, gameTables = false, snapshot } = {}) {
   const request = async (url, options = {}) => {
     const response = await fetchConfig(url, {
       ...options,
@@ -19,7 +19,7 @@ async function readOfficialTaskConfig(version, fetchConfig, { language = false, 
   const raw = manifest.body.bundleVers;
   const bundles = typeof raw === "string" ? JSON.parse(raw) : raw;
   if (!safeVersion(bundles?.config)) throw new Error("官方配置包版本无效");
-  const bundle = await (await request(`${CDN}/remote/config/config.${toy ? version : bundles.config}.json`)).json();
+  const bundle = await (await request(`${CDN}/remote/config/config.${gameTables ? version : bundles.config}.json`)).json();
   const readAsset = async (name) => {
     const entry = Object.entries(bundle.paths || {}).find(([, path]) =>
       path?.[0] === name && bundle.types?.[path[1]] === (name.endsWith("c") ? "cc.BufferAsset" : "cc.JsonAsset"));
@@ -51,10 +51,10 @@ async function readOfficialTaskConfig(version, fetchConfig, { language = false, 
   const extra = await readAsset(binary ? "config_apc" : "config_ap");
   if (extra.COMMIT_ID !== undefined && extra.COMMIT_ID !== version)
     throw new Error("官方补充配置版本不一致");
-  const level = toy ? await readAsset("level") : {};
+  const level = gameTables ? await readAsset("level") : {};
   if (level.COMMIT_ID !== undefined && level.COMMIT_ID !== version)
     throw new Error("官方等级配置版本不一致");
-  const translations = (language || toy) ? await readAsset("language") : {};
+  const translations = (language || gameTables) ? await readAsset("language") : {};
   if (translations.COMMIT_ID !== undefined && translations.COMMIT_ID !== version)
     throw new Error("官方语言配置版本不一致");
   const result = { ...extra, ...config, ...level, ...translations, version };
@@ -91,7 +91,7 @@ export function loadOfficialTaskConfig(version, fetchConfig = globalThis.fetch, 
   if (!safeVersion(version)) return Promise.reject(new Error("官方配置版本无效"));
   let cache = sharedConfigs.get(fetchConfig);
   if (!cache) sharedConfigs.set(fetchConfig, cache = new Map());
-  const key = `${version}/${!!options.language}/${!!options.binary}/${!!options.toy}`;
+  const key = `${version}/${!!options.language}/${!!options.binary}/${!!options.gameTables}`;
   if (!cache.has(key)) {
     const loading = readOfficialTaskConfig(version, fetchConfig, options);
     cache.set(key, loading);

@@ -27,3 +27,15 @@ test('停止时不改阵容，写超时不自动重发',async()=>{
  const s=server();await assert.rejects(runEmptyFormation({...s,config,stopped:()=>true}),/停止/);assert.equal(s.calls.length,0);
  let n=0;await assert.rejects(runEmptyFormation({...s,config,send:async()=>{n++;throw Error('timeout');}}),/timeout/);assert.equal(n,1);
 });
+
+import { loadEmptyFormationConfig } from '../src/utils/emptyFormation.js';
+import { officialConfigFetch } from './officialConfigFixture.js';
+test('无将阵容从账号版本JSON语言分表读取武将品质，不读取BON', async () => {
+ const requests=[];
+ const fixture=officialConfigFetch('formation-json',{}, {}, config);
+ const loaded=await loadEmptyFormationConfig(async()=>({dataBundleVer:'formation-json'}),async(url,...args)=>{requests.push(url);return fixture(url,...args);});
+ assert.equal(planEmptyFormation(make(),loaded).hero.heroId,303);
+ assert.ok(requests.some(url=>url.endsWith('config.formation-json.json')));
+ assert.ok(requests.some(url=>url.endsWith('.language.json')));
+ assert.ok(!requests.some(url=>url.endsWith('.bin')));
+});

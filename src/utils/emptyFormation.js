@@ -6,7 +6,7 @@ export async function loadEmptyFormationConfig(send, fetcher = globalThis.fetch)
   if (typeof version !== 'string' || !/^[\w-]+$/.test(version)) throw new Error('未取得武将配置版本');
   if (!configs.has(version)) {
     const loading = (async()=>{
-      const config = await loadOfficialTaskConfig(version, fetcher, { binary: true });
+      const config = await loadOfficialTaskConfig(version, fetcher, { gameTables: true });
       if (!config.HeroConf) throw new Error('缺少武将品质配置');
       return config;
     })();

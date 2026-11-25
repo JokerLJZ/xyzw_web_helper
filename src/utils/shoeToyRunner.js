@@ -24,7 +24,7 @@ export async function loadShoeToyConfig(send, fetcher = globalThis.fetch) {
   if (typeof version !== "string" || !/^[\w-]+$/.test(version)) throw new Error("未取得玩具配置版本");
   if (!cache.has(version)) {
     const loading = (async () => {
-      return validateShoeToyConfig(await loadOfficialTaskConfig(version, fetcher, { toy: true }));
+      return validateShoeToyConfig(await loadOfficialTaskConfig(version, fetcher, { gameTables: true }));
     })();
     cache.set(version, loading);
     loading.catch(() => cache.delete(version));
