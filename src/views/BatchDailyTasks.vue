@@ -953,6 +953,8 @@
                 >
                   玄武活动兑换宠物饼干
                 </n-button>
+                <n-select v-model:value="batchSettings.apexShopGoods" multiple :options="APEX_SHOP_OPTIONS" placeholder="选择竞技大厅商店商品（按商品顺序兑换）" :disabled="isRunning" style="width: 360px" />
+                <n-button size="small" @click="batchApexShopExchange" :disabled="isRunning || !selectedTokens.length">竞技大厅商店全量兑换</n-button>
                 <n-button
                   size="small"
                   @click="batchRedeemCodes"
@@ -3894,6 +3896,7 @@
 </template>
 
 <script setup>
+import { APEX_SHOP_OPTIONS } from '@/utils/apexShop.js';
 import { ALT_REFINE_ATTRIBUTES, ALT_REFINE_COLORS } from "@/utils/altRefinePolicy.js";
 import { createTasksAltUtilities } from "@/utils/batch/tasksAltUtilities.js";
 import SaltBattleSettings from "@/components/SaltBattleSettings.vue";
@@ -6705,7 +6708,7 @@ const executeScheduledTask = async (task) => {
       if (shouldStop.value) break;
       await runScheduledAccount(tokenId);
     }
-    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.some(name => ["batchCheerShopPurchase", "batchCampfireLottery", "batchAutoFeudatory", "batchReleaseFeudatory"].includes(name)) ? 0 : 2) && !shouldStop.value; retryRound++) {
+    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.some(name => ["batchApexShopExchange", "batchCheerShopPurchase", "batchCampfireLottery", "batchAutoFeudatory", "batchReleaseFeudatory"].includes(name)) ? 0 : 2) && !shouldStop.value; retryRound++) {
     const retryIds = getBatchRetryTokenIds(availableTokens, tokenStatus.value, shouldStop.value);
     for (const tokenId of retryIds) {
       if (shouldStop.value) break;
@@ -8347,6 +8350,7 @@ const tasksStore = createTasksStore(createTaskDeps());
 const {
   batchJoinLegion,
   batchCheerShopPurchase,
+  batchApexShopExchange,
   legion_storebuygoods,
   legionStoreBuyWhiteJade,
   legionStoreBuySkinCoins,
@@ -8427,6 +8431,7 @@ const { batchXuanwuBlessing, batchExchangeXuanwuPetCookies } =
 const getScheduledTaskFunction = (name) => {
   const registry = {
     batchCheerShopPurchase,
+    batchApexShopExchange,
     batchClaimCollectionRewards,
     batchClaimCardCollectionRewards,
     startBatch,

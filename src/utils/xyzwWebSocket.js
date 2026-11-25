@@ -553,6 +553,7 @@ export function registerDefaultCommands(reg) {
     .register("activity_actegamestageclaim", { actId: 0 })
 
     // 逐鹿盐山竞猜
+    .register("apex_buy", { shopId: 0, buyCnt: 1 })
     .register("apex_getroleinfo")
     .register("apex_getguesslist", { scheduleId: 0, idx: 0 })
     .register("apex_guess", { teamId: "" })
@@ -1357,6 +1358,7 @@ export class XyzwWebSocketClient {
       role_getroleinforesp: "role_getroleinfo",
       lordweapon_getresp: "lordweapon_get",
       lordweapon_unlockresp: "lordweapon_unlock",
+      apex_buyresp: "apex_buy",
       apex_getroleinforesp: "apex_getroleinfo",
       apex_getguesslistresp: "apex_getguesslist",
       apex_guessresp: "apex_guess",

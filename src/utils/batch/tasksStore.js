@@ -1,3 +1,4 @@
+import { runApexShop } from '../apexShop.js';
 import { getTaskErrorStatus } from '../scheduledTaskResult.js';
 import { runCheerShopPurchase } from '../cheerShop.js';
 import { syncBlackMarketPurchaseConfig } from "./blackMarketConfig.js";
@@ -69,6 +70,52 @@ export function createTasksStore(deps) {
         } catch (error) {
           tokenStatus.value[id] = getTaskErrorStatus(error, shouldStop.value);
           log(`助威商店采购${tokenStatus.value[id] === 'stopped' ? '已停止' : '停止'}：${error.message}`, tokenStatus.value[id] === 'stopped' ? 'info' : 'error');
+        } finally {
+          if (connected) {
+            try { tokenStore.closeWebSocketConnection(id); }
+            finally { releaseConnectionSlot(); }
+          }
+        }
+      }
+    } finally {
+      ids.forEach(id => { if (tokenStatus.value[id] === "waiting") tokenStatus.value[id] = "stopped"; });
+      currentRunningTokenId.value = null;
+      isRunning.value = false;
+    }
+  };
+
+  const batchApexShopExchange = async () => {
+    const ids = [...selectedTokens.value];
+    if (!ids.length) return;
+    const selected = [...(batchSettings.apexShopGoods || [])];
+    if (!selected.length) {
+      message.warning('请先选择竞技大厅商店商品');
+      return;
+    }
+    isRunning.value = true;
+    shouldStop.value = false;
+    ids.forEach(id => { tokenStatus.value[id] = "waiting"; });
+    try {
+      for (const id of ids) {
+        if (shouldStop.value) break;
+        let connected = false;
+        const name = tokens.value.find(t => t.id === id)?.name || id;
+        const log = (text, type = 'info') => addLog({ time: new Date().toLocaleTimeString(), message: `${name} ${text}`, type });
+        try {
+          tokenStatus.value[id] = 'running';
+          currentRunningTokenId.value = id;
+          await ensureConnection(id);
+          connected = true;
+          await runApexShop({
+            selected, shouldStop: () => shouldStop.value,
+            send: (cmd, params) => tokenStore.sendMessageWithPromise(id, cmd, params, 15000),
+            wait: ms => new Promise(resolve => setTimeout(resolve, Math.max(ms, Number(delayConfig?.command) || 0))),
+            log,
+          });
+          tokenStatus.value[id] = shouldStop.value ? 'stopped' : 'completed';
+        } catch (error) {
+          tokenStatus.value[id] = getTaskErrorStatus(error, shouldStop.value);
+          log(`竞技大厅商店兑换${tokenStatus.value[id] === 'stopped' ? '已停止' : '停止'}：${error.message}`, tokenStatus.value[id] === 'stopped' ? 'info' : 'error');
         } finally {
           if (connected) {
             try { tokenStore.closeWebSocketConnection(id); }
@@ -725,6 +772,7 @@ export function createTasksStore(deps) {
 
   return {
     batchCheerShopPurchase,
+    batchApexShopExchange,
     batchJoinLegion,
     store_syncpurchaseconfig,
     legion_storebuygoods,

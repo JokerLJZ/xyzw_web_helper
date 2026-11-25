@@ -172,6 +172,7 @@ export const TASK_GROUPS = [
       "batchUpgradeLordTo6000",
       "batchUseWarehouseItems",
       "batchExchangeXuanwuPetCookies",
+      "batchApexShopExchange",
       "batchRedeemCodes",
       "store_discount_purchase"
     ]

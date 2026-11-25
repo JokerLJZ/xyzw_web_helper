@@ -39,6 +39,7 @@ export const bossTimesOptions = [0, 1, 2, 3, 4].map((v) => ({
 
 // 可用的定时任务列表
 export const availableTasks = [
+  { label: "竞技大厅商店兑换", value: "batchApexShopExchange" },
   { label: "助威商店采购", value: "batchCheerShopPurchase" },
   { label: "日常任务", value: "startBatch" },
   { label: "领取挂机", value: "claimHangUpRewards" },
@@ -212,6 +213,7 @@ export const defaultSettings = {
 // 默认批量设置
 export const defaultBatchSettings = {
   cheerShopPurchases: {},
+  apexShopGoods: [],
   saltBattle: { ...DEFAULT_SALT_BATTLE_SETTINGS },
   legionId: null,
   crystalHeroId: 107,
