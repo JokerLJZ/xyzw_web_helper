@@ -110,6 +110,20 @@ const addLog = (messageText, type = "info") => {
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const HERO_STAR_ACTION_DELAY_MS = 3000;
+const HERO_STAR_RATE_LIMIT_DELAY_MS = 6000;
+const HERO_STAR_MAX_RATE_LIMIT_RETRIES = 4;
+
+const isHeroStarRateLimitError = (error) => {
+  const text = [
+    error?.message,
+    error?.code,
+    error?.body?.code,
+    error?.data?.code,
+    String(error || ""),
+  ].join(" ");
+  return text.includes("200400") || text.includes("操作太快");
+};
 
 /** 启动仅英雄升星 */
 const startHeroUpgrade = async () => {
@@ -216,21 +230,49 @@ const runHeroUpgrade = async (mod) => {
           break;
         }
         try {
-          const res = await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "hero_heroupgradestar",
-            { heroId },
-            8000,
-          );
-          const ok =
-            res && (res.code === 0 || res.success === true || res.result === 0);
-          addLog(`英雄ID:${heroId} 升星第${i}/10次`, ok ? "success" : "error");
-          if (!ok) throw new Error("升星失败");
+          let upgraded = false;
+          for (
+            let attempt = 0;
+            attempt <= HERO_STAR_MAX_RATE_LIMIT_RETRIES;
+            attempt += 1
+          ) {
+            try {
+              await sleep(Math.max(mod.delay, HERO_STAR_ACTION_DELAY_MS));
+              const res = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "hero_heroupgradestar",
+                { heroId },
+                8000,
+              );
+              const ok =
+                res &&
+                (res.role?.heroes ||
+                  res.code === 0 ||
+                  res.success === true ||
+                  res.result === 0);
+              if (!ok) throw new Error("升星响应未确认成功");
+              upgraded = true;
+              break;
+            } catch (error) {
+              if (
+                !isHeroStarRateLimitError(error) ||
+                attempt >= HERO_STAR_MAX_RATE_LIMIT_RETRIES
+              ) {
+                throw error;
+              }
+              addLog(
+                `英雄ID:${heroId} 升星触发200400，等待6秒后进行第${attempt + 1}次重试`,
+                "warning",
+              );
+              await sleep(HERO_STAR_RATE_LIMIT_DELAY_MS);
+            }
+          }
+          if (!upgraded) throw new Error("升星重试后仍未成功");
+          addLog(`英雄ID:${heroId} 升星第${i}/10次`, "success");
         } catch (err) {
           addLog(`英雄ID:${heroId} 升星第${i}/10次失败，跳过剩余次数`, "error");
           skip = true;
         }
-        await sleep(mod.delay);
         if (skip) break;
       }
       state.value.done++;

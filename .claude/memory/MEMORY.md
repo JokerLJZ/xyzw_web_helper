@@ -1,0 +1,1 @@
+- [功能变更必须维护到 FEATURE_STICKMAN.md](feedback_feature_doc.md) — 每次新增/增强功能后须在仓库根 FEATURE_STICKMAN.md 追加章节并同步提交

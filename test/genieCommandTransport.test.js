@@ -1,0 +1,134 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import fs from "node:fs/promises";
+
+// 隔离浏览器缓存和日志依赖，使用生产命令注册、队列和响应匹配实现。
+const source = (await fs.readFile(new URL("../src/utils/xyzwWebSocket.js", import.meta.url), "utf8"))
+  .replace(/^import .*;$/gm, "");
+const prelude = `const WebSocket = { OPEN: 1 };
+const $CacheManager = { getCache: () => ({}) };
+const bonProtocol = {}, g_utils = {};
+const wsLogger = new Proxy({}, {get: () => () => {}}), gameLogger = wsLogger;`;
+const { CommandRegistry, registerDefaultCommands, XyzwWebSocketClient } = await import(
+  `data:text/javascript;base64,${Buffer.from(prelude + source).toString("base64")}`
+);
+
+test("洗练采集200040错误显示版本过低，并保留服务器error字段", async () => {
+  // api采集/洗练/旧Z.txt：quench返回code:200040,error:版本过低，请升级。
+  for (const useResp of [true, false]) {
+    for (const errorText of [undefined, "版本过低，请升级", "请升级洗练协议"]) {
+      const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+      client.connected = true; client.socket = { readyState: 1, close() {} };
+      const promise = client.sendWithPromise("equipment_quench", { heroId:102, part:1 }, 1000);
+      const task = client.sendQueue.shift();
+      const rejection = assert.rejects(promise, new RegExp(errorText || "版本过低，请升级"));
+      client._handlePromiseResponse({ ...(useResp ? {resp:task.seq} : {}), cmd:"equipment_quenchresp", code:200040, error:errorText });
+      await rejection;
+      assert.equal(Object.keys(client.promises).length,0);
+      client._clearTimers();
+    }
+  }
+});
+
+test("珍珠采购按采集参数构造请求并匹配syncrewardresp",async()=>{
+  const registry=registerDefaultCommands(new CommandRegistry());
+  assert.deepEqual(registry.build("activity_buygoods",0,1,{type:1,goodsId:8206}).body,{type:1,goodsId:8206});
+  const client=new XyzwWebSocketClient({url:"wss://test",utils:{}});client.connected=true; client.socket = { readyState: 1, close() {} };
+  const promise=client.sendWithPromise("activity_buygoods",{type:1,goodsId:8304},1000);
+  client.sendQueue.shift();
+  const body={role:{items:{1013:{quantity:117}}},reward:[{type:3,itemId:13041,value:1}]};
+  client._handlePromiseResponse({cmd:"syncrewardresp",body});
+  const result=await promise;assert.equal(result.reward[0].itemId,13041);
+  client._clearTimers();
+});
+
+test("灯神战力计算按抓包编码，并按resp序号接收战力响应", async () => {
+  const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+  client.connected = true; client.socket = { readyState: 1, close() {} };
+  const params = { battleTeam: { 0: 101, 1: 102, 2: 109, 3: 113, 4: 202 }, lordWeaponId: 3 };
+  const promise = client.sendWithPromise("hero_calcpowerbyteam", params, 1000);
+  const task = client.sendQueue.shift();
+  const packet = client.registry.build(task.cmd, 0, task.seq, task.params);
+  assert.equal(packet.cmd, "hero_calcpowerbyteam");
+  assert.deepEqual(packet.body, params);
+  client._handlePromiseResponse({ resp: task.seq, cmd: "hero_calcpowerbyteamresp", body: { power: 3015364283 } });
+  assert.deepEqual(await promise, { power: 3015364283 });
+  assert.equal(Object.keys(client.promises).length, 0);
+});
+
+test("未注册命令立即报错，不入队也不留下等待请求", async () => {
+  const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+  client.connected = true; client.socket = { readyState: 1, close() {} };
+  await assert.rejects(client.sendWithPromise("unknown_command", {}, 15000), /未注册的游戏命令/);
+  assert.equal(client.sendQueue.length, 0);
+  assert.equal(Object.keys(client.promises).length, 0);
+});
+
+test("完整灯神阵容可通过真实命令注册器构造挑战报文", () => {
+  const registry = registerDefaultCommands(new CommandRegistry());
+  const body = { battleTeam: { 0: 107, 1: 108, 2: 116, 3: 112, 4: 120 }, genieId: 4, lordWeaponId: 3 };
+  assert.deepEqual(registry.build("fight_startgenie", 0, 39, body).body, body);
+});
+
+test("断线立即拒绝所有请求并清除队列，重连不会重放旧写请求", async () => {
+  const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+  client.connected = true; client.socket = { readyState: 1, close() {} };
+  const pending = Promise.allSettled([
+    client.sendWithPromise("store_getpurchase", {}, 15000),
+    client.sendWithPromise("store_setpurchase", { purchaseCnt: 2, purchaseItemList: [] }, 15000),
+  ]);
+  client.disconnect();
+  for (const result of await pending) {
+    assert.equal(result.status, "rejected");
+    assert.match(result.reason.message, /连接已断开/);
+  }
+  assert.equal(Object.keys(client.promises).length, 0);
+  assert.equal(client.sendQueue.length, 0);
+  client._clearTimers();
+});
+
+test("逐鹿盐山助威携带数量，竞技大厅领奖匹配独立任务响应", async () => {
+  const registry = registerDefaultCommands(new CommandRegistry());
+  assert.deepEqual(registry.build("apex_vote", 0, 1, { round: 5, teamId: "team-a", voteCnt: 9999 }).body, { round: 5, teamId: "team-a", voteCnt: 9999 });
+  assert.deepEqual(registry.build("apex_taskclaim", 0, 2, { confId: 7 }).body, { confId: 7 });
+  const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+  client.connected = true; client.socket = { readyState: 1, close() {} };
+  const promise = client.sendWithPromise("apex_taskclaim", { confId: 7 }, 1000);
+  client.sendQueue.shift();
+  client._handlePromiseResponse({ cmd: "apex_taskclaimresp", body: { apexRoleInfo: { taskClaimedMap: { 7: true } } } });
+  assert.equal((await promise).apexRoleInfo.taskClaimedMap[7], true);
+  assert.equal(Object.keys(client.promises).length, 0);
+  client._clearTimers();
+});
+
+test("竞猜奖励按赛程和队伍发送，并匹配竞猜领取独立响应", async () => {
+  const client = new XyzwWebSocketClient({url:"wss://test",utils:{}});client.connected=true; client.socket = { readyState: 1, close() {} };
+  const params={scheduleId:124,teamId:"winner"};
+  assert.deepEqual(client.registry.build("apex_guessclaim",0,1,params).body,params);
+  const promise=client.sendWithPromise("apex_guessclaim",params,1000);client.sendQueue.shift();
+  client._handlePromiseResponse({cmd:"apex_guessclaimresp",body:{apexRoleInfo:{guessClaimMap:{124:{winner:true}}}}});
+  assert.equal((await promise).apexRoleInfo.guessClaimMap[124].winner,true);client._clearTimers();
+});
+
+test("怪异塔新增领奖指令按真实注册器编码并匹配各自响应", async () => {
+  const cases = [
+    ["evotower_claimlegiontask", { taskId: 4 }, "evotower_claimlegiontaskresp", { evoTower: { legionTaskClaimMap: { 4: 1 } } }],
+    ["evotower_getshareinfo", {}, "evotower_getshareinforesp", { shareTask: { shareTaskMap: {} } }],
+    ["evotower_claimsharetaskreward", { taskId: 5 }, "evotower_claimsharetaskrewardresp", { shareTask: { shareTaskMap: { 2: { claimedProgress: 1 } } } }],
+    ["evotower_claimorderpassdailyreward", {}, "evotower_claimorderpassdailyrewardresp", { evoTower: { orderPassReward: { 261021: 1 } } }],
+    ["role_asyncclaimrewardv2", { type: "evoTowerShop", isAll: true, rewardId: "" }, "role_asyncclaimrewardv2resp", { type: "evoTowerShop", isAll: true }],
+    ["activity_battlepassrewardclaim", { battlePassId: 1003 }, "activity_battlepassrewardclaimresp", { activity: { warOrderActivityInfo: {} } }],
+  ];
+  for (const [cmd, params, responseCmd, body] of cases) {
+    const client = new XyzwWebSocketClient({ url: "wss://test", utils: {} });
+    client.connected = true; client.socket = { readyState: 1, close() {} };
+    try {
+      assert.deepEqual(client.registry.build(cmd, 0, 1, params).body, params);
+      const pending = client.sendWithPromise(cmd, params, 1000);
+      client.sendQueue.shift();
+      client._handlePromiseResponse({ cmd: responseCmd, body });
+      assert.deepEqual(await pending, body);
+      assert.equal(Object.keys(client.promises).length, 0);
+    } finally { client._clearTimers(); }
+  }
+});
