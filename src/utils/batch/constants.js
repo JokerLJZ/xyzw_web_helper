@@ -105,6 +105,7 @@ export const availableTasks = [
   { label: "批量开始探索功法", value: "batchLegacyBeginHangUp" },
   { label: "批量领取特权功法", value: "batchLegacyClaimChargeReward" },
   { label: "批量赠送功法残卷", value: "batchLegacyGiftSendEnhanced" },
+  { label: "全量功法残卷赠送", value: "batchLegacyFullGift" },
   { label: "一键领取蟠桃园任务", value: "batchClaimPeachTasks" },
   { label: "灯神到达11层扫荡魔毯", value: "batchAltGenieSweep" },
   { label: "一键扫荡灯神", value: "batchGenieSweep" },

@@ -775,6 +775,9 @@
                 >
                   批量功法残卷赠送
                 </n-button>
+                <n-button size="small" :disabled="isRunning || selectedTokens.length === 0" @click="batchLegacyFullGift">
+                  全量功法残卷赠送
+                </n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="small-account" tab="小号任务">
@@ -3924,6 +3927,7 @@ import WeeklyRewardSettings from "@/components/Common/WeeklyRewardSettings.vue";
 import { normalizeWeeklyRewardChoice } from "@/utils/weeklyReward.js";
 import JianghuBlackMarketSettings from "@/components/Common/JianghuBlackMarketSettings.vue";
 import { DEFAULT_JIANGHU_BLACK_MARKET_PURCHASES, normalizeJianghuBlackMarketPurchases } from "@/utils/jianghuBlackMarketWeekly.js";
+import { runLegacyFullGift } from '@/utils/legacyFullGift.js';
 import { runCampfireLottery } from '@/utils/campfireLottery.js';
 import { groupTaskCatalog } from '@/utils/batch/taskCatalog.js';
 import { CHEER_SHOP_GOODS } from '@/utils/cheerShop.js';
@@ -5045,6 +5049,7 @@ const legacyTaskNames = [
   "batchLegacyBeginHangUp",
   "batchLegacyClaimChargeReward",
   "batchLegacyGiftSendEnhanced",
+  "batchLegacyFullGift",
 ];
 
 const isLegacyTaskName = (taskName) => legacyTaskNames.includes(taskName);
@@ -6716,7 +6721,7 @@ const executeScheduledTask = async (task) => {
       if (shouldStop.value) break;
       await runScheduledAccount(tokenId);
     }
-    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.some(name => ["batchApexShopExchange", "batchCheerShopPurchase", "batchCampfireLottery", "batchAutoFeudatory", "batchReleaseFeudatory"].includes(name)) ? 0 : 2) && !shouldStop.value; retryRound++) {
+    for (let retryRound = 1; retryRound <= (task.manual || task.selectedTasks.some(name => ["batchApexShopExchange", "batchCheerShopPurchase", "batchCampfireLottery", "batchLegacyFullGift", "batchAutoFeudatory", "batchReleaseFeudatory"].includes(name)) ? 0 : 2) && !shouldStop.value; retryRound++) {
     const retryIds = getBatchRetryTokenIds(availableTokens, tokenStatus.value, shouldStop.value);
     for (const tokenId of retryIds) {
       if (shouldStop.value) break;
@@ -8369,6 +8374,19 @@ const {
   collection_claimfreereward,
 } = tasksStore;
 
+const { batchRechargeStandard: batchLegacyFullGift } = createTasksRecharge({
+  ...createTaskDeps(),
+  isScheduled: () => scheduledTaskExecutionActive,
+  isScheduledSession: isScheduledTokenSession,
+}, {
+  label: "全量功法残卷赠送",
+  runStandard: context => runLegacyFullGift({
+    ...context,
+    recipientId: Number(batchSettings.receiverId),
+    password: batchSettings.password,
+  }),
+});
+
 const tasksLegacy = createTasksLegacy(createTaskDeps());
 const {
   batchLegacyClaim,
@@ -8502,6 +8520,7 @@ const getScheduledTaskFunction = (name) => {
     batchLegacyBeginHangUp,
     batchLegacyClaimChargeReward,
     batchLegacyGiftSendEnhanced,
+    batchLegacyFullGift,
     batchClaimPeachTasks,
     batchGenieSweep,
     batchAltGenieSweep,

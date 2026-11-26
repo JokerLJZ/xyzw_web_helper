@@ -134,7 +134,8 @@ export const TASK_GROUPS = [
       "batchLegacyClaim",
       "batchLegacyBeginHangUp",
       "batchLegacyClaimChargeReward",
-      "batchLegacyGiftSendEnhanced"
+      "batchLegacyGiftSendEnhanced",
+      "batchLegacyFullGift"
     ]
   },
   {
