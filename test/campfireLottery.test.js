@@ -78,20 +78,29 @@ test('加奖或库存不变不能被误认成功，保留记录并阻止重跑�
   await assert.rejects(f.run(), /未确认/);
   assert.equal(f.draws().length, 1);
   assert.equal(f.store.size, 1);
-  await assert.rejects(f.run(), /上次.*待核实/);
+  await assert.rejects(f.run(), /上次.*待核实.*现有35个（预期25个）.*当前1（预期2）/);
   assert.equal(f.draws().length, 1);
 });
 
-test('请求超时只补查不重发，下次执行先确认上次扣除与等级再继续', async () => {
+test('请求超时后补查确认当次结果，结束本轮并清除记录', async () => {
   const f = fixture({ timeout: true });
-  await assert.rejects(f.run(), /不自动重试/);
+  const result = await f.run();
+  assert.equal(result.draws, 1);
   assert.equal(f.draws().length, 1);
-  assert.equal(f.store.size, 1);
-  assert.deepEqual(f.state(), { stock: 25, boxId: 2 });
+  assert.equal(f.store.size, 0);
+  assert.equal(result.remaining, 25);
   f.options.timeout = false;
   assert.equal((await f.run()).draws, 2);
   assert.equal(f.draws().length, 3);
   assert.equal(f.store.size, 0);
+});
+
+test('超时补查仍不匹配时保留记录，下一轮不重复发送', async () => {
+  const f = fixture({ timeout: true, noEffect: true });
+  await assert.rejects(f.run(), /不自动重试/);
+  assert.equal(f.store.size, 1);
+  await assert.rejects(f.run(), /上次.*待核实/);
+  assert.equal(f.draws().length, 1);
 });
 
 test('明确拒绝不自动重试，清除未发生成本的标记以便后续手动重查', async () => {
@@ -129,5 +138,5 @@ test('注册批量和定时入口，含抽奖的定时任务不做失败自动�
   const view = readFileSync(new URL('../src/views/BatchDailyTasks.vue', import.meta.url), 'utf8');
   assert.match(view, /@click="batchCampfireLottery"/);
   assert.match(view.slice(view.indexOf('const getScheduledTaskFunction')), /batchCampfireLottery,/);
-  assert.match(view, /\["batchCheerShopPurchase", "batchCampfireLottery", "batchAutoFeudatory", "batchReleaseFeudatory"\]\.includes\(name\)/);
+  assert.match(view, /\[[^\]\n]*"batchCampfireLottery"[^\]\n]*\]\.includes\(name\)\) \? 0 : 2/);
 });

@@ -36,8 +36,12 @@ export async function runCampfireLottery({ id, send, config, log = () => {}, sto
   const save = value => value ? storage.setItem(key, JSON.stringify(value)) : storage.removeItem(key);
   const pending = JSON.parse(storage.getItem(key) || "null");
   const confirmed = (before, after) => before.roleId === after.roleId && after.stock === before.stock - before.cost && after.boxId === before.nextBoxId;
+  const describeMismatch = (before, after) =>
+    `种火石现有${after.stock}个（预期${before.stock - before.cost}个），篝火等级当前${after.boxId}（预期${before.nextBoxId}）`;
   if (pending) {
-    if (!confirmed(pending, state)) throw new Error("上次篝火抽奖结果待核实，停止且不重复抽奖");
+    if (!confirmed(pending, state)) {
+      throw new Error(`上次篝火抽奖结果待核实，停止且不重复抽奖：${describeMismatch(pending, state)}`);
+    }
     save(null);
     log("已通过库存与篝火等级确认上次抽奖，继续剩余道具");
   }
@@ -52,11 +56,20 @@ export async function runCampfireLottery({ id, send, config, log = () => {}, sto
       if (error.serverRejected) save(null);
       if (error.stopped) throw error;
       // Query only. An uncertain paid request must never be sent again.
-      await snapshot().catch(() => {});
+      const after = await snapshot().catch(() => null);
+      if (!error.serverRejected && after && confirmed(before, after)) {
+        save(null);
+        draws++;
+        spent += before.cost;
+        return {
+          status: "completed", draws, spent, remaining: after.stock,
+          reason: `篝火抽奖请求异常，补查已确认本轮抽奖${draws}次，消耗${spent}个种火石，剩余${after.stock}个，本轮已停止`,
+        };
+      }
       throw new Error(`篝火抽奖结果待核实，停止且不自动重试：${error.message}`);
     }
     state = await snapshot();
-    if (!confirmed(before, state)) throw new Error("篝火道具扣除或等级变化未确认，停止且不重复抽奖");
+    if (!confirmed(before, state)) throw new Error(`篝火道具扣除或等级变化未确认，停止且不重复抽奖：${describeMismatch(before, state)}`);
     save(null);
     draws++; spent += before.cost;
     log(`篝火第${draws}次抽奖已确认，累计消耗${spent}个种火石，剩余${state.stock}个`);
