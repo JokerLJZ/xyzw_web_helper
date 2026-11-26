@@ -38,7 +38,6 @@ test('用现有道具逐次抽完，支持满级回到1级，保留不足一次�
   assert.deepEqual(await f.run(), { status: 'completed', draws: 3, spent: 30, remaining: 5, reason: '篝火抽奖3次，消耗30个种火石，剩余5个' });
   assert.equal(f.draws().length, 3);
   assert.deepEqual(f.state(), { stock: 5, boxId: 1 });
-  assert.equal(f.store.size, 0);
   assert.equal((await f.run()).status, 'skipped');
   assert.equal(f.draws().length, 3);
 });
@@ -73,55 +72,38 @@ test('不是种火石的支付配置或重复等级时，不请求游戏', async
   }
 });
 
-test('加奖或库存不变不能被误认成功，保留记录并阻止重跑再消耗', async () => {
+test('成功响应后库存未减少时停止本轮', async () => {
   const f = fixture({ noEffect: true });
-  await assert.rejects(f.run(), /未确认/);
-  assert.equal(f.draws().length, 1);
-  assert.equal(f.store.size, 1);
-  await assert.rejects(f.run(), /上次.*待核实.*现有35个（预期25个）.*当前1（预期2）/);
+  await assert.rejects(f.run(), /库存未减少/);
   assert.equal(f.draws().length, 1);
 });
 
-test('请求超时后补查确认当次结果，结束本轮并清除记录', async () => {
-  const f = fixture({ timeout: true });
-  const result = await f.run();
-  assert.equal(result.draws, 1);
+test('忽略旧记录，按当前库存及档位抽奖', async () => {
+  const f = fixture({ stock: 16, boxId: 3 });
+  f.store.set('xyzw:campfire-draw:123', JSON.stringify({ stock: 29, nextBoxId: 2 }));
+  assert.equal((await f.run()).remaining, 6);
   assert.equal(f.draws().length, 1);
-  assert.equal(f.store.size, 0);
-  assert.equal(result.remaining, 25);
+});
+
+test('抽奖超时结束本轮，下次按当前库存继续', async () => {
+  const f = fixture({ timeout: true });
+  await assert.rejects(f.run(), /请求超时/);
+  assert.equal(f.draws().length, 1);
   f.options.timeout = false;
   assert.equal((await f.run()).draws, 2);
   assert.equal(f.draws().length, 3);
-  assert.equal(f.store.size, 0);
 });
 
-test('超时补查仍不匹配时保留记录，下一轮不重复发送', async () => {
-  const f = fixture({ timeout: true, noEffect: true });
-  await assert.rejects(f.run(), /不自动重试/);
-  assert.equal(f.store.size, 1);
-  await assert.rejects(f.run(), /上次.*待核实/);
-  assert.equal(f.draws().length, 1);
-});
-
-test('明确拒绝不自动重试，清除未发生成本的标记以便后续手动重查', async () => {
+test('服务端明确拒绝后结束本轮', async () => {
   const f = fixture({ reject: true });
-  await assert.rejects(f.run(), /不自动重试/);
+  await assert.rejects(f.run(), /服务器明确拒绝/);
   assert.equal(f.draws().length, 1);
-  assert.equal(f.store.size, 0);
 });
 
-test('用户停止后不发下一次抽奖，保留待确认记录', async () => {
+test('用户停止后不发下一次抽奖', async () => {
   const f = fixture({ stop: true });
   await assert.rejects(f.run(), /停止/);
   assert.equal(f.draws().length, 1);
-  assert.equal(f.store.size, 1);
-});
-
-test('记录保存失败在抽奖前停止', async () => {
-  const f = fixture();
-  f.storage.setItem = () => { throw new Error('storage full'); };
-  await assert.rejects(f.run(), /storage full/);
-  assert.equal(f.draws().length, 0);
 });
 
 test('读取不到完整库存或本人快照时停止，不能使用写响应猜库存', async () => {
