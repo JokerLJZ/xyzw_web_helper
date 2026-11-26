@@ -142,7 +142,7 @@ export function createPetTasks(deps) {
             const quantity = role?.items ? Number(role.items[15001]?.quantity ?? 0) : NaN;
             const exp = Number(role?.petData?.pets?.[current.slot]?.exp ?? 0);
             if (!Number.isFinite(quantity) || quantity <= 0) {
-              log("宠物经验道具不足或数量无法确认，结束升级", "warning");
+              log("宠物经验道具不足或数量无法确认，结束升级");
               break;
             }
             await tokenStore.sendMessageWithPromise(id, "pet_useexpitem", {

@@ -3319,6 +3319,7 @@ export function createTasksItem(deps) {
         });
         await ensureConnection(tokenId);
         let roleInfo = await queryFormationRole(tokenId, tokenName);
+        let cultivationIncomplete = false;
         let cultivationFailed = false;
         const luBuResult = await ensureFormationHeroOwned(
           tokenId,
@@ -3374,7 +3375,7 @@ export function createTasksItem(deps) {
           try {
             const result = await upgradeSingleHero(tokenId, tokenName, heroId, 750, roleInfo);
             roleInfo = result.roleInfo;
-            if (!result.reachedTarget) cultivationFailed = true;
+            if (!result.reachedTarget) cultivationIncomplete = true;
           } catch (error) {
             cultivationFailed = true;
             addLog({
@@ -3392,7 +3393,7 @@ export function createTasksItem(deps) {
           try {
             const result = await upgradeLordAndLuBu(tokenId, tokenName, roleInfo);
             roleInfo = result.roleInfo;
-            if (result.stopReason) cultivationFailed = true;
+            if (result.stopReason) cultivationIncomplete = true;
           } catch (error) {
             cultivationFailed = true;
             addLog({
@@ -3419,10 +3420,10 @@ export function createTasksItem(deps) {
           );
         }
         tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : cultivationFailed ? "failed" : "completed";
-        if (cultivationFailed && !shouldStop.value) addLog({
+        if ((cultivationIncomplete || cultivationFailed) && !shouldStop.value) addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} 推图准备部分完成：阵容已调整，部分培养未完成，请查看前面的失败或资源不足日志`,
-          type: "warning",
+          message: `${tokenName} 推图准备部分完成：阵容已调整，部分培养未完成`,
+          type: "info",
         });
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";
@@ -3523,6 +3524,7 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
         let roleInfo = await queryFormationRole(tokenId, tokenName);
+        let cultivationIncomplete = false;
         let cultivationFailed = false;
 
         for (const group of upgradeGroups) {
@@ -3546,7 +3548,7 @@ export function createTasksItem(deps) {
                 roleInfo,
               );
               roleInfo = result.roleInfo;
-              if (!result.reachedTarget) cultivationFailed = true;
+              if (!result.reachedTarget) cultivationIncomplete = true;
             } catch (error) {
               cultivationFailed = true;
               addLog({
@@ -3570,7 +3572,7 @@ export function createTasksItem(deps) {
           try {
             const result = await upgradeLordAndLuBu(tokenId, tokenName, roleInfo);
             roleInfo = result.roleInfo;
-            if (result.stopReason) cultivationFailed = true;
+            if (result.stopReason) cultivationIncomplete = true;
           } catch (error) {
             cultivationFailed = true;
             addLog({
@@ -3606,10 +3608,10 @@ export function createTasksItem(deps) {
           } else await adjustMainLevelFormation(tokenId, tokenName, roleInfo);
         }
         tokenStatus.value[tokenId] = shouldStop.value ? "stopped" : cultivationFailed ? "failed" : "completed";
-        if (cultivationFailed && !shouldStop.value) addLog({
+        if ((cultivationIncomplete || cultivationFailed) && !shouldStop.value) addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${tokenName} ${beginner ? "入门阵容" : "推图准备"}部分完成：阵容已调整，部分培养未完成，请查看前面的失败或资源不足日志`,
-          type: "warning",
+          message: `${tokenName} ${beginner ? "入门阵容" : "推图准备"}部分完成：阵容已调整，部分培养未完成`,
+          type: "info",
         });
       } catch (error) {
         tokenStatus.value[tokenId] = "failed";

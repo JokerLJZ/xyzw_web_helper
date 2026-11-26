@@ -79,8 +79,8 @@ for (const early of [true, false]) {
   }));
   test(`${title}资源不足仍调整阵容并报告部分完成`, async () => immediateTimers(async () => {
     const f = fixture(early, 0, false, false, true); await f.run();
-    assert.equal(f.deps.tokenStatus.value.a, "failed");
-    assert.ok(f.logs.some(log => log.message.includes("部分完成")));
+    assert.equal(f.deps.tokenStatus.value.a, "completed");
+    assert.ok(f.logs.some(log => log.type === "info" && log.message.includes("部分完成")));
     assert.ok(f.logs.some(log => log.message.includes("阵容已调整")));
   }));
   test(`${title}布阵超时但已下阵，复查后不重复下阵`, async () => immediateTimers(async () => {
